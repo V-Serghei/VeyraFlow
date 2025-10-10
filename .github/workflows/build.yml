@@ -1,0 +1,106 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            rust-target: x86_64-unknown-linux-gnu
+            native-ext: so
+          - os: windows-latest
+            rid: win-x64
+            rust-target: x86_64-pc-windows-msvc
+            native-ext: dll
+          - os: macos-latest
+            rid: osx-x64
+            rust-target: x86_64-apple-darwin
+            native-ext: dylib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.rust-target }}
+        override: true
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Install cbindgen
+      run: cargo install cbindgen
+
+    - name: Build Rust library
+      working-directory: ./native/veyra_core
+      run: |
+        cargo build --release --target ${{ matrix.rust-target }}
+
+    - name: Copy native library (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        mkdir -p src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native
+        cp native/veyra_core/target/${{ matrix.rust-target }}/release/libveyra_core.${{ matrix.native-ext }} src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native/
+
+    - name: Copy native library (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        if (!(Test-Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native")) {
+            New-Item -ItemType Directory -Force -Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native" | Out-Null
+        }
+        Copy-Item "native\veyra_core\target\${{ matrix.rust-target }}\release\veyra_core.${{ matrix.native-ext }}" "src\Veyra.Desktop\runtimes\${{ matrix.rid }}\native\" -Force
+
+    - name: Copy native library (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        mkdir -p src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native
+        cp native/veyra_core/target/${{ matrix.rust-target }}/release/libveyra_core.${{ matrix.native-ext }} src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native/
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build .NET solution
+      run: dotnet build --no-restore --configuration Release
+
+    - name: Test .NET solution
+      run: dotnet test --no-build --configuration Release --verbosity normal
+
+    - name: Build Go sync agent
+      working-directory: ./tools/sync-agent
+      run: go build -o sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+
+    - name: Publish Desktop app
+      run: dotnet publish src/Veyra.Desktop/Veyra.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true
+
+    - name: Upload Desktop app artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: veyraflow-${{ matrix.rid }}
+        path: src/Veyra.Desktop/bin/Release/net9.0/${{ matrix.rid }}/publish/
+
+    - name: Upload sync agent artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }}

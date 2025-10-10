@@ -52,3 +52,32 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Rust
+native/veyra_core/target/
+#native/veyra_core/Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Go
+tools/sync-agent/sync-agent
+tools/sync-agent/sync-agent.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Native libraries (build artifacts, not source)
+src/Veyra.Desktop/runtimes/*/native/*.so
+src/Veyra.Desktop/runtimes/*/native/*.dll
+src/Veyra.Desktop/runtimes/*/native/*.dylib
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Generated files
+*.g.cs
