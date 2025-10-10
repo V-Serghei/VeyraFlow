@@ -55,7 +55,7 @@ nunit-*.xml
 
 # Rust
 native/veyra_core/target/
-native/veyra_core/Cargo.lock
+#native/veyra_core/Cargo.lock
 **/*.rs.bk
 *.pdb
 
