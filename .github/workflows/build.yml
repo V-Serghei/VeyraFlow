@@ -2,9 +2,10 @@ name: Build and Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ develop, main ]
   pull_request:
-    branches: [ main ]
+    branches: [ develop, main ]
+  workflow_dispatch: {}
 
 jobs:
   build:
@@ -63,9 +64,12 @@ jobs:
 
     - name: Copy native library (Windows)
       if: matrix.os == 'windows-latest'
+      shell: pwsh
       run: |
-        mkdir -p src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native
-        copy native\veyra_core\target\${{ matrix.rust-target }}\release\veyra_core.${{ matrix.native-ext }} src\Veyra.Desktop\runtimes\${{ matrix.rid }}\native\
+        if (!(Test-Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native")) {
+            New-Item -ItemType Directory -Force -Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native" | Out-Null
+        }
+        Copy-Item "native\veyra_core\target\${{ matrix.rust-target }}\release\veyra_core.${{ matrix.native-ext }}" "src\Veyra.Desktop\runtimes\${{ matrix.rid }}\native\" -Force
 
     - name: Copy native library (macOS)
       if: matrix.os == 'macos-latest'
