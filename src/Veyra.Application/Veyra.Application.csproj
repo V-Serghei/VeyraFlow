@@ -7,7 +7,13 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
   </ItemGroup>
-
+  <Target Name="BuildRustCore" BeforeTargets="Build">
+    <Exec Command="cargo build --manifest-path=$(SolutionDir)src\veyra_core\Cargo.toml --release" />
+    <MakeDir Directories="$(OutDir)runtimes\win-x64\native" />
+    <Copy SourceFiles="$(SolutionDir)src\veyra_core\target\release\veyra_core.dll"
+          DestinationFolder="$(OutDir)runtimes\win-x64\native"
+          SkipUnchangedFiles="true" />
+  </Target>
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
