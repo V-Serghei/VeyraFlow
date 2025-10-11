@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
-using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Commands.Auth;
 
 namespace Veyra.Desktop.ViewModels.Pages.AuthWindow;

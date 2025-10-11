@@ -13,15 +13,15 @@
         <StackPanel Spacing="12">
             <TextBlock Text="О VeyraFlow" FontSize="22" FontWeight="SemiBold"/>
             <TextBlock TextWrapping="Wrap">
-                VeyraFlow — desktop-проводник с контент-адресным версионированием,
-                снимками, блочной дедупликацией, шифрованием и локальным индексом SQLite.
-                Облачная синхронизация — по желанию (S3/WebDAV/SFTP).
+                VeyraFlow is a desktop file explorer with content-based versioning,
+                snapshots, block-level deduplication, encryption, and a local SQLite index.
+                Cloud sync is optional (S3/WebDAV/SFTP).
             </TextBlock>
-            <TextBlock Text="• Снимки и история изменений"/>
-            <TextBlock Text="• Блочная дедупликация и экономия места"/>
-            <TextBlock Text="• Сквозное шифрование"/>
-            <TextBlock Text="• Кросс-языковая архитектура: C# / Rust / Go"/>
-            <Button Content="Закрыть" HorizontalAlignment="Right" Width="120" IsDefault="True"
+            <TextBlock Text="• Snapshots and change history"/>
+            <TextBlock Text="• Block deduplication and space saving"/>
+            <TextBlock Text="• End-to-end encryption"/>
+            <TextBlock Text="• Cross-language architecture: C# / Rust / Go"/>
+            <Button Content="Close" HorizontalAlignment="Right" Width="120" IsDefault="True"
                     Command="{Binding CloseCommand}"/>
         </StackPanel>
     </ScrollViewer>
