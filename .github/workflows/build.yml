@@ -201,36 +201,34 @@ jobs:
     needs: build
     permissions:
       contents: read
-      packages: write
-    env:
-      IMAGE_NAME: ghcr.io/${{ toLower(github.repository_owner) }}/cloud-api
+      packages: write  
     steps:
       - uses: actions/checkout@v4
+  
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+  
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build (no push) on PR
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
+  
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          context: ./server/cloud-api
-          file: ./server/cloud-api/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: false
-
-      - name: Build & Push on main/develop
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
-        with:
-          context: ./server/cloud-api
-          file: ./server/cloud-api/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
+          images: ghcr.io/${{ github.repository_owner }}/cloud-api
           tags: |
-            ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+  
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server/cloud-api
+          file: ./server/cloud-api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
