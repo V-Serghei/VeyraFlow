@@ -6,7 +6,7 @@ namespace Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 public partial class WelcomeTipsOptInViewModel : ObservableObject
 {
     [ObservableProperty]
-    private bool enableTips  = true;
+    private bool _enableTips  = true;
 
     public event System.Action<bool>? ContinueRequested;
 
