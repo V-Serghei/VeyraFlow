@@ -2,7 +2,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Desktop.Services.Navigation;
-using Veyra.Desktop.ViewModels.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 
@@ -18,6 +17,6 @@ public partial class WelcomeIntroViewModel(INavigationService navigationService)
     [RelayCommand]
     private async Task LearnMore() => await _navigationService.ShowInfoAsync();
 
-    public string Title => "Добро пожаловать в Версионный Проводник";
-    public string Subtitle => "Проводник с версионным контролем. Отслеживайте изменения, создавайте снимки и не теряйте данные.";
+    public string Title => "Welcome to the Versioned Explorer";
+    public string Subtitle => "A file explorer with version control. Track changes, create snapshots, and never lose your data.";
 }

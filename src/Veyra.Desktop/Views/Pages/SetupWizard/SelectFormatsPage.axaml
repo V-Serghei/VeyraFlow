@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
+             xmlns:setupWizard="clr-namespace:Veyra.Desktop.Models.Pages.SetupWizard"
              x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SelectFormatsPage"
              d:DataContext="{d:DesignInstance vm:SelectFormatsViewModel, IsDesignTimeCreatable=True}"
              x:DataType="vm:SelectFormatsViewModel"
@@ -27,7 +28,7 @@
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:SelectFormatsViewModel+ExtItem">
+                    <DataTemplate x:DataType="setupWizard:FileExtensionOption">
                         <ToggleButton Margin="6" Padding="12,6" IsChecked="{Binding IsSelected}">
                             <TextBlock Text="{Binding Name}"/>
                         </ToggleButton>
