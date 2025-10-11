@@ -87,7 +87,7 @@ jobs:
       run: dotnet test --no-build --configuration Release --verbosity normal
 
     - name: Build Go sync agent
-      working-directory: ./tools/sync-agent
+      working-directory: ./tools/sync-agent/sync-agent/cmd
       run: go build -o sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
 
     - name: Publish Desktop app
@@ -103,4 +103,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: sync-agent-${{ matrix.rid }}
-        path: tools/sync-agent/sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        path: sync-agent/cmd/sync-agent/sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }}
