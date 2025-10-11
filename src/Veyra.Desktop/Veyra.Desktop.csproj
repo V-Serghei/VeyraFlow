@@ -17,6 +17,7 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.6" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.6" />
+    <PackageReference Include="Avalonia.Labs.CommandManager" Version="11.3.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.6" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.6" />
     <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
@@ -34,6 +35,7 @@
     <ProjectReference Include="..\Veyra.Application\Veyra.Application.csproj" />
     <ProjectReference Include="..\Veyra.Infrastructure.Sync\Veyra.Infrastructure.Sync.csproj" />
     <ProjectReference Include="..\Veyra.Infrastructure.Data\Veyra.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\Veyra.Infrastructure.Native\Veyra.Infrastructure.Native.csproj" />
     <ProjectReference Include="..\Veyra.Shared.Logging\Veyra.Shared.Logging.csproj" />
 
   </ItemGroup>

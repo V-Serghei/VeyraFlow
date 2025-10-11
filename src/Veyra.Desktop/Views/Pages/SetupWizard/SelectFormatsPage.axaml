@@ -1,0 +1,45 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
+             x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SelectFormatsPage"
+             d:DataContext="{d:DesignInstance vm:SelectFormatsViewModel, IsDesignTimeCreatable=True}"
+             x:DataType="vm:SelectFormatsViewModel"
+>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Margin="0,0,0,12">
+            <TextBlock FontSize="20" FontWeight="Bold" Text="Выбор форматов файлов"/>
+            <TextBlock Opacity="0.8" Margin="0,6,0,0"
+                       Text="Выберите расширения файлов, которые нужно отслеживать."/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding AllExtensions}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SelectFormatsViewModel+ExtItem">
+                        <ToggleButton Margin="6" Padding="12,6" IsChecked="{Binding IsSelected}">
+                            <TextBlock Text="{Binding Name}"/>
+                        </ToggleButton>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+            <TextBox Width="220" Text="{Binding CustomExt, Mode=TwoWay}"/>
+            <Button Content="Добавить" Margin="8,0,0,0" Width="100" Command="{Binding AddCustomCommand}"/>
+            <TextBlock Margin="16,0,0,0" Opacity="0.7" Text="{Binding FooterText}"/>
+        </StackPanel>
+    </Grid>
+</UserControl>
