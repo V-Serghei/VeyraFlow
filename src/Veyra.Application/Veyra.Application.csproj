@@ -21,6 +21,16 @@
     <Folder Include="Queries\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Abstractions\" />
+    <Folder Include="Commands\" />
+    <Folder Include="Config\" />
+    <Folder Include="DTOs\" />
+    <Folder Include="Mapping\" />
+    <Folder Include="Pipelines\" />
+    <Folder Include="Queries\" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
