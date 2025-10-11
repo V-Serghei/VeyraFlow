@@ -1,0 +1,28 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.InfoWindow"
+        Width="640" Height="420"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Title="О проекте"
+        d:DataContext="{d:DesignInstance vm:InfoWindowViewModel, IsDesignTimeCreatable=True}"
+        x:DataType="vm:InfoWindowViewModel">
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="12">
+            <TextBlock Text="О VeyraFlow" FontSize="22" FontWeight="SemiBold"/>
+            <TextBlock TextWrapping="Wrap">
+                VeyraFlow — desktop-проводник с контент-адресным версионированием,
+                снимками, блочной дедупликацией, шифрованием и локальным индексом SQLite.
+                Облачная синхронизация — по желанию (S3/WebDAV/SFTP).
+            </TextBlock>
+            <TextBlock Text="• Снимки и история изменений"/>
+            <TextBlock Text="• Блочная дедупликация и экономия места"/>
+            <TextBlock Text="• Сквозное шифрование"/>
+            <TextBlock Text="• Кросс-языковая архитектура: C# / Rust / Go"/>
+            <Button Content="Закрыть" HorizontalAlignment="Right" Width="120" IsDefault="True"
+                    Command="{Binding CloseCommand}"/>
+        </StackPanel>
+    </ScrollViewer>
+</Window>
