@@ -9,6 +9,7 @@ using Veyra.Desktop.Views;
 using Veyra.Desktop.Views.Windows;
 using Veyra.Infrastructure.Data;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
+using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
 using Veyra.Shared.Logging;
 
@@ -32,7 +33,7 @@ public static class DependencyInjection
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
-
+        services.AddInfrastructureNative(cfg);
 
         // Navigation & Window Services
         services.AddSingleton<IWindowService, WindowService >();
@@ -66,6 +67,12 @@ public static class DependencyInjection
                 DataContext = sp.GetRequiredService<InfoWindowViewModel>()
             });
 
+        services.AddTransient<ViewModels.Pages.SetupWizard.SetupWizardViewModel>();
+        services.AddTransient<ViewModels.Pages.SetupWizard.SelectDirectoriesViewModel>();
+        services.AddTransient<ViewModels.Pages.SetupWizard.SelectFormatsViewModel>();
+        services.AddTransient<Views.Pages.SetupWizard.SetupWizardWindow>();
+        services.AddTransient<Views.Pages.SetupWizard.SelectDirectoriesPage>();
+        services.AddTransient<Views.Pages.SetupWizard.SelectFormatsPage>();
 
         return services.BuildServiceProvider();
 
