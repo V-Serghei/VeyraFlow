@@ -81,3 +81,10 @@ src/Veyra.Desktop/runtimes/*/native/*.dylib
 
 # Generated files
 *.g.cs
+
+
+.env
+**/.env
+*.env
+*.env.*
+!.env.example
