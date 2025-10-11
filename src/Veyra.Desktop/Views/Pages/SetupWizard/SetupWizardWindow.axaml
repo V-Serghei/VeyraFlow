@@ -1,0 +1,22 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
+        x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SetupWizardWindow"
+        d:DataContext="{d:DesignInstance vm:SetupWizardViewModel, IsDesignTimeCreatable=True}"
+        x:DataType="vm:SetupWizardViewModel"
+        Width="920" Height="640" Title="Первичная настройка"
+        Background="#121212" Foreground="#EEEEEE" CanResize="False">
+    <Design.DataContext>
+        <vm:SetupWizardViewModel/>
+    </Design.DataContext>
+
+    <DockPanel Margin="24">
+        <StackPanel Orientation="Horizontal" DockPanel.Dock="Bottom" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Назад" Width="120" Margin="0,0,8,0" Command="{Binding BackCommand}"/>
+            <Button Content="Далее" Width="160" Command="{Binding NextCommand}" IsEnabled="{Binding CanGoNext}"/>
+        </StackPanel>
+
+        <ContentControl Content="{Binding CurrentPage}"/>
+    </DockPanel>
+</Window>
