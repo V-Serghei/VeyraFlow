@@ -197,31 +197,24 @@ jobs:
         path: server/cloud-api/dist/cloud-api
 
   docker-cloud-api:
-    name: Build Docker image (cloud-api)
     runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: read
       packages: write
     env:
-      IMAGE_NAME: ghcr.io/${{ github.repository }}/cloud-api
+      IMAGE_NAME: ghcr.io/${{ toLower(github.repository_owner) }}/cloud-api
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build (no push) on pull_request
+      - name: Build (no push) on PR
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v6
         with:
@@ -237,7 +230,7 @@ jobs:
           context: ./server/cloud-api
           file: ./server/cloud-api/Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: false
+          push: true
           tags: |
             ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
             ${{ env.IMAGE_NAME }}:latest
