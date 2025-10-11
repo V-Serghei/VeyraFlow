@@ -1,6 +1,6 @@
 module github.com/V-Serghei/VeyraFlow/tools/sync-agent
 
-go 1.24.7
+go 1.25.0
 
 require (
 	golang.org/x/net v0.42.0 // indirect
