@@ -1,21 +1,51 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
+using System;
+using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.DependencyInjection;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.ViewModels.Pages.AuthWindow;
+using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
 public partial class WelcomeWindowViewModel: ObservableObject
 {
+    private readonly IServiceProvider _sp;
     private readonly INavigationService _nav;
-    public WelcomeWindowViewModel(INavigationService nav) => _nav = nav;
 
-    [RelayCommand]
-    private void Start() => _nav.GoToMain();
+    public WelcomeWindowViewModel(IServiceProvider sp, INavigationService nav)
+    {
+        _sp  = sp;
+        _nav = nav;
 
-    [RelayCommand]
-    private async void LearnMore() => await _nav.ShowInfoAsync();
+        NavigateToIntro();
+    }
+    [ObservableProperty] private object? currentPage;
+    public bool EnableTipsSelected { get; private set; }
 
-    public string Title => "Добро пожаловать в Версионный Проводник";
-    public string Subtitle =>
-        "Проводник с версионным контролем. Отслеживайте изменения, создавайте снимки и не теряйте данные.";
+    private void NavigateToIntro()
+    {
+        var vm = _sp.GetRequiredService<WelcomeIntroViewModel>();
+        vm.StartRequested += NavigateToTips;
+        CurrentPage = vm;
+    }
+    private void NavigateToTips()
+    {
+        var vm = _sp.GetRequiredService<WelcomeTipsOptInViewModel>();
+        vm.ContinueRequested += OnContinueFromTips;
+        CurrentPage = vm;
+    }
+
+    private void OnContinueFromTips(bool enableTips)
+    {
+        EnableTipsSelected = enableTips;
+        NavigateToLogin();
+    }
+
+    private void NavigateToLogin()
+    {
+        var vm = _sp.GetRequiredService<LoginViewModel>();
+        vm.LoginSucceeded += () => _nav.GoToMain();
+        CurrentPage = vm;
+    }
+
 }
