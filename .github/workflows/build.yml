@@ -87,15 +87,15 @@ jobs:
       run: dotnet test --no-build --configuration Release --verbosity normal
 
     - name: Build Go sync agent (Windows)
-        if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
-        working-directory: ./tools/sync-agent
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $env:CGO_ENABLED = "0"
-          $env:GOARCH = "amd64"
-          go mod download
-          go build -trimpath -ldflags="-s -w" -o .\dist\sync-agent.exe .\cmd\sync-agent
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      working-directory: ./tools/sync-agent
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        $env:CGO_ENABLED = "0"
+        $env:GOARCH = "amd64"
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o .\dist\sync-agent.exe .\cmd\sync-agent
 
     - name: Build Go sync agent (Unix)
       if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
@@ -119,15 +119,15 @@ jobs:
         path: src/Veyra.Desktop/bin/Release/net9.0/${{ matrix.rid }}/publish/
 
     - name: Upload sync agent artifact (Windows)
-        if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: sync-agent-${{ matrix.rid }}
-          path: tools/sync-agent/dist/sync-agent.exe
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/dist/sync-agent.exe
 
     - name: Upload sync agent artifact (Unix)
-        if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: sync-agent-${{ matrix.rid }}
-          path: tools/sync-agent/dist/sync-agent
+      if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/dist/sync-agent
