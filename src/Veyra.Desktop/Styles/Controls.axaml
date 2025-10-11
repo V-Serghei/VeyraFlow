@@ -1,0 +1,9 @@
+﻿<Styles xmlns="https://github.com/avaloniaui">
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource ThemeBackgroundBrush}"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="Margin" Value="8"/>
+        <Setter Property="BoxShadow" Value="0 0 12 0 #22000000"/>
+    </Style>
+</Styles>

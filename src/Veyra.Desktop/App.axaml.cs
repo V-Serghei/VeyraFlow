@@ -4,94 +4,62 @@ using Avalonia.Data.Core;
 using Avalonia.Data.Core.Plugins;
 using System.Linq;
 using Avalonia.Markup.Xaml;
-using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.IO;
+using Avalonia.Controls;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
+using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.ViewModels;
+using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Data.Persistence;
 using AvaloniaApplication = Avalonia.Application;
+using DependencyInjection = Veyra.Desktop.CompositionRoot.DependencyInjection;
 
 namespace Veyra.Desktop;
 
 public partial class App : AvaloniaApplication
 {
-    public IServiceProvider? ServiceProvider { get; private set; }
+    public static IServiceProvider? _serviceProvider { get; private set; } = null!;
 
-    public override void Initialize()
-    {
-        AvaloniaXamlLoader.Load(this);
-    }
+    public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
+        //DB path
+        var dbPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "VeyraFlow", "veyra.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        var connectionString = $"Data Source={dbPath}";
+
+        // Dependency Injection setup
+        _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
+
+
+        using (IServiceScope scope = _serviceProvider.CreateScope())
+        {
+            VeyraDbContext db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+            db.Database.EnsureCreated();
+        }
+        Veyra.Infrastructure.Data.DependencyInjection.EnableWalMode(connectionString);
+
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             // Configure services
-            var services = new ServiceCollection();
-            ConfigureServices(services);
-            ServiceProvider = services.BuildServiceProvider();
-
-            // Initialize database
-            InitializeDatabase(ServiceProvider);
-
-            // Avoid duplicate validations from both Avalonia and the CommunityToolkit. 
-            // More info: https://docs.avaloniaui.net/docs/guides/development-guides/data-validation#manage-validationplugins
-            DisableAvaloniaDataAnnotationValidation();
-            desktop.MainWindow = new MainWindow
+            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
             {
-                DataContext = new MainWindowViewModel(),
-            };
+                // Set shutdown mode to close the application when the last window is closed
+                classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+                // Show welcome window on startup
+                var nav = _serviceProvider.GetRequiredService<INavigationService>();
+                nav.ShowWelcome(); // synchronous call to show the welcome window
+            }
         }
-
         base.OnFrameworkInitializationCompleted();
-    }
-
-    private void ConfigureServices(IServiceCollection services)
-    {
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VeyraFlow",
-            "veyra.db");
-
-        var dbDirectory = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(dbDirectory) && !Directory.Exists(dbDirectory))
-        {
-            Directory.CreateDirectory(dbDirectory);
-        }
-
-        var connectionString = $"Data Source={dbPath}";
-
-        services.AddApplication();
-        services.AddInfrastructureData(connectionString);
-    }
-
-    private void InitializeDatabase(IServiceProvider serviceProvider)
-    {
-        using var scope = serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
-        dbContext.Database.EnsureCreated();
-
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VeyraFlow",
-            "veyra.db");
-        var connectionString = $"Data Source={dbPath}";
-        Infrastructure.Data.DependencyInjection.EnableWalMode(connectionString);
-    }
-
-    private void DisableAvaloniaDataAnnotationValidation()
-    {
-        // Get an array of plugins to remove
-        var dataValidationPluginsToRemove =
-            BindingPlugins.DataValidators.OfType<DataAnnotationsValidationPlugin>().ToArray();
-
-        // remove each entry found
-        foreach (var plugin in dataValidationPluginsToRemove)
-        {
-            BindingPlugins.DataValidators.Remove(plugin);
-        }
     }
 }
