@@ -27,11 +27,15 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Veyra.Application\Veyra.Application.csproj" />
+    <ProjectReference Include="..\Veyra.Infrastructure.Sync\Veyra.Infrastructure.Sync.csproj" />
     <ProjectReference Include="..\Veyra.Infrastructure.Data\Veyra.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\Veyra.Shared.Logging\Veyra.Shared.Logging.csproj" />
+
   </ItemGroup>
 
   <ItemGroup>
