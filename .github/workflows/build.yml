@@ -86,9 +86,28 @@ jobs:
     - name: Test .NET solution
       run: dotnet test --no-build --configuration Release --verbosity normal
 
-    - name: Build Go sync agent
+    - name: Build Go sync agent (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
       working-directory: ./tools/sync-agent
-      run: go build -o sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        $env:CGO_ENABLED = "0"
+        $env:GOARCH = "amd64"
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o .\dist\sync-agent.exe .\cmd\sync-agent
+
+    - name: Build Go sync agent (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      working-directory: ./tools/sync-agent
+      shell: bash
+      run: |
+        set -euxo pipefail
+        mkdir -p dist
+        export CGO_ENABLED=0
+        export GOARCH=amd64
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o ./dist/sync-agent ./cmd/sync-agent
 
     - name: Publish Desktop app
       run: dotnet publish src/Veyra.Desktop/Veyra.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true
@@ -99,8 +118,16 @@ jobs:
         name: veyraflow-${{ matrix.rid }}
         path: src/Veyra.Desktop/bin/Release/net9.0/${{ matrix.rid }}/publish/
 
-    - name: Upload sync agent artifact
+    - name: Upload sync agent artifact (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
       uses: actions/upload-artifact@v4
       with:
         name: sync-agent-${{ matrix.rid }}
-        path: tools/sync-agent/sync-agent${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        path: tools/sync-agent/dist/sync-agent.exe
+
+    - name: Upload sync agent artifact (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/dist/sync-agent
