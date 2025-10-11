@@ -9,41 +9,6 @@
         Title="VeyraFlow — Welcome"
         d:DataContext="{d:DesignInstance vm:WelcomeWindowViewModel, IsDesignTimeCreatable=True}"
         x:DataType="vm:WelcomeWindowViewModel">
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
-    </Grid.RowDefinitions>
 
-    <StackPanel Margin="32" Spacing="8">
-      <TextBlock Text="{Binding Title}" FontSize="32" FontWeight="SemiBold"/>
-      <TextBlock Text="{Binding Subtitle}" Opacity="0.85" TextWrapping="Wrap"/>
-    </StackPanel>
-
-    <UniformGrid Grid.Row="1" Columns="3" Margin="32" HorizontalAlignment="Stretch">
-      <Border Classes="card"><StackPanel Spacing="4">
-        <TextBlock Text="Автоматическое версионирование" FontWeight="SemiBold"/>
-        <TextBlock Text="Создавайте версии по изменениям, расписанию или вручную."
-                   TextWrapping="Wrap" Opacity="0.9"/>
-      </StackPanel></Border>
-
-      <Border Classes="card"><StackPanel Spacing="4">
-        <TextBlock Text="Поддержка всех форматов" FontWeight="SemiBold"/>
-        <TextBlock Text="Документы, изображения, видео, аудио и другие файлы."
-                   TextWrapping="Wrap" Opacity="0.9"/>
-      </StackPanel></Border>
-
-      <Border Classes="card"><StackPanel Spacing="4">
-        <TextBlock Text="Безопасное хранение" FontWeight="SemiBold"/>
-        <TextBlock Text="Локально и в облаке с шифрованием."
-                   TextWrapping="Wrap" Opacity="0.9"/>
-      </StackPanel></Border>
-    </UniformGrid>
-
-    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,24" Spacing="12">
-      <Button Content="Начать" Width="140" Command="{Binding StartCommand}"/>
-      <Button Content="Узнать больше" Width="140" Command="{Binding LearnMoreCommand}"/>
-    </StackPanel>
-  </Grid>
+    <ContentControl Content="{Binding CurrentPage}" />
 </Window>

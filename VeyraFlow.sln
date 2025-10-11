@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyra.Infrastructure.Native
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyra.Infrastructure.Sync", "src\Veyra.Infrastructure.Sync\Veyra.Infrastructure.Sync.csproj", "{459E2248-642B-4DA8-B6B3-95D92C3F7EE4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyra.Shared.Logging", "src\Veyra.Shared.Logging\Veyra.Shared.Logging.csproj", "{D9AE447D-296B-4242-9973-DAAC74E6F3B2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -141,6 +143,18 @@ Global
 		{459E2248-642B-4DA8-B6B3-95D92C3F7EE4}.Release|x64.Build.0 = Release|Any CPU
 		{459E2248-642B-4DA8-B6B3-95D92C3F7EE4}.Release|x86.ActiveCfg = Release|Any CPU
 		{459E2248-642B-4DA8-B6B3-95D92C3F7EE4}.Release|x86.Build.0 = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|x64.Build.0 = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Debug|x86.Build.0 = Debug|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|x64.ActiveCfg = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|x64.Build.0 = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|x86.ActiveCfg = Release|Any CPU
+		{D9AE447D-296B-4242-9973-DAAC74E6F3B2}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

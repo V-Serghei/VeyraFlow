@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: veyra-pg
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  cloud-api:
+    build:
+      context: ./server/cloud-api
+      dockerfile: Dockerfile
+    container_name: veyra-cloud-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${HTTP_PORT}
+      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+    ports:
+      - "8080:8080"
+  seq:
+    image: datalust/seq:2024.1
+    container_name: veyra-seq
+    environment:
+      - ACCEPT_EULA=Y
+      - SEQ_LOGLEVEL=Verbose
+    ports:
+      - "5341:80"
+    volumes:
+      - seq-data:/data
+
+volumes:
+  pgdata:
+  seq-data:

@@ -1,0 +1,28 @@
+﻿<UserControl
+    x:Class="Veyra.Desktop.Views.Pages.AuthWindow.LoginView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.AuthWindow"
+    d:DataContext="{d:DesignInstance vm:LoginViewModel, IsDesignTimeCreatable=True}"
+    xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+    x:DataType="vm:LoginViewModel">
+
+    <Border Padding="24">
+        <StackPanel Spacing="12" Width="360" HorizontalAlignment="Center">
+            <TextBlock Text="Sign in" FontSize="24" FontWeight="SemiBold" />
+
+            <TextBlock Text="Username" />
+            <TextBox Text="{Binding Username}" />
+
+            <TextBlock Text="Password" />
+            <TextBox PasswordChar="•" Text="{Binding Password}" />
+
+            <Button Content="Sign in"
+                    Command="{Binding LoginCommand}"
+                    IsEnabled="{Binding IsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}" />
+
+            <TextBlock Foreground="Red" Text="{Binding Error}" />
+        </StackPanel>
+    </Border>
+</UserControl>

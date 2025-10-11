@@ -1,20 +1,11 @@
-using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core;
-using Avalonia.Data.Core.Plugins;
-using System.Linq;
 using Avalonia.Markup.Xaml;
 using System;
 using System.IO;
 using Avalonia.Controls;
-using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
-using Veyra.Application;
+using Serilog;
 using Veyra.Desktop.Services.Navigation;
-using Veyra.Desktop.ViewModels;
-using Veyra.Desktop.ViewModels.Windows;
-using Veyra.Desktop.Views;
-using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Data.Persistence;
 using AvaloniaApplication = Avalonia.Application;
 using DependencyInjection = Veyra.Desktop.CompositionRoot.DependencyInjection;
@@ -62,4 +53,9 @@ public partial class App : AvaloniaApplication
         }
         base.OnFrameworkInitializationCompleted();
     }
+    private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+    {
+        Log.CloseAndFlush();
+    }
+
 }

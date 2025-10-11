@@ -1,0 +1,22 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
+             x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeIntroView"
+             d:DataContext="{d:DesignInstance vm:WelcomeIntroViewModel, IsDesignTimeCreatable=True}"
+             x:DataType="vm:WelcomeIntroViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+        <StackPanel Spacing="8">
+            <TextBlock Text="{Binding Title}" FontSize="32" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Subtitle}" Opacity="0.85" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Border Grid.Row="1" Margin="0,24,0,24" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="12">
+            <Button Content="Начать" Width="140" Command="{Binding StartCommand}"/>
+            <Button Content="Узнать больше" Width="140" Command="{Binding LearnMoreCommand}"/>
+        </StackPanel>
+    </Grid>
+</UserControl>
