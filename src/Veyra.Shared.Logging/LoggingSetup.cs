@@ -13,7 +13,7 @@ public static class LoggingSetup
         var logsDir = baseDirectory ?? AppContext.BaseDirectory;
         var filePath = Path.Combine(logsDir, "logs", "veyra-.clef");
 
-        var seqUrl = Environment.GetEnvironmentVariable("SEQ_URL") ?? "http://localhost:5341";
+        var seqUrl = Environment.GetEnvironmentVariable("SEQ_URL");
 
         var loggerConfig = new LoggerConfiguration()
             .MinimumLevel.Information()
