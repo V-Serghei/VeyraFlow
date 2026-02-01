@@ -3,40 +3,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-/**
- * Computes BLAKE3 hash of the given data
- * Returns length of hash written to output buffer
- */
-int veyra_blake3_hash(const unsigned char *data,
-                      int data_len,
-                      unsigned char *output,
-                      int output_len);
-
-/**
- * Compresses data using zstd
- * Returns length of compressed data, or -1 on error
- */
-int veyra_zstd_compress(const unsigned char *data,
-                        int data_len,
-                        unsigned char *output,
-                        int output_len,
-                        int level);
-
-/**
- * Decompresses zstd data
- * Returns length of decompressed data, or -1 on error
- */
-int veyra_zstd_decompress(const unsigned char *data,
-                          int data_len,
-                          unsigned char *output,
-                          int output_len);
-
-/**
- * Gets version string
- */
 const char *veyra_get_version(void);
 
-/**
- * Frees a string returned by veyra_get_version
- */
-void veyra_free_string(char *s);
+int32_t veyra_last_error_utf8(uint8_t *out, uint64_t out_len, uint64_t *written);
+
+int32_t veyra_file_size_utf8(const char *path, uint64_t *size_out);
+
+int32_t veyra_read_file_utf8(const char *path, uint8_t *out, uint64_t out_len, uint64_t *written);

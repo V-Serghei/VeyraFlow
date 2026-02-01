@@ -4,14 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-fastcdc = "3.1"
 blake3 = "1.5"
 zstd = "0.13"
-chacha20poly1305 = "0.10"
+fastcdc = "3.2"
 
 [build-dependencies]
 cbindgen = "0.27"
 
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
