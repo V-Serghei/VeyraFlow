@@ -11,10 +11,7 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddSingleton<ISetupState, SetupState>();
-
-        // TODO(native):configure native services.
-
+        services.AddSingleton<INativeSetupApplier, NativeSetupApplier>();
         return services;
     }
 }

@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Veyra.Application\Veyra.Application.csproj" />
     <ProjectReference Include="..\Veyra.Domain\Veyra.Domain.csproj" />
   </ItemGroup>
 
