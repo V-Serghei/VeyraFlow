@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System;
+using System.IO;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -12,20 +14,36 @@ public class DbContextTests
         var services = new ServiceCollection();
         services.AddInfrastructureData("Data Source=:memory:");
 
-        var serviceProvider = services.BuildServiceProvider();
-        var dbContext = serviceProvider.GetRequiredService<VeyraDbContext>();
+        var sp = services.BuildServiceProvider();
+        var db = sp.GetRequiredService<VeyraDbContext>();
 
-        Assert.NotNull(dbContext);
-        Assert.NotNull(dbContext.FileSnapshots);
+        Assert.NotNull(db);
+        Assert.NotNull(db.FileSnapshots);
     }
 
     [Fact]
-    public void EnableWalMode_DoesNotThrow()
+    public void Database_Migrate_CreatesSchema()
     {
-        var connectionString = "Data Source=:memory:";
-        var exception = Record.Exception(() => DependencyInjection.EnableWalMode(connectionString));
-        
-        // WAL mode might not work on in-memory databases, but shouldn't throw
-        Assert.Null(exception);
+        var dbPath = Path.Combine(Path.GetTempPath(), $"veyra_test_{Guid.NewGuid():N}.db");
+        var cs = $"Data Source={dbPath}";
+
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddInfrastructureData(cs);
+
+            var sp = services.BuildServiceProvider();
+            using var scope = sp.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+
+            db.Database.Migrate();
+
+            var exists = db.Database.CanConnect();
+            Assert.True(exists);
+        }
+        finally
+        {
+            if (File.Exists(dbPath)) File.Delete(dbPath);
+        }
     }
 }
