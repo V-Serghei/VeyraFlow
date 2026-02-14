@@ -1,7 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Veyra.Application.Abstractions.Setup;
 using Veyra.Infrastructure.Data.Persistence;
+using Veyra.Infrastructure.Data.Setup;
 
 namespace Veyra.Infrastructure.Data;
 
@@ -18,22 +20,11 @@ public static class DependencyInjection
             });
         });
 
-        services.AddScoped<ISqliteConnectionFactory, SqliteConnectionFactory>(sp =>
-        {
-            return new SqliteConnectionFactory(connectionString);
-        });
+        services.AddScoped<ISqliteConnectionFactory, SqliteConnectionFactory>(sp => new SqliteConnectionFactory(connectionString));
+        services.AddScoped<ISetupRepository, EfSetupRepository>();
 
         return services;
     }
-
-    // public static void EnableWalMode(string connectionString)
-    // {
-    //     using var connection = new SqliteConnection(connectionString);
-    //     connection.Open();
-    //     using var command = connection.CreateCommand();
-    //     command.CommandText = "PRAGMA journal_mode=WAL;";
-    //     command.ExecuteNonQuery();
-    // }
 }
 
 public interface ISqliteConnectionFactory

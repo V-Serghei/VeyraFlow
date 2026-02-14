@@ -4,17 +4,16 @@ using Veyra.Application.Abstractions.Setup;
 
 namespace Veyra.Application.Commands.Setup;
 
-public sealed class SetWatchedDirectoriesHandler(ISetupState state, ILogger<SetWatchedDirectoriesHandler> log)
+public sealed class SetWatchedDirectoriesHandler(
+    ISetupRepository repo,
+    INativeSetupApplier native,
+    ILogger<SetWatchedDirectoriesHandler> log)
     : IRequestHandler<SetWatchedDirectoriesCommand>
 {
-    public Task Handle(SetWatchedDirectoriesCommand request, CancellationToken cancellationToken)
+    public async Task Handle(SetWatchedDirectoriesCommand request, CancellationToken cancellationToken)
     {
-        state.SetWatchedDirectories(request.Paths);
-        log.LogInformation("Watched directories set: {Count}", request.Paths.Count);
-
-        // TODO(native): call validation
-        // TODO(rust):
-
-        return Task.CompletedTask;
+        await repo.ReplaceWatchedDirectoriesAsync(request.Paths, cancellationToken);
+        log.LogInformation("Watched directories saved: {Count}", request.Paths.Count);
+        await native.ApplySetupAsync(cancellationToken);
     }
 }

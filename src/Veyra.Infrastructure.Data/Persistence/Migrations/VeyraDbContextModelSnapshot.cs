@@ -15,7 +15,7 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
 
             modelBuilder.Entity("Veyra.Domain.Entities.FileSnapshot", b =>
                 {
@@ -49,6 +49,141 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasIndex("FilePath");
 
                     b.ToTable("FileSnapshots");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.D_WatchedFormat", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Pattern")
+                        .IsUnique();
+
+                    b.ToTable("D_WatchedFormats", (string)null);
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("WatchedDirectories");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectoryFormat", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DirectoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("FormatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FormatId");
+
+                    b.HasIndex("DirectoryId", "FormatId")
+                        .IsUnique();
+
+                    b.ToTable("WatchedDirectoryFormats");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectoryFormat", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.Watched.WatchedDirectory", "Directory")
+                        .WithMany("DirectoryFormats")
+                        .HasForeignKey("DirectoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.Watched.D_WatchedFormat", "Format")
+                        .WithMany("DirectoryFormats")
+                        .HasForeignKey("FormatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Directory");
+
+                    b.Navigation("Format");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.D_WatchedFormat", b =>
+                {
+                    b.Navigation("DirectoryFormats");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectory", b =>
+                {
+                    b.Navigation("DirectoryFormats");
                 });
 #pragma warning restore 612, 618
         }
