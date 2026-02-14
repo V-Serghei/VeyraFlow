@@ -8,6 +8,7 @@ public class VeyraDbContext : DbContext
     public VeyraDbContext(DbContextOptions<VeyraDbContext> options)
         : base(options)
     {
+
     }
 
     public DbSet<FileSnapshot> FileSnapshots { get; set; } = null!;

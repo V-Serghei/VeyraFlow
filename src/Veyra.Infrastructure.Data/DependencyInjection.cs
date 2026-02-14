@@ -14,6 +14,7 @@ public static class DependencyInjection
             options.UseSqlite(connectionString, sqliteOptions =>
             {
                 sqliteOptions.CommandTimeout(30);
+                sqliteOptions.MigrationsAssembly(typeof(VeyraDbContext).Assembly.FullName);
             });
         });
 
@@ -25,14 +26,14 @@ public static class DependencyInjection
         return services;
     }
 
-    public static void EnableWalMode(string connectionString)
-    {
-        using var connection = new SqliteConnection(connectionString);
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA journal_mode=WAL;";
-        command.ExecuteNonQuery();
-    }
+    // public static void EnableWalMode(string connectionString)
+    // {
+    //     using var connection = new SqliteConnection(connectionString);
+    //     connection.Open();
+    //     using var command = connection.CreateCommand();
+    //     command.CommandText = "PRAGMA journal_mode=WAL;";
+    //     command.ExecuteNonQuery();
+    // }
 }
 
 public interface ISqliteConnectionFactory

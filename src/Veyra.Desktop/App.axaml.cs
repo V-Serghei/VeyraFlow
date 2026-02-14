@@ -3,6 +3,7 @@ using Avalonia.Markup.Xaml;
 using System;
 using System.IO;
 using Avalonia.Controls;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Veyra.Desktop.Services.Navigation;
@@ -20,42 +21,34 @@ public partial class App : AvaloniaApplication
 
     public override void OnFrameworkInitializationCompleted()
     {
-        //DB path
         var dbPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "VeyraFlow", "veyra.db");
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
         var connectionString = $"Data Source={dbPath}";
 
-        // Dependency Injection setup
         _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
 
-
-        using (IServiceScope scope = _serviceProvider.CreateScope())
+        using (var scope = _serviceProvider.CreateScope())
         {
-            VeyraDbContext db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
-            db.Database.EnsureCreated();
+            var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+            db.Database.Migrate();
+            db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
+            db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
         }
-        Veyra.Infrastructure.Data.DependencyInjection.EnableWalMode(connectionString);
 
-
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
         {
-            // Configure services
-            if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
-            {
-                // Set shutdown mode to close the application when the last window is closed
-                classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
-                // Show welcome window on startup
-                var nav = _serviceProvider.GetRequiredService<INavigationService>();
-                nav.ShowWelcome(); // synchronous call to show the welcome window
-            }
+            classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            var nav = _serviceProvider.GetRequiredService<INavigationService>();
+            nav.ShowWelcome();
         }
+
         base.OnFrameworkInitializationCompleted();
     }
+
     private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {
         Log.CloseAndFlush();
     }
-
 }
