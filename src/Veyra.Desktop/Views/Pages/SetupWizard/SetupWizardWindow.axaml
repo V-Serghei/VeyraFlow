@@ -9,15 +9,27 @@
         Background="#121212" Foreground="#EEEEEE" CanResize="False">
 
     <DockPanel Margin="24">
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Bottom"
-                    HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="Назад"  Width="120" Margin="0,0,8,0"
-                    Command="{Binding BackCommand}"/>
-            <Button Content="{Binding NextButtonText}" Width="160"
-                    Command="{Binding NextCommand}"
-                    IsEnabled="{Binding CanGoNext}"/>
-        </StackPanel>
 
+        <!-- Bottom: navigation buttons + step info -->
+        <Grid DockPanel.Dock="Bottom" Margin="0,16,0,0" ColumnDefinitions="Auto,*,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding StepInfo}"
+                       VerticalAlignment="Center" Opacity="0.6"/>
+
+            <TextBlock Grid.Column="1" Text="{Binding ErrorMessage}"
+                       Foreground="#FF5555" TextWrapping="Wrap"
+                       VerticalAlignment="Center" Margin="16,0"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="Назад" Width="120" Margin="0,0,8,0"
+                        Command="{Binding BackCommand}"/>
+                <Button Content="{Binding NextButtonText}" Width="160"
+                        Command="{Binding NextCommand}"
+                        IsEnabled="{Binding CanGoNext}"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Content: step views -->
         <ContentControl Content="{Binding CurrentStep}">
             <ContentControl.DataTemplates>
                 <DataTemplate DataType="vm:SelectDirectoriesViewModel">
@@ -25,6 +37,9 @@
                 </DataTemplate>
                 <DataTemplate DataType="vm:SelectFormatsViewModel">
                     <pages:SelectFormatsPage/>
+                </DataTemplate>
+                <DataTemplate DataType="vm:RepositoryNameViewModel">
+                    <pages:RepositoryNamePage/>
                 </DataTemplate>
             </ContentControl.DataTemplates>
         </ContentControl>

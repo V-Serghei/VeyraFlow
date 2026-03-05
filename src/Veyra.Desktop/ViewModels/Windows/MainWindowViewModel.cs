@@ -1,8 +1,19 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Desktop.ViewModels.Pages.Dashboard;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
-public partial class MainWindowViewModel : ObservableObject
+public sealed partial class MainWindowViewModel : ObservableObject
 {
-    public string Greeting => "Welcome to VeyraFlow";
+    public RepositoryDashboardViewModel Dashboard { get; }
+
+    public MainWindowViewModel(RepositoryDashboardViewModel dashboard)
+    {
+        Dashboard = dashboard;
+    }
+
+    public async void OnLoaded()
+    {
+        await Dashboard.LoadAsync();
+    }
 }
