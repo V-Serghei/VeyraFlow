@@ -253,6 +253,61 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
                 .SetProperty(x => x.UpdatedAt, now), ct);
     }
 
+    public async Task AddWatchedDirectoryAsync(string path, CancellationToken ct = default)
+    {
+        var normalized = NormalizePathsForStore(new[] { path });
+        if (normalized.Count == 0) return;
+
+        var p = normalized[0];
+        var now = DateTime.UtcNow;
+
+        var existing = await dbContext.Set<WatchedDirectory>()
+            .FirstOrDefaultAsync(x => x.Path == p, ct);
+
+        if (existing is not null)
+        {
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.IsEnabled = true;
+            existing.UpdatedAt = now;
+            existing.ErrorMessage = null;
+        }
+        else
+        {
+            dbContext.Add(new WatchedDirectory
+            {
+                Path = p,
+                IsEnabled = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+                IsDeleted = false,
+                DeletedAt = null,
+                ErrorMessage = null
+            });
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateWatchedDirectoryAsync(string oldPath, string newPath, CancellationToken ct = default)
+    {
+        var normalizedOld = NormalizePathsForLookup(new[] { oldPath });
+        var normalizedNew = NormalizePathsForStore(new[] { newPath });
+        if (normalizedOld.Count == 0 || normalizedNew.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+
+        var entity = await dbContext.Set<WatchedDirectory>()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Path == normalizedOld[0], ct);
+
+        if (entity is null) return;
+
+        entity.Path = normalizedNew[0];
+        entity.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public async Task<IReadOnlyList<string>> GetWatchedDirectoriesAsync(CancellationToken ct = default)
     {
         return await dbContext.Set<WatchedDirectory>()
@@ -262,6 +317,59 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             .ToListAsync(ct);
     }
 
+    public async Task AddTrackedExtensionAsync(string extension, CancellationToken ct = default)
+    {
+        var normalized = NormalizeExtensionsForStore(new[] { extension });
+        if (normalized.Count == 0) return;
+
+        var p = normalized[0];
+        var now = DateTime.UtcNow;
+
+        var existing = await dbContext.Set<D_WatchedFormat>()
+            .FirstOrDefaultAsync(x => x.Pattern == p, ct);
+
+        if (existing is not null)
+        {
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.IsEnabled = true;
+            existing.UpdatedAt = now;
+        }
+        else
+        {
+            dbContext.Add(new D_WatchedFormat
+            {
+                Pattern = p,
+                IsEnabled = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+                IsDeleted = false,
+                DeletedAt = null
+            });
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateTrackedExtensionAsync(string oldPattern, string newPattern, CancellationToken ct = default)
+    {
+        var normalizedOld = NormalizeExtensionsForLookup(new[] { oldPattern });
+        var normalizedNew = NormalizeExtensionsForStore(new[] { newPattern });
+        if (normalizedOld.Count == 0 || normalizedNew.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+
+        var entity = await dbContext.Set<D_WatchedFormat>()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Pattern == normalizedOld[0], ct);
+
+        if (entity is null) return;
+
+        entity.Pattern = normalizedNew[0];
+        entity.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
     public async Task<IReadOnlyList<string>> GetTrackedExtensionsAsync(CancellationToken ct = default)
     {
         return await dbContext.Set<D_WatchedFormat>()
@@ -269,6 +377,126 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             .OrderBy(x => x.Pattern)
             .Select(x => x.Pattern)
             .ToListAsync(ct);
+    }
+
+    // ── Directory ↔ Format links ──────────────────────────────────
+
+    public async Task LinkDirectoryToFormatsAsync(string directoryPath, IReadOnlyCollection<string> formatPatterns, CancellationToken ct = default)
+    {
+        var normalizedPath = NormalizePathsForLookup(new[] { directoryPath });
+        var normalizedExts = NormalizeExtensionsForLookup(formatPatterns);
+        if (normalizedPath.Count == 0 || normalizedExts.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        var path = normalizedPath[0];
+
+        var dir = await dbContext.Set<WatchedDirectory>()
+            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Path == path, ct);
+        if (dir is null) return;
+
+        var fmtIds = await dbContext.Set<D_WatchedFormat>()
+            .Where(x => !x.IsDeleted && normalizedExts.Contains(x.Pattern))
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        if (fmtIds.Count == 0) return;
+
+        var existingLinks = await dbContext.Set<WatchedDirectoryFormat>()
+            .Where(x => x.DirectoryId == dir.Id && fmtIds.Contains(x.FormatId))
+            .ToListAsync(ct);
+
+        var map = existingLinks.ToDictionary(x => x.FormatId);
+
+        foreach (var fId in fmtIds)
+        {
+            if (map.TryGetValue(fId, out var link))
+            {
+                link.IsDeleted = false;
+                link.DeletedAt = null;
+                link.UpdatedAt = now;
+            }
+            else
+            {
+                dbContext.Add(new WatchedDirectoryFormat
+                {
+                    DirectoryId = dir.Id,
+                    FormatId = fId,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    IsDeleted = false,
+                    DeletedAt = null
+                });
+            }
+        }
+
+        await dbContext.SaveChangesAsync(ct);
+    }
+
+    public async Task UnlinkDirectoryFromFormatsAsync(string directoryPath, IReadOnlyCollection<string> formatPatterns, CancellationToken ct = default)
+    {
+        var normalizedPath = NormalizePathsForLookup(new[] { directoryPath });
+        var normalizedExts = NormalizeExtensionsForLookup(formatPatterns);
+        if (normalizedPath.Count == 0 || normalizedExts.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        var path = normalizedPath[0];
+
+        var dirId = await dbContext.Set<WatchedDirectory>()
+            .Where(x => !x.IsDeleted && x.Path == path)
+            .Select(x => x.Id)
+            .FirstOrDefaultAsync(ct);
+        if (dirId == 0) return;
+
+        var fmtIds = await dbContext.Set<D_WatchedFormat>()
+            .Where(x => !x.IsDeleted && normalizedExts.Contains(x.Pattern))
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        if (fmtIds.Count == 0) return;
+
+        await dbContext.Set<WatchedDirectoryFormat>()
+            .Where(x => !x.IsDeleted && x.DirectoryId == dirId && fmtIds.Contains(x.FormatId))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+    }
+
+    public async Task<IReadOnlyList<string>> GetFormatsForDirectoryAsync(string directoryPath, CancellationToken ct = default)
+    {
+        var normalizedPath = NormalizePathsForLookup(new[] { directoryPath });
+        if (normalizedPath.Count == 0) return Array.Empty<string>();
+
+        var path = normalizedPath[0];
+
+        return await dbContext.Set<WatchedDirectoryFormat>()
+            .Where(x => !x.IsDeleted && x.Directory.Path == path && !x.Directory.IsDeleted)
+            .Select(x => x.Format.Pattern)
+            .OrderBy(x => x)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> GetDirectoriesForFormatAsync(string formatPattern, CancellationToken ct = default)
+    {
+        var normalizedExt = NormalizeExtensionsForLookup(new[] { formatPattern });
+        if (normalizedExt.Count == 0) return Array.Empty<string>();
+
+        var pattern = normalizedExt[0];
+
+        return await dbContext.Set<WatchedDirectoryFormat>()
+            .Where(x => !x.IsDeleted && x.Format.Pattern == pattern && !x.Format.IsDeleted)
+            .Select(x => x.Directory.Path)
+            .OrderBy(x => x)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<(string DirectoryPath, string FormatPattern)>> GetAllDirectoryFormatLinksAsync(CancellationToken ct = default)
+    {
+        var rows = await dbContext.Set<WatchedDirectoryFormat>()
+            .Where(x => !x.IsDeleted && !x.Directory.IsDeleted && !x.Format.IsDeleted)
+            .Select(x => new { x.Directory.Path, x.Format.Pattern })
+            .OrderBy(x => x.Path).ThenBy(x => x.Pattern)
+            .ToListAsync(ct);
+
+        return rows.Select(x => (x.Path, x.Pattern)).ToList();
     }
 
     private static List<string> NormalizePathsForStore(IEnumerable<string> paths)

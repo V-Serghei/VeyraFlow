@@ -3,12 +3,15 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.ViewModels.Pages.Dashboard;
 using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.Views.Windows;
-using Veyra.Infrastructure.Data;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
+using Veyra.Desktop.ViewModels.Pages.SetupWizard;
+using Veyra.Desktop.Views.Pages.SetupWizard;
+using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
 using Veyra.Shared.Logging;
@@ -25,57 +28,57 @@ public static class DependencyInjection
             .AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: true)
             .AddEnvironmentVariables()
             .Build();
+
         var services = new ServiceCollection();
 
-        // Logging
+        // ── Cross-cutting ──────────────────────────────────────
         services.AddVeyraLogging();
-        // Application & Infrastructure // Business Logic
+
+        // ── Application & Infrastructure ───────────────────────
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
         services.AddInfrastructureNative(cfg);
 
-        // Navigation & Window Services
-        services.AddSingleton<IWindowService, WindowService >();
+        // ── Navigation & Window Services ───────────────────────
+        services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
 
-        services.AddTransient<LoginViewModel>();
+        // ── ViewModels ─────────────────────────────────────────
+        // Welcome flow
+        services.AddTransient<WelcomeWindowViewModel>();
         services.AddTransient<WelcomeIntroViewModel>();
         services.AddTransient<WelcomeTipsOptInViewModel>();
-        // ViewModels & Views // DataContext bindings
-        // Welcome Window
-        services.AddTransient<WelcomeWindowViewModel>();
-        services.AddTransient<WelcomeWindow>(sp =>
-            new WelcomeWindow
-            {
-                DataContext = sp.GetRequiredService<WelcomeWindowViewModel>()
-            });
+        services.AddTransient<LoginViewModel>();
 
-        // Main Window
+        // Setup wizard
+        services.AddTransient<SetupWizardViewModel>();
+        services.AddTransient<SelectDirectoriesViewModel>();
+        services.AddTransient<SelectFormatsViewModel>();
+
+        // Dashboard
+        services.AddTransient<RepositoryDashboardViewModel>();
+
+        // Main / Info
         services.AddTransient<MainWindowViewModel>();
-        services.AddTransient<MainWindow>(sp =>
-            new MainWindow
-            {
-                DataContext = sp.GetRequiredService<MainWindowViewModel>()
-            });
-
-        // Info Window
         services.AddTransient<InfoWindowViewModel>();
-        services.AddTransient<InfoWindow>(sp =>
-            new InfoWindow
-            {
-                DataContext = sp.GetRequiredService<InfoWindowViewModel>()
-            });
 
-        services.AddTransient<ViewModels.Pages.SetupWizard.SetupWizardViewModel>();
-        services.AddTransient<ViewModels.Pages.SetupWizard.SelectDirectoriesViewModel>();
-        services.AddTransient<ViewModels.Pages.SetupWizard.SelectFormatsViewModel>();
-        services.AddTransient<Views.Pages.SetupWizard.SetupWizardWindow>();
+        // ── Windows (View factories) ───────────────────────────
+        services.AddTransient<WelcomeWindow>(sp =>
+            new WelcomeWindow { DataContext = sp.GetRequiredService<WelcomeWindowViewModel>() });
+
+        services.AddTransient<MainWindow>(sp =>
+            new MainWindow { DataContext = sp.GetRequiredService<MainWindowViewModel>() });
+
+        services.AddTransient<InfoWindow>(sp =>
+            new InfoWindow { DataContext = sp.GetRequiredService<InfoWindowViewModel>() });
+
+        services.AddTransient<SetupWizardWindow>();
+
+        // ── Pages (for ViewLocator / DataTemplates) ────────────
         services.AddTransient<Views.Pages.SetupWizard.SelectDirectoriesPage>();
         services.AddTransient<Views.Pages.SetupWizard.SelectFormatsPage>();
 
         return services.BuildServiceProvider();
-
-
     }
 }

@@ -1,0 +1,130 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.Dashboard"
+             x:Class="Veyra.Desktop.Views.Pages.Dashboard.RepositoryDashboardView"
+             x:Name="Root"
+             d:DataContext="{d:DesignInstance vm:RepositoryDashboardViewModel, IsDesignTimeCreatable=False}"
+             x:DataType="vm:RepositoryDashboardViewModel">
+
+    <Grid ColumnDefinitions="320,*" Margin="16">
+
+        <!-- LEFT: Repository list -->
+        <Border Grid.Column="0" Background="#1A1A1A" CornerRadius="12" Padding="12" Margin="0,0,8,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Репозитории" FontSize="18" FontWeight="Bold" Margin="0,0,0,12"/>
+
+                <Button DockPanel.Dock="Bottom" Content="+ Добавить директорию"
+                        HorizontalAlignment="Stretch" Margin="0,8,0,0"
+                        Command="{Binding AddRepositoryCommand}"/>
+
+                <TextBlock DockPanel.Dock="Bottom" Foreground="#FF5555"
+                           Text="{Binding ErrorMessage}" TextWrapping="Wrap"
+                           Margin="0,4,0,0"
+                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Repositories}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:RepositoryCardViewModel">
+                                <Button Margin="0,2" Padding="10,8"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Command="{Binding DataContext.SelectRepositoryCommand, ElementName=Root}"
+                                        CommandParameter="{Binding .}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"/>
+                                        <TextBlock Text="{Binding DirectoryPath}" Opacity="0.6" FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding FormatsDisplay}" Opacity="0.5" FontSize="11"
+                                                   Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+
+        <!-- RIGHT: Detail panel -->
+        <Border Grid.Column="1" Background="#1E1E1E" CornerRadius="12" Padding="20"
+                IsVisible="{Binding IsDetailVisible}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+
+                    <TextBlock Text="Детали репозитория" FontSize="18" FontWeight="Bold"/>
+
+                    <TextBlock Text="Имя"/>
+                    <TextBox Text="{Binding DetailName, Mode=TwoWay}"/>
+
+                    <TextBlock Text="Описание"/>
+                    <TextBox Text="{Binding DetailDescription, Mode=TwoWay}"
+                             AcceptsReturn="True" Height="60"/>
+
+                    <TextBlock Text="Директория" Opacity="0.7"/>
+                    <TextBlock Text="{Binding DetailPath}" FontFamily="Consolas" Opacity="0.9"/>
+
+                    <Separator Margin="0,8"/>
+
+                    <!-- Linked formats -->
+                    <TextBlock Text="Привязанные форматы" FontWeight="SemiBold"/>
+                    <ItemsControl ItemsSource="{Binding DetailFormats}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <StackPanel Orientation="Horizontal" Margin="0,2,8,2">
+                                    <Border Background="#333" CornerRadius="4" Padding="8,4">
+                                        <TextBlock Text="{Binding .}" FontSize="12"/>
+                                    </Border>
+                                    <Button Content="×" Margin="4,0,0,0" Padding="4,2"
+                                            FontSize="12"
+                                            Command="{Binding DataContext.UnlinkFormatCommand, ElementName=Root}"
+                                            CommandParameter="{Binding .}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Available formats to add -->
+                    <TextBlock Text="Доступные форматы (нажмите чтобы привязать)" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                    <ItemsControl ItemsSource="{Binding AvailableFormats}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Button Margin="4" Padding="8,4"
+                                        Content="{Binding .}" FontSize="12"
+                                        Command="{Binding DataContext.LinkFormatCommand, ElementName=Root}"
+                                        CommandParameter="{Binding .}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Separator Margin="0,8"/>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Content="Сохранить" Width="120" Command="{Binding SaveDetailCommand}"/>
+                        <Button Content="Удалить" Width="120" Command="{Binding DeleteRepositoryCommand}"
+                                Foreground="#FF5555"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Placeholder when no repo selected -->
+        <Border Grid.Column="1" IsVisible="{Binding !IsDetailVisible}"
+                CornerRadius="12" Padding="20">
+            <TextBlock Text="Выберите репозиторий из списка слева"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Opacity="0.5" FontSize="16"/>
+        </Border>
+    </Grid>
+</UserControl>
