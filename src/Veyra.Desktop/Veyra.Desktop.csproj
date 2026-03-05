@@ -45,4 +45,10 @@
       <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Views\Pages\Dashboard\RepositoryDashboardView.cs">
+      <DependentUpon>RepositoryDashboardView.axaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
 </Project>

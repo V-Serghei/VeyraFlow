@@ -15,10 +15,8 @@
 
   <ItemGroup>
     <Folder Include="Config\" />
-    <Folder Include="DTOs\" />
     <Folder Include="Mapping\" />
     <Folder Include="Pipelines\" />
-    <Folder Include="Queries\" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,7 +24,6 @@
     <Folder Include="DTOs\" />
     <Folder Include="Mapping\" />
     <Folder Include="Pipelines\" />
-    <Folder Include="Queries\" />
   </ItemGroup>
 
   <PropertyGroup>

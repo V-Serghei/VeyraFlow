@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -10,9 +11,11 @@ using Veyra.Infrastructure.Data.Persistence;
 namespace Veyra.Infrastructure.Data.Persistence.Migrations
 {
     [DbContext(typeof(VeyraDbContext))]
-    partial class VeyraDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260214150002_SetupWatchTables")]
+    partial class SetupWatchTables
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
@@ -49,75 +52,6 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasIndex("FilePath");
 
                     b.ToTable("FileSnapshots");
-                });
-
-            modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("DeletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("DirectoryId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DirectoryId")
-                        .IsUnique();
-
-                    b.ToTable("Repositories");
-                });
-
-            modelBuilder.Entity("Veyra.Domain.Entities.UserProfile", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("LastLoginAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Username")
-                        .IsUnique();
-
-                    b.ToTable("UserProfiles");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.D_WatchedFormat", b =>
@@ -224,17 +158,6 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("WatchedDirectoryFormats");
-                });
-
-            modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
-                {
-                    b.HasOne("Veyra.Domain.Entities.Watched.WatchedDirectory", "Directory")
-                        .WithOne()
-                        .HasForeignKey("Veyra.Domain.Entities.Repository", "DirectoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Directory");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectoryFormat", b =>
