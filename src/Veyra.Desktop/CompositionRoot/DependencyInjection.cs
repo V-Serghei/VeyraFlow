@@ -63,7 +63,7 @@ public static class DependencyInjection
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
 
-        // ── Windows (View factories) ───────────────────────────
+        // ── Windows ────────────────────────────────────────────
         services.AddTransient<WelcomeWindow>(sp =>
             new WelcomeWindow { DataContext = sp.GetRequiredService<WelcomeWindowViewModel>() });
 
@@ -74,10 +74,6 @@ public static class DependencyInjection
             new InfoWindow { DataContext = sp.GetRequiredService<InfoWindowViewModel>() });
 
         services.AddTransient<SetupWizardWindow>();
-
-        // ── Pages (for ViewLocator / DataTemplates) ────────────
-        services.AddTransient<Views.Pages.SetupWizard.SelectDirectoriesPage>();
-        services.AddTransient<Views.Pages.SetupWizard.SelectFormatsPage>();
 
         return services.BuildServiceProvider();
     }

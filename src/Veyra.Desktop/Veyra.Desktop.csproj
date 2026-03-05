@@ -50,5 +50,9 @@
     <Compile Update="Views\Pages\Dashboard\RepositoryDashboardView.cs">
       <DependentUpon>RepositoryDashboardView.axaml</DependentUpon>
     </Compile>
+    <Compile Update="Views\Pages\SetupWizard\RepositoryNamePage.axaml.cs">
+      <DependentUpon>RepositoryNamePage.axaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
 </Project>

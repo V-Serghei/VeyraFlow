@@ -28,14 +28,18 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private RepositoryCardViewModel? _selectedRepository;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
+    [ObservableProperty] private bool _isEmpty;
 
-    // Detail panel state
+    // Detail panel
     [ObservableProperty] private bool _isDetailVisible;
     [ObservableProperty] private string _detailName = string.Empty;
     [ObservableProperty] private string? _detailDescription;
     [ObservableProperty] private string _detailPath = string.Empty;
     [ObservableProperty] private ObservableCollection<string> _detailFormats = new();
     [ObservableProperty] private ObservableCollection<string> _availableFormats = new();
+
+    // Search
+    [ObservableProperty] private string _searchQuery = string.Empty;
 
     public RepositoryDashboardViewModel(
         IMediator mediator,
@@ -47,7 +51,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         _windows = windows;
     }
 
-    /// <summary>Call this after the view is loaded to populate data.</summary>
     [RelayCommand]
     public async Task LoadAsync()
     {
@@ -56,7 +59,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             IsLoading = true;
             ErrorMessage = null;
 
-            // Ensure repos exist for all directories
             await _mediator.Send(new EnsureRepositoriesCommand());
 
             var repos = await _mediator.Send(new GetAllRepositoriesQuery());
@@ -70,14 +72,44 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                     Name = r.Name,
                     Description = r.Description,
                     DirectoryPath = r.DirectoryPath,
+                    StatusText = "Локально",
+                    StatusColor = "#4CAF50",
+                    LastActivity = "Только что"
                 };
+
                 foreach (var f in r.LinkedFormats)
                     card.LinkedFormats.Add(f);
+
+                // Try to get basic dir info
+                try
+                {
+                    if (Directory.Exists(r.DirectoryPath))
+                    {
+                        var dirInfo = new DirectoryInfo(r.DirectoryPath);
+                        var files = dirInfo.GetFiles("*", SearchOption.TopDirectoryOnly);
+                        card.FileCount = files.Length;
+                        var totalSize = files.Sum(f => f.Length);
+                        card.SizeDisplay = FormatSize(totalSize);
+                    }
+                    else
+                    {
+                        card.StatusText = "Недоступен";
+                        card.StatusColor = "#F44336";
+                    }
+                }
+                catch
+                {
+                    card.StatusText = "Ошибка чтения";
+                    card.StatusColor = "#FF9800";
+                }
+
                 card.RefreshFormatsDisplay();
                 Repositories.Add(card);
             }
 
-            // Load available formats for linking
+            IsEmpty = Repositories.Count == 0;
+
+            // Available formats
             List<string> allExts = await _mediator.Send(new GetTrackedExtensionsQuery());
             AvailableFormats = new ObservableCollection<string>(allExts);
         }
@@ -107,6 +139,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         DetailPath = repo.DirectoryPath;
         DetailFormats = new ObservableCollection<string>(repo.LinkedFormats.ToList());
         IsDetailVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseDetail()
+    {
+        IsDetailVisible = false;
+        SelectedRepository = null;
     }
 
     [RelayCommand]
@@ -165,10 +204,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             await _mediator.Send(new UpdateRepositoryCommand(
                 SelectedRepository.Id, DetailName, DetailDescription));
+
+            var savedId = SelectedRepository.Id;
             await LoadAsync();
 
-            // Re-select
-            var updated = Repositories.FirstOrDefault(r => r.Id == SelectedRepository.Id);
+            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
             if (updated is not null)
                 SelectRepository(updated);
         }
@@ -189,13 +229,10 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             await _mediator.Send(new LinkFormatsToRepositoryCommand(
                 SelectedRepository.Id, new[] { format }));
 
-            if (!DetailFormats.Contains(format))
-                DetailFormats.Add(format);
-
+            var savedId = SelectedRepository.Id;
             await LoadAsync();
-            var updated = Repositories.FirstOrDefault(r => r.Id == SelectedRepository.Id);
-            if (updated is not null)
-                SelectRepository(updated);
+            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
+            if (updated is not null) SelectRepository(updated);
         }
         catch (Exception ex)
         {
@@ -213,16 +250,22 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             await _mediator.Send(new UnlinkFormatsFromRepositoryCommand(
                 SelectedRepository.Id, new[] { format }));
 
-            DetailFormats.Remove(format);
-
+            var savedId = SelectedRepository.Id;
             await LoadAsync();
-            var updated = Repositories.FirstOrDefault(r => r.Id == SelectedRepository.Id);
-            if (updated is not null)
-                SelectRepository(updated);
+            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
+            if (updated is not null) SelectRepository(updated);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to unlink format");
         }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} Б";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} МБ";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
     }
 }

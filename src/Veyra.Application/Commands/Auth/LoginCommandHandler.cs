@@ -7,6 +7,7 @@ namespace Veyra.Application.Commands.Auth;
 
 public sealed class LoginCommandHandler(
     IAuthService authService,
+    IUserProfileRepository userProfileRepo,
     ILogger<LoginCommandHandler> logger)
     : IRequestHandler<LoginCommand, OperationResult>
 {
@@ -21,6 +22,11 @@ public sealed class LoginCommandHandler(
             if (success)
             {
                 logger.LogInformation("User {Username} logged in successfully", request.Username);
+
+                // Save user profile to local SQLite
+                await userProfileRepo.SaveOrUpdateProfileAsync(request.Username, cancellationToken);
+                logger.LogInformation("User profile saved locally for {Username}", request.Username);
+
                 return OperationResult.Ok();
             }
 

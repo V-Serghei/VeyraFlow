@@ -65,11 +65,12 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
 
     private async Task RunSetupThenMainAsync()
     {
+        // Open wizard as dialog
         var wizard = _windows.Create<SetupWizardWindow>();
         var wizardVm = _sp.GetRequiredService<SetupWizardViewModel>();
         wizard.DataContext = wizardVm;
 
-        // Close wizard when VM requests it
+        // Close wizard when VM signals completion
         wizardVm.RequestClose += (_, _) => wizard.Close();
 
         Window? owner = _windows.GetActiveWindow();
@@ -78,9 +79,8 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
         else
             _windows.Show(wizard);
 
-        // After wizard: ensure repositories are created for all directories
-        await _mediator.Send(new EnsureRepositoriesCommand());
-
+        // Navigate to main window with dashboard
+        // Dashboard.LoadAsync() will be called from MainWindow.Opened
         _nav.GoToMain();
     }
 }
