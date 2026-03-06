@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -126,6 +126,7 @@ public sealed class RustRepositoryScanner(
             DateTime.UtcNow,
             entries,
             scanOptions.SaveFileVersions,
+            scanOptions.SnapshotTitle,
             ct);
 
         progress?.Report(new RepositoryScanProgressDto(
@@ -431,3 +432,4 @@ public sealed class RustRepositoryScanner(
         public string? ContentHashSha256 { get; init; }
     }
 }
+

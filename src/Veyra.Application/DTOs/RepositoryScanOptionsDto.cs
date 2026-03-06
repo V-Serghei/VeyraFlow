@@ -5,4 +5,5 @@ public sealed record RepositoryScanOptionsDto(
     int MaxReadBytesPerSecond = 0,
     int MaxIoOperationsPerSecond = 0,
     bool SaveFileVersions = false,
-    string? TriggerOverride = null);
+    string? TriggerOverride = null,
+    string? SnapshotTitle = null);

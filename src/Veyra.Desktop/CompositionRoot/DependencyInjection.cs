@@ -77,6 +77,7 @@ public static class DependencyInjection
         services.AddTransient<AppSettingsViewModel>();
 
         services.AddTransient<CreateRepositoryWindowViewModel>();
+        services.AddTransient<SnapshotNameDialogWindowViewModel>();
 
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
@@ -93,10 +94,12 @@ public static class DependencyInjection
         services.AddTransient<CreateRepositoryWindow>(sp =>
             new CreateRepositoryWindow { DataContext = sp.GetRequiredService<CreateRepositoryWindowViewModel>() });
 
+        services.AddTransient<SnapshotNameDialogWindow>(sp =>
+            new SnapshotNameDialogWindow { DataContext = sp.GetRequiredService<SnapshotNameDialogWindowViewModel>() });
+
         services.AddTransient<SetupWizardWindow>();
 
         return services.BuildServiceProvider();
     }
 }
-
 

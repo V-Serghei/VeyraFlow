@@ -5,37 +5,74 @@
              x:Class="Veyra.Desktop.Views.Pages.Explorer.RepositoryExplorerView"
              x:Name="Root"
              x:DataType="explorer:RepositoryExplorerViewModel"
-             Background="#0D0D0D">
+             Background="#0A0F16">
+
+    <UserControl.Styles>
+        <Style Selector="ListBox.flat-list">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+        <Style Selector="ListBox.flat-list > ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="ListBox.flat-list > ListBoxItem:selected">
+            <Setter Property="Background" Value="#1F2E43"/>
+        </Style>
+        <Style Selector="ListBox.flat-list > ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1F2E43"/>
+        </Style>
+        <Style Selector="ListBox.flat-list > ListBoxItem:pointerover">
+            <Setter Property="Background" Value="#14243A57"/>
+        </Style>
+    </UserControl.Styles>
 
     <DockPanel Margin="20,16">
-        <Border DockPanel.Dock="Top" Background="#121212" CornerRadius="10" Padding="14" Margin="0,0,0,12">
+        <Border DockPanel.Dock="Top"
+                CornerRadius="12"
+                Padding="14"
+                Margin="0,0,0,12"
+                BorderBrush="#243243"
+                BorderThickness="1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#131C29" Offset="0"/>
+                    <GradientStop Color="#0F1722" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
-                <Button Grid.Column="0" Content="← Назад" Command="{Binding BackCommand}" Padding="12,8"/>
+                <Button Grid.Column="0" Content="Back" Command="{Binding BackCommand}" Padding="12,8"/>
 
                 <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="{Binding RepositoryName}" FontSize="20" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding RepositoryPath}" Opacity="0.7" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="Live sync включен"
-                               Opacity="0.7"
+                    <TextBlock Text="{Binding RepositoryPath}" Opacity="0.72" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="Live sync enabled"
+                               Opacity="0.68"
                                FontSize="11"
                                IsVisible="{Binding IsLiveSyncActive}"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Синхронизировать"
+                    <Button Content="Sync index"
                             Command="{Binding RescanCommand}"
                             IsEnabled="{Binding CanRunScanActions}"/>
-                    <Button Content="Снимок версии"
+                    <Button Content="Create snapshot"
                             Command="{Binding CreateSnapshotCommand}"
                             IsEnabled="{Binding CanRunScanActions}"/>
-                    <Button Content="Настройки" Command="{Binding OpenSettingsCommand}"/>
+                    <Button Content="Snapshot history"
+                            Command="{Binding ShowSnapshotHistoryCommand}"
+                            IsEnabled="{Binding CanRunScanActions}"/>
+                    <Button Content="Settings" Command="{Binding OpenSettingsCommand}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
         <Border DockPanel.Dock="Top"
-                Background="#131820"
-                BorderBrush="#1F2937"
+                Background="#131F2C"
+                BorderBrush="#1F3147"
                 BorderThickness="1"
                 CornerRadius="10"
                 Padding="12"
@@ -60,154 +97,309 @@
                    Foreground="#F87171"
                    IsVisible="{Binding HasErrorMessage}"/>
 
-        <Grid ColumnDefinitions="260,*,360" ColumnSpacing="12">
-            <Border Grid.Column="0" Background="#121212" CornerRadius="10" Padding="12">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Структура папок" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <TreeView ItemsSource="{Binding TreeNodes}"
-                              SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
-                        <TreeView.DataTemplates>
-                            <TreeDataTemplate DataType="explorer:ExplorerTreeNodeViewModel" ItemsSource="{Binding Children}">
-                                <TextBlock Text="{Binding Name}"/>
-                            </TreeDataTemplate>
-                        </TreeView.DataTemplates>
-                    </TreeView>
-                </DockPanel>
-            </Border>
+        <Grid>
+            <Grid ColumnDefinitions="260,*,360" ColumnSpacing="12">
+                <Border Grid.Column="0"
+                        Background="#111922"
+                        BorderBrush="#1E2A38"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Folders" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <TreeView ItemsSource="{Binding TreeNodes}"
+                                  SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
+                            <TreeView.DataTemplates>
+                                <TreeDataTemplate DataType="explorer:ExplorerTreeNodeViewModel" ItemsSource="{Binding Children}">
+                                    <TextBlock Text="{Binding Name}"/>
+                                </TreeDataTemplate>
+                            </TreeView.DataTemplates>
+                        </TreeView>
+                    </DockPanel>
+                </Border>
 
-            <Border Grid.Column="1" Background="#121212" CornerRadius="10" Padding="12">
-                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
-                    <TextBox Grid.Row="0" Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Поиск по текущей папке"/>
+                <Border Grid.Column="1"
+                        Background="#111922"
+                        BorderBrush="#1E2A38"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
+                        <TextBox Grid.Row="0" Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Search in current folder"/>
 
-                    <Grid Grid.Row="1" ColumnDefinitions="40,*,120,100,120,100" Margin="0,6,0,2">
-                        <TextBlock Grid.Column="1" Text="Имя" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="2" Text="Тип" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="3" Text="Размер" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="4" Text="Изменено" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="5" Text="Действие" FontWeight="SemiBold" Opacity="0.8"/>
+                        <Grid Grid.Row="1" ColumnDefinitions="40,*,120,100,120,100" Margin="0,6,0,2">
+                            <TextBlock Grid.Column="1" Text="Name" FontWeight="SemiBold" Opacity="0.8"/>
+                            <TextBlock Grid.Column="2" Text="Type" FontWeight="SemiBold" Opacity="0.8"/>
+                            <TextBlock Grid.Column="3" Text="Size" FontWeight="SemiBold" Opacity="0.8"/>
+                            <TextBlock Grid.Column="4" Text="Modified" FontWeight="SemiBold" Opacity="0.8"/>
+                            <TextBlock Grid.Column="5" Text="Action" FontWeight="SemiBold" Opacity="0.8"/>
+                        </Grid>
+
+                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Items}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="explorer:ExplorerItemViewModel">
+                                        <Border Background="#141F2C" CornerRadius="10" Padding="8" Margin="0,0,0,6">
+                                            <Grid ColumnDefinitions="40,*,120,100,120,100" ColumnSpacing="6">
+                                                <Button Grid.Column="0" Content="{Binding Icon}" FontSize="14"
+                                                        Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).SelectItemCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"/>
+                                                <TextBlock Grid.Column="2" Text="{Binding Type}" VerticalAlignment="Center" Opacity="0.8"/>
+                                                <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
+                                                <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
+                                                <Button Grid.Column="5" Content="Open" IsVisible="{Binding CanOpenDirectory}"
+                                                        Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
                     </Grid>
+                </Border>
 
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Items}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="explorer:ExplorerItemViewModel">
-                                    <Border Background="#161616" CornerRadius="8" Padding="8" Margin="0,0,0,6">
-                                        <Grid ColumnDefinitions="40,*,120,100,120,100" ColumnSpacing="6">
-                                            <Button Grid.Column="0" Content="{Binding Icon}" FontSize="14"
-                                                    Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).SelectItemCommand}"
-                                                    CommandParameter="{Binding .}"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="2" Text="{Binding Type}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <Button Grid.Column="5" Content="Открыть" IsVisible="{Binding CanOpenDirectory}"
-                                                    Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemCommand}"
-                                                    CommandParameter="{Binding .}"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
+                <Border Grid.Column="2"
+                        Background="#111922"
+                        BorderBrush="#1E2A38"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Pending changes" FontSize="13" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding LastSnapshotLabel}" Opacity="0.75"/>
+                            <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.85" TextWrapping="Wrap"/>
 
-            <Border Grid.Column="2" Background="#121212" CornerRadius="10" Padding="12">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="Текущие изменения" FontSize="13" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding LastSnapshotLabel}" Opacity="0.75"/>
-                        <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.85" TextWrapping="Wrap"/>
-
-                        <ListBox ItemsSource="{Binding PendingChanges}" MaxHeight="220" IsVisible="{Binding HasPendingChanges}">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="explorer:RepositoryPendingChangeViewModel">
-                                    <Border Background="#161616" CornerRadius="8" Padding="8" Margin="0,0,0,6">
-                                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
-                                            <TextBlock Grid.Row="0" Grid.Column="0"
-                                                       Text="{Binding ChangeKindLabel}"
-                                                       Foreground="{Binding ChangeKindColor}"
-                                                       FontWeight="SemiBold"/>
-                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
-                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                                                       Text="{Binding RelativePath}"
-                                                       Opacity="0.65"
-                                                       FontSize="11"
-                                                       TextTrimming="CharacterEllipsis"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-
-                        <TextBlock Text="Нет изменений для фиксации" Opacity="0.7" IsVisible="{Binding HasNoPendingChanges}"/>
-
-                        <Border Height="1" Background="#1E1E1E" Margin="0,4"/>
-
-                        <TextBlock Text="Детали файла" FontSize="13" FontWeight="SemiBold"/>
-
-                        <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
-                            <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
-                            <TextBlock Text="{Binding SelectedItem.Type}"/>
-                            <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
-                            <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
-                            <TextBlock Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap" Opacity="0.7"/>
-
-                            <Border Height="1" Background="#1E1E1E" Margin="0,4"/>
-
-                            <TextBlock Text="Версии файла" FontWeight="SemiBold"/>
-                            <TextBlock Text="Загрузка версий..." Opacity="0.7" IsVisible="{Binding IsVersionLoading}"/>
-
-                            <ListBox ItemsSource="{Binding FileVersions}"
-                                     SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
-                                     MaxHeight="180">
+                            <ListBox Classes="flat-list"
+                                     ItemsSource="{Binding PendingChanges}"
+                                     MaxHeight="220"
+                                     IsVisible="{Binding HasPendingChanges}">
                                 <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                        <StackPanel Margin="2" Spacing="2">
-                                            <TextBlock Text="{Binding Title}"/>
-                                            <TextBlock Text="{Binding SizeDisplay}" Opacity="0.7" FontSize="11"/>
-                                        </StackPanel>
+                                    <DataTemplate x:DataType="explorer:RepositoryPendingChangeViewModel">
+                                        <Border Background="#162434" CornerRadius="10" Padding="8">
+                                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
+                                                <TextBlock Grid.Row="0" Grid.Column="0"
+                                                           Text="{Binding ChangeKindLabel}"
+                                                           Foreground="{Binding ChangeKindColor}"
+                                                           FontWeight="SemiBold"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                           Text="{Binding RelativePath}"
+                                                           Opacity="0.65"
+                                                           FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </Grid>
+                                        </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <TextBlock Text="Для выбранной версии нет блоков содержимого. Восстановление и diff недоступны."
-                                       Foreground="#FBBF24"
-                                       TextWrapping="Wrap"
-                                       IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+                            <TextBlock Text="No pending changes" Opacity="0.7" IsVisible="{Binding HasNoPendingChanges}"/>
 
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Button Content="В новый файл"
-                                        Command="{Binding RestoreVersionAsCopyCommand}"
-                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
-                                <Button Content="Поверх текущего"
-                                        Command="{Binding RestoreVersionOverwriteCommand}"
-                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                            <Border Height="1" Background="#1E2A38" Margin="0,4"/>
+
+                            <TextBlock Text="Snapshots" FontSize="13" FontWeight="SemiBold"/>
+                            <TextBlock Text="Open the dedicated history menu to browse commits, changed files and version controls." Opacity="0.75" TextWrapping="Wrap"/>
+                            <Button Content="Open snapshot history"
+                                    Command="{Binding ShowSnapshotHistoryCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="12,10"/>
+
+                            <Border Height="1" Background="#1E2A38" Margin="0,4"/>
+
+                            <TextBlock Text="Selected file" FontSize="13" FontWeight="SemiBold"/>
+                            <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="6">
+                                <TextBlock Text="{Binding SelectedItem.Name}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.7" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.75"/>
                             </StackPanel>
 
-                            <Button Content="Diff с предыдущей"
-                                    Command="{Binding CompareSelectedWithPreviousCommand}"
-                                    IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
-
-                            <TextBlock Text="{Binding VersionActionMessage}"
-                                       TextWrapping="Wrap"
-                                       Opacity="0.9"
-                                       IsVisible="{Binding HasVersionActionMessage}"/>
-
-                            <TextBox Text="{Binding DiffPreview}"
-                                     AcceptsReturn="True"
-                                     IsReadOnly="True"
-                                     Height="220"
-                                     IsVisible="{Binding HasDiffPreview}"/>
+                            <TextBlock Text="Select a file from current index or from snapshot history."
+                                       Opacity="0.7"
+                                       IsVisible="{Binding HasNoSelectedItem}"
+                                       TextWrapping="Wrap"/>
                         </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
 
-                        <StackPanel IsVisible="{Binding HasNoSelectedItem}" Spacing="6">
-                            <TextBlock Text="Выберите файл или папку" Opacity="0.75"/>
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
+            <Border IsVisible="{Binding IsSnapshotHistoryMenuOpen}"
+                    Background="#AA050A12"
+                    CornerRadius="0"
+                    Padding="18">
+                <Border HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        CornerRadius="14"
+                        BorderBrush="#2A3F56"
+                        BorderThickness="1"
+                        Padding="14"
+                        MaxHeight="900">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#101B2A" Offset="0"/>
+                            <GradientStop Color="#0D1724" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+
+                    <Grid RowDefinitions="Auto,*" RowSpacing="12">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Snapshot history" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="Browse commits, inspect changed files and manage file versions."
+                                           Opacity="0.75"
+                                           FontSize="12"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Close"
+                                    Command="{Binding CloseSnapshotHistoryMenuCommand}"
+                                    Padding="14,8"/>
+                        </Grid>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="330,360,*" ColumnSpacing="12">
+                            <Border Grid.Column="0"
+                                    Background="#142235"
+                                    CornerRadius="12"
+                                    Padding="10">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Commits" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="Loading commits..." Opacity="0.7" IsVisible="{Binding IsSnapshotHistoryLoading}"/>
+
+                                    <ListBox Classes="flat-list"
+                                             ItemsSource="{Binding SnapshotHistory}"
+                                             SelectedItem="{Binding SelectedSnapshot, Mode=TwoWay}"
+                                             IsVisible="{Binding HasSnapshotHistory}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="explorer:RepositorySnapshotHistoryEntryViewModel">
+                                                <Border Background="#0F1722" CornerRadius="10" Padding="10">
+                                                    <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="3">
+                                                        <TextBlock Grid.Row="0" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Grid.Row="1" Text="{Binding DisplayTime}" Opacity="0.75" FontSize="11"/>
+                                                        <TextBlock Grid.Row="2" Text="{Binding ChangedFilesLabel}" Opacity="0.75" FontSize="11"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <TextBlock Text="No commits yet" Opacity="0.7" IsVisible="{Binding HasNoSnapshotHistory}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1"
+                                    Background="#142235"
+                                    CornerRadius="12"
+                                    Padding="10">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Files in selected commit" FontWeight="SemiBold" FontSize="13"/>
+                                    <TextBlock Text="Select a commit to see changed files" Opacity="0.7" IsVisible="{Binding HasNoSelectedSnapshot}"/>
+                                    <TextBlock Text="Loading changed files..." Opacity="0.7" IsVisible="{Binding IsSnapshotFilesLoading}"/>
+
+                                    <ListBox Classes="flat-list"
+                                             ItemsSource="{Binding SnapshotFiles}"
+                                             SelectedItem="{Binding SelectedSnapshotFile, Mode=TwoWay}"
+                                             IsVisible="{Binding HasSnapshotFiles}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="explorer:RepositorySnapshotFileChangeViewModel">
+                                                <Border Background="#0F1722" CornerRadius="10" Padding="10">
+                                                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
+                                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold"/>
+                                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
+                                                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                                   Text="{Binding RelativePath}"
+                                                                   Opacity="0.65"
+                                                                   FontSize="11"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+
+                                    <TextBlock Text="No changed files in this commit" Opacity="0.7" IsVisible="{Binding HasNoSnapshotFiles}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Background="#142235"
+                                    CornerRadius="12"
+                                    Padding="12">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Version controls" FontSize="13" FontWeight="SemiBold"/>
+
+                                        <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
+                                            <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding SelectedItem.Type}"/>
+                                            <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
+                                            <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
+                                            <TextBlock Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap" Opacity="0.7"/>
+
+                                            <Border Height="1" Background="#1E2A38" Margin="0,4"/>
+
+                                            <TextBlock Text="File versions" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Loading versions..." Opacity="0.7" IsVisible="{Binding IsVersionLoading}"/>
+
+                                            <ListBox Classes="flat-list"
+                                                     ItemsSource="{Binding FileVersions}"
+                                                     SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                                     MaxHeight="220">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                        <Border Background="#0F1722" CornerRadius="8" Padding="8">
+                                                            <StackPanel Spacing="2">
+                                                                <TextBlock Text="{Binding Title}"/>
+                                                                <TextBlock Text="{Binding SizeDisplay}" Opacity="0.7" FontSize="11"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+
+                                            <TextBlock Text="No content blocks for selected version. Restore and diff are unavailable."
+                                                       Foreground="#FBBF24"
+                                                       TextWrapping="Wrap"
+                                                       IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Button Content="Restore as copy"
+                                                        Command="{Binding RestoreVersionAsCopyCommand}"
+                                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                                                <Button Content="Restore overwrite"
+                                                        Command="{Binding RestoreVersionOverwriteCommand}"
+                                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                                            </StackPanel>
+
+                                            <Button Content="Diff with previous"
+                                                    Command="{Binding CompareSelectedWithPreviousCommand}"
+                                                    IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
+
+                                            <TextBlock Text="{Binding VersionActionMessage}"
+                                                       TextWrapping="Wrap"
+                                                       Opacity="0.9"
+                                                       IsVisible="{Binding HasVersionActionMessage}"/>
+
+                                            <TextBox Text="{Binding DiffPreview}"
+                                                     AcceptsReturn="True"
+                                                     IsReadOnly="True"
+                                                     Height="220"
+                                                     IsVisible="{Binding HasDiffPreview}"/>
+                                        </StackPanel>
+
+                                        <TextBlock Text="Select a file in commit list to open version controls."
+                                                   Opacity="0.75"
+                                                   IsVisible="{Binding HasNoSelectedItem}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
             </Border>
         </Grid>
     </DockPanel>

@@ -61,5 +61,8 @@
     <Compile Update="Views\Pages\Explorer\RepositoryExplorerView.axaml.cs">
       <DependentUpon>RepositoryExplorerView.axaml</DependentUpon>
     </Compile>
+    <Compile Update="Views\Windows\SnapshotNameDialogWindow.axaml.cs">
+      <DependentUpon>SnapshotNameDialogWindow.axaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>

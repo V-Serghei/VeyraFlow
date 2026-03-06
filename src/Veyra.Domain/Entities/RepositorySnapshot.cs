@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class RepositorySnapshot
 {
@@ -8,6 +8,7 @@ public class RepositorySnapshot
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public required string Trigger { get; set; }
+    public string? Title { get; set; }
 
     public int TotalEntries { get; set; }
     public int FileEntries { get; set; }

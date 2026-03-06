@@ -15,6 +15,9 @@ using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
+using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.ViewModels.Windows;
+using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -24,6 +27,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private const int LiveSyncMinIntervalMs = 1500;
 
     private readonly IMediator _mediator;
+    private readonly IWindowService _windows;
     private readonly ILogger<RepositoryExplorerViewModel> _log;
     private readonly Dictionary<string, ExplorerTreeNodeViewModel> _nodeByPath =
         new(StringComparer.OrdinalIgnoreCase);
@@ -37,12 +41,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private Timer? _liveSyncTimer;
     private bool _liveSyncPending;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
+    private bool _isSyncingSelectionFromSnapshot;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     private int _repositoryId;
 
     [ObservableProperty] private string _repositoryName = string.Empty;
@@ -50,6 +56,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     private bool _isLoading;
 
     [ObservableProperty] private bool _isEmpty;
@@ -89,6 +96,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     private bool _isScanRunning;
 
     [ObservableProperty] private int _scanPercent;
@@ -101,7 +109,28 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoPendingChanges))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     private bool _hasPendingChanges;
+    [ObservableProperty] private bool _isSnapshotHistoryLoading;
+    [ObservableProperty] private bool _isSnapshotFilesLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoSnapshotHistory))]
+    private bool _hasSnapshotHistory;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoSelectedSnapshot))]
+    [NotifyPropertyChangedFor(nameof(HasNoSnapshotFiles))]
+    private RepositorySnapshotHistoryEntryViewModel? _selectedSnapshot;
+
+    [ObservableProperty]
+    private RepositorySnapshotFileChangeViewModel? _selectedSnapshotFile;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoSnapshotFiles))]
+    private bool _hasSnapshotFiles;
+
+    [ObservableProperty] private bool _isSnapshotHistoryMenuOpen;
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
     public bool HasNoSelectedItem => !HasSelectedItem;
@@ -109,7 +138,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasDiffPreview => !string.IsNullOrWhiteSpace(DiffPreview);
     public bool SelectedVersionHasNoContentBlocks => SelectedVersion is not null && !SelectedVersionHasContentBlocks;
     public bool HasNoPendingChanges => !HasPendingChanges;
+    public bool HasNoSnapshotHistory => !HasSnapshotHistory;
+    public bool HasNoSelectedSnapshot => SelectedSnapshot is null;
+    public bool HasNoSnapshotFiles => SelectedSnapshot is not null && !HasSnapshotFiles;
     public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning;
+    public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
     public bool CanRestoreSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanRunDiffForSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
 
@@ -117,12 +150,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
     public ObservableCollection<ExplorerFileVersionViewModel> FileVersions { get; } = [];
     public ObservableCollection<RepositoryPendingChangeViewModel> PendingChanges { get; } = [];
+    public ObservableCollection<RepositorySnapshotHistoryEntryViewModel> SnapshotHistory { get; } = [];
+    public ObservableCollection<RepositorySnapshotFileChangeViewModel> SnapshotFiles { get; } = [];
 
     public RepositoryExplorerViewModel(
         IMediator mediator,
+        IWindowService windows,
         ILogger<RepositoryExplorerViewModel> log)
     {
         _mediator = mediator;
+        _windows = windows;
         _log = log;
     }
 
@@ -139,7 +176,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SelectedVersion = null;
             FileVersions.Clear();
             PendingChanges.Clear();
+            SnapshotHistory.Clear();
+            SnapshotFiles.Clear();
+            SelectedSnapshot = null;
+            SelectedSnapshotFile = null;
             HasPendingChanges = false;
+            HasSnapshotHistory = false;
+            HasSnapshotFiles = false;
+            IsSnapshotHistoryLoading = false;
+            IsSnapshotFilesLoading = false;
+            IsSnapshotHistoryMenuOpen = false;
             PendingChangesSummary = "Изменений с последнего снимка нет.";
             LastSnapshotLabel = "Снимок еще не создан.";
 
@@ -166,7 +212,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             TreeNodes.Clear();
             FileVersions.Clear();
             PendingChanges.Clear();
+            SnapshotHistory.Clear();
+            SnapshotFiles.Clear();
+            SelectedSnapshot = null;
+            SelectedSnapshotFile = null;
             HasPendingChanges = false;
+            HasSnapshotHistory = false;
+            HasSnapshotFiles = false;
+            IsSnapshotHistoryLoading = false;
+            IsSnapshotFilesLoading = false;
+            IsSnapshotHistoryMenuOpen = false;
             PendingChangesSummary = "Не удалось загрузить изменения.";
             LastSnapshotLabel = "Снимок еще не создан.";
             IsEmpty = true;
@@ -188,12 +243,67 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnSelectedItemChanged(ExplorerItemViewModel? value)
     {
         HasSelectedItem = value is not null;
+
+        if (!_isSyncingSelectionFromSnapshot
+            && value is not null
+            && SelectedSnapshotFile is not null
+            && !value.RelativePath.Equals(SelectedSnapshotFile.RelativePath, StringComparison.OrdinalIgnoreCase))
+        {
+            SelectedSnapshotFile = null;
+        }
+
         _ = LoadVersionsForSelectedItemAsync(value);
+    }
+
+    partial void OnSelectedSnapshotChanged(RepositorySnapshotHistoryEntryViewModel? value)
+    {
+        _ = LoadSnapshotFilesForSelectedSnapshotAsync(value?.SnapshotId);
+    }
+
+    partial void OnSelectedSnapshotFileChanged(RepositorySnapshotFileChangeViewModel? value)
+    {
+        if (value is null)
+            return;
+
+        SelectItemFromSnapshotFile(value);
     }
 
     partial void OnSelectedVersionChanged(ExplorerFileVersionViewModel? value)
     {
         SelectedVersionHasContentBlocks = value?.HasContentBlocks == true;
+    }
+
+    private void SelectItemFromSnapshotFile(RepositorySnapshotFileChangeViewModel value)
+    {
+        _isSyncingSelectionFromSnapshot = true;
+
+        try
+        {
+            var existing = Items.FirstOrDefault(i =>
+                i.RelativePath.Equals(value.RelativePath, StringComparison.OrdinalIgnoreCase));
+
+            if (existing is not null)
+            {
+                SelectedItem = existing;
+                return;
+            }
+
+            SelectedItem = new ExplorerItemViewModel
+            {
+                RelativePath = value.RelativePath,
+                ParentRelativePath = GetParentRelativePath(value.RelativePath),
+                IsDirectory = false,
+                Name = value.Name,
+                Type = GuessItemType(value.RelativePath),
+                SizeDisplay = value.ChangeKind == "deleted" ? "deleted" : FormatSize(value.CurrentSizeBytes),
+                ModifiedDisplay = SelectedSnapshot?.DisplayTime ?? string.Empty,
+                HashSha256 = null
+            };
+        }
+        finally
+        {
+            _isSyncingSelectionFromSnapshot = false;
+        }
     }
 
     [RelayCommand]
@@ -226,13 +336,71 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private async Task CreateSnapshotAsync()
     {
+        await LoadPendingChangesAsync();
+
+        if (!HasPendingChanges)
+        {
+            ErrorMessage = "No changes detected. Snapshot creation is disabled.";
+            return;
+        }
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            ErrorMessage = "Unable to open snapshot dialog window.";
+            return;
+        }
+
+        var dialog = _windows.Create<SnapshotNameDialogWindow>();
+        if (dialog.DataContext is SnapshotNameDialogWindowViewModel vm)
+        {
+            var defaultName = $"snimok_{DateTime.Now:yyyyMMdd_HHmmss}";
+            var changedFiles = PendingChanges.Select(change => new SnapshotPendingFileItemViewModel
+            {
+                RelativePath = change.RelativePath,
+                Name = change.Name,
+                ChangeKind = change.ChangeKind,
+                CurrentSizeBytes = change.CurrentSizeBytes,
+                BaselineSizeBytes = change.BaselineSizeBytes
+            }).ToList();
+
+            vm.Initialize(defaultName, changedFiles);
+        }
+
+        await _windows.ShowDialogAsync(dialog, owner);
+
+        if (!dialog.IsConfirmed)
+            return;
+
+        var snapshotTitle = dialog.SnapshotTitle;
+
         await ExecuteScanAsync(
             saveFileVersions: true,
             triggerOverride: "manual_snapshot",
-            fallbackMessage: "Создание снимка...",
+            fallbackMessage: "Saving snapshot...",
             showErrors: true,
-            successMessage: "Снимок версии сохранен.");
+            successMessage: "Snapshot saved.",
+            snapshotTitle: snapshotTitle);
     }
+
+    [RelayCommand]
+    private async Task ShowSnapshotHistoryAsync()
+    {
+        IsSnapshotHistoryMenuOpen = true;
+
+        if (RepositoryId == 0)
+            return;
+
+        if (!IsSnapshotHistoryLoading)
+            await LoadSnapshotHistoryAsync(SelectedSnapshot?.SnapshotId ?? 0);
+
+        if (SelectedSnapshot is null && SnapshotHistory.Count > 0)
+            SelectedSnapshot = SnapshotHistory[0];
+    }
+
+    [RelayCommand]
+    private void CloseSnapshotHistoryMenu()
+        => IsSnapshotHistoryMenuOpen = false;
 
     [RelayCommand]
     private void SelectTreeNode(ExplorerTreeNodeViewModel? node)
@@ -408,7 +576,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         string triggerOverride,
         string fallbackMessage,
         bool showErrors,
-        string? successMessage)
+        string? successMessage,
+        string? snapshotTitle = null)
     {
         if (RepositoryId == 0)
             return false;
@@ -448,7 +617,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 progress,
                 new RepositoryScanOptionsDto(
                     SaveFileVersions: saveFileVersions,
-                    TriggerOverride: triggerOverride))));
+                    TriggerOverride: triggerOverride,
+                    SnapshotTitle: snapshotTitle))));
 
             if (!result.Success)
             {
@@ -569,6 +739,119 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             : $"Изменений +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
     }
 
+    private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0)
+    {
+        if (RepositoryId == 0)
+            return;
+
+        IsSnapshotHistoryLoading = true;
+
+        try
+        {
+            var history = await _mediator.Send(new GetRepositorySnapshotHistoryQuery(RepositoryId, 200));
+
+            SnapshotHistory.Clear();
+            foreach (var item in history)
+            {
+                SnapshotHistory.Add(new RepositorySnapshotHistoryEntryViewModel
+                {
+                    SnapshotId = item.SnapshotId,
+                    Title = item.Title,
+                    CreatedAtUtc = item.CreatedAtUtc,
+                    Trigger = item.Trigger,
+                    ChangedFilesCount = item.ChangedFilesCount
+                });
+            }
+
+            HasSnapshotHistory = SnapshotHistory.Count > 0;
+
+            var selected = preferredSnapshotId > 0
+                ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == preferredSnapshotId)
+                : null;
+
+            if (selected is null && SnapshotHistory.Count > 0)
+                selected = SnapshotHistory[0];
+
+            SelectedSnapshot = selected;
+
+            if (selected is null)
+            {
+                SnapshotFiles.Clear();
+                SelectedSnapshotFile = null;
+                HasSnapshotFiles = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to load snapshot history for repository {RepositoryId}", RepositoryId);
+            SnapshotHistory.Clear();
+            SnapshotFiles.Clear();
+            SelectedSnapshot = null;
+            SelectedSnapshotFile = null;
+            HasSnapshotHistory = false;
+            HasSnapshotFiles = false;
+        }
+        finally
+        {
+            IsSnapshotHistoryLoading = false;
+        }
+    }
+
+    private async Task LoadSnapshotFilesForSelectedSnapshotAsync(long? snapshotId)
+    {
+        SnapshotFiles.Clear();
+        SelectedSnapshotFile = null;
+        HasSnapshotFiles = false;
+
+        if (snapshotId is null || snapshotId <= 0 || RepositoryId == 0)
+            return;
+
+        IsSnapshotFilesLoading = true;
+
+        try
+        {
+            var files = await _mediator.Send(new GetRepositorySnapshotChangedFilesQuery(
+                RepositoryId,
+                snapshotId.Value,
+                2000));
+
+            foreach (var file in files)
+            {
+                SnapshotFiles.Add(new RepositorySnapshotFileChangeViewModel
+                {
+                    SnapshotId = file.SnapshotId,
+                    FileIdentityId = file.FileIdentityId,
+                    FileVersionId = file.FileVersionId,
+                    RelativePath = file.RelativePath,
+                    Name = file.Name,
+                    ChangeKind = file.ChangeKind,
+                    CurrentSizeBytes = file.CurrentSizeBytes,
+                    PreviousSizeBytes = file.PreviousSizeBytes
+                });
+            }
+
+            HasSnapshotFiles = SnapshotFiles.Count > 0;
+
+            if (HasSnapshotFiles)
+                SelectedSnapshotFile = SnapshotFiles[0];
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Failed to load snapshot files for repository {RepositoryId}, snapshot {SnapshotId}",
+                RepositoryId,
+                snapshotId);
+
+            SnapshotFiles.Clear();
+            SelectedSnapshotFile = null;
+            HasSnapshotFiles = false;
+        }
+        finally
+        {
+            IsSnapshotFilesLoading = false;
+        }
+    }
     private async Task RefreshEntriesAndTreeAsync(bool clearSelection)
     {
         if (RepositoryId == 0)
@@ -576,9 +859,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         var previousDirectoryPath = clearSelection ? null : _selectedDirectoryPath;
         var previousItemPath = clearSelection ? null : SelectedItem?.RelativePath;
+        var previousSnapshotId = clearSelection ? 0 : SelectedSnapshot?.SnapshotId ?? 0;
 
         _entries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(RepositoryId));
         await LoadPendingChangesAsync();
+        await LoadSnapshotHistoryAsync(previousSnapshotId);
         BuildTree();
 
         if (!string.IsNullOrWhiteSpace(previousDirectoryPath)
@@ -598,10 +883,24 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!clearSelection && !string.IsNullOrWhiteSpace(previousItemPath))
         {
-            SelectedItem = Items.FirstOrDefault(i =>
+            var restoredItem = Items.FirstOrDefault(i =>
                 i.RelativePath.Equals(previousItemPath, StringComparison.OrdinalIgnoreCase));
+
+            if (restoredItem is not null)
+            {
+                SelectedItem = restoredItem;
+            }
+            else if (SelectedSnapshotFile is not null
+                     && SelectedSnapshotFile.RelativePath.Equals(previousItemPath, StringComparison.OrdinalIgnoreCase))
+            {
+                SelectItemFromSnapshotFile(SelectedSnapshotFile);
+            }
+            else
+            {
+                SelectedItem = null;
+            }
         }
-        else
+        else if (SelectedSnapshotFile is null)
         {
             SelectedItem = null;
         }
@@ -887,6 +1186,27 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         IsEmpty = Items.Count == 0;
     }
 
+    private static string? GetParentRelativePath(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        var normalized = relativePath.Replace('\\', '/');
+        var idx = normalized.LastIndexOf('/');
+        if (idx <= 0)
+            return null;
+
+        return normalized[..idx];
+    }
+
+    private static string GuessItemType(string relativePath)
+    {
+        var ext = Path.GetExtension(relativePath);
+        if (string.IsNullOrWhiteSpace(ext))
+            return "File";
+
+        return ext.TrimStart('.').ToUpperInvariant();
+    }
     private static ExplorerItemViewModel MapToItem(RepositoryScanEntryDto entry)
     {
         var type = entry.IsDirectory
@@ -942,4 +1262,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
     }
 }
+
+
+
 

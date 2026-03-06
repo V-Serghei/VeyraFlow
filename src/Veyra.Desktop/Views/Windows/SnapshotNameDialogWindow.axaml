@@ -1,0 +1,113 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
+        x:DataType="windows:SnapshotNameDialogWindowViewModel"
+        Width="980"
+        Height="640"
+        MinWidth="860"
+        MinHeight="540"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1724"
+        Foreground="#EEEEEE"
+        Title="Create Snapshot">
+
+    <DockPanel Margin="16" LastChildFill="True">
+        <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
+            <TextBlock Text="Create snapshot" FontSize="19" FontWeight="SemiBold"/>
+            <TextBlock Text="Review changed files before commit. Diff preview is currently a placeholder with comparison metadata."
+                       Opacity="0.75"
+                       TextWrapping="Wrap"/>
+
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Text="Snapshot name" VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1"
+                         Text="{Binding SnapshotName, Mode=TwoWay}"
+                         Watermark="snimok_yyyyMMdd_HHmmss"/>
+            </Grid>
+
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="#F87171"
+                       IsVisible="{Binding HasErrorMessage}"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Grid ColumnDefinitions="380,*" ColumnSpacing="12">
+            <Border Grid.Column="0"
+                    Background="#132033"
+                    BorderBrush="#22354A"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Changed files" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="No changed files detected."
+                               Opacity="0.7"
+                               IsVisible="{Binding HasNoChangedFiles}"/>
+
+                    <ListBox ItemsSource="{Binding ChangedFiles}"
+                             SelectedItem="{Binding SelectedChangedFile, Mode=TwoWay}"
+                             IsVisible="{Binding HasChangedFiles}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="windows:SnapshotPendingFileItemViewModel">
+                                <Border Background="#0F1722" CornerRadius="8" Padding="8" Margin="0,0,0,6">
+                                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                   Text="{Binding RelativePath}"
+                                                   Opacity="0.65"
+                                                   FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Background="#132033"
+                    BorderBrush="#22354A"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Selected file" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Text="{Binding SelectedChangedFileTitle}" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding SelectedChangedFilePath}" Opacity="0.72" TextWrapping="Wrap"/>
+
+                    <Border Height="1" Background="#22354A" Margin="0,4"/>
+
+                    <TextBlock Text="Comparison summary" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding SelectedChangedFileHint}" TextWrapping="Wrap"/>
+
+                    <TextBlock Text="Diff preview" FontWeight="SemiBold" Margin="0,6,0,0"/>
+                    <TextBox Text="{Binding SelectedChangedFilePreview}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             Height="220"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8"
+                    Margin="0,12,0,0">
+            <Button Content="Cancel" Width="120" Command="{Binding CancelCommand}"/>
+            <Button Content="Save Snapshot"
+                    Width="140"
+                    Command="{Binding SaveCommand}"
+                    IsEnabled="{Binding CanSave}"/>
+        </StackPanel>
+    </DockPanel>
+</Window>

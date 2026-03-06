@@ -18,6 +18,7 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime scannedAtUtc,
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
         bool saveFileVersions = true,
+        string? snapshotTitle = null,
         CancellationToken ct = default)
     {
         db.ChangeTracker.Clear();
@@ -71,6 +72,7 @@ public sealed class EfRepositorySnapshotRepository(
         {
             RepositoryId = repositoryId,
             Trigger = safeTrigger,
+            Title = NormalizeSnapshotTitle(snapshotTitle),
             CreatedAt = scannedAtUtc,
             TotalEntries = totalEntries,
             FileEntries = fileEntries,
@@ -524,6 +526,171 @@ public sealed class EfRepositorySnapshotRepository(
             ordered);
     }
 
+    public async Task<IReadOnlyList<RepositorySnapshotHistoryItemDto>> GetSnapshotHistoryAsync(
+        int repositoryId,
+        int take = 100,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0)
+            return Array.Empty<RepositorySnapshotHistoryItemDto>();
+
+        var limit = Math.Clamp(take, 1, 500);
+
+        var snapshots = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Take(limit + 1)
+            .Select(s => new SnapshotLight(
+                s.Id,
+                s.Title,
+                s.CreatedAt,
+                s.Trigger))
+            .ToListAsync(ct);
+
+        if (snapshots.Count == 0)
+            return Array.Empty<RepositorySnapshotHistoryItemDto>();
+
+        var snapshotIds = snapshots.Select(s => s.SnapshotId).ToList();
+
+        var linkRows = await db.Set<SnapshotFileLink>()
+            .Where(l => snapshotIds.Contains(l.SnapshotId))
+            .Select(l => new SnapshotLinkState(
+                l.SnapshotId,
+                l.FileIdentityId,
+                l.FileVersionId,
+                l.FileVersion != null && l.FileVersion.IsDeletionMarker,
+                l.FileVersion != null ? l.FileVersion.SizeBytes : 0,
+                l.FileVersion != null ? l.FileVersion.CreatedAt : DateTime.MinValue,
+                l.FileIdentity.RelativePath,
+                l.FileIdentity.Name))
+            .ToListAsync(ct);
+
+        var statesBySnapshot = linkRows
+            .GroupBy(l => l.SnapshotId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyDictionary<long, SnapshotLinkState>)g.ToDictionary(x => x.FileIdentityId));
+
+        var result = new List<RepositorySnapshotHistoryItemDto>(Math.Min(limit, snapshots.Count));
+
+        for (var i = 0; i < snapshots.Count && result.Count < limit; i++)
+        {
+            var current = snapshots[i];
+            var previous = i + 1 < snapshots.Count ? snapshots[i + 1] : null;
+
+            var currentStates = statesBySnapshot.GetValueOrDefault(current.SnapshotId, EmptyLinkStateMap);
+            var previousStates = previous is null
+                ? EmptyLinkStateMap
+                : statesBySnapshot.GetValueOrDefault(previous.SnapshotId, EmptyLinkStateMap);
+
+            var changedFilesCount = CountChangedFiles(currentStates, previousStates);
+
+            result.Add(new RepositorySnapshotHistoryItemDto(
+                current.SnapshotId,
+                current.Title,
+                current.CreatedAtUtc,
+                current.Trigger,
+                changedFilesCount));
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<RepositorySnapshotFileChangeDto>> GetSnapshotChangedFilesAsync(
+        int repositoryId,
+        long snapshotId,
+        int take = 1000,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0 || snapshotId <= 0)
+            return Array.Empty<RepositorySnapshotFileChangeDto>();
+
+        var limit = Math.Clamp(take, 1, 5000);
+
+        var versionedSnapshotIds = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        var index = versionedSnapshotIds.FindIndex(id => id == snapshotId);
+        if (index < 0)
+            return Array.Empty<RepositorySnapshotFileChangeDto>();
+
+        var previousSnapshotId = index + 1 < versionedSnapshotIds.Count
+            ? versionedSnapshotIds[index + 1]
+            : 0;
+
+        var currentRows = await db.Set<SnapshotFileLink>()
+            .Where(l => l.SnapshotId == snapshotId)
+            .Select(l => new SnapshotLinkState(
+                l.SnapshotId,
+                l.FileIdentityId,
+                l.FileVersionId,
+                l.FileVersion != null && l.FileVersion.IsDeletionMarker,
+                l.FileVersion != null ? l.FileVersion.SizeBytes : 0,
+                l.FileVersion != null ? l.FileVersion.CreatedAt : DateTime.MinValue,
+                l.FileIdentity.RelativePath,
+                l.FileIdentity.Name))
+            .ToListAsync(ct);
+
+        var previousRows = previousSnapshotId == 0
+            ? []
+            : await db.Set<SnapshotFileLink>()
+                .Where(l => l.SnapshotId == previousSnapshotId)
+                .Select(l => new SnapshotLinkState(
+                    l.SnapshotId,
+                    l.FileIdentityId,
+                    l.FileVersionId,
+                    l.FileVersion != null && l.FileVersion.IsDeletionMarker,
+                    l.FileVersion != null ? l.FileVersion.SizeBytes : 0,
+                    l.FileVersion != null ? l.FileVersion.CreatedAt : DateTime.MinValue,
+                    l.FileIdentity.RelativePath,
+                    l.FileIdentity.Name))
+                .ToListAsync(ct);
+
+        var previousByIdentity = previousRows.ToDictionary(x => x.FileIdentityId);
+
+        var changes = new List<RepositorySnapshotFileChangeDto>();
+
+        foreach (var current in currentRows.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            previousByIdentity.TryGetValue(current.FileIdentityId, out var previous);
+
+            if (previous is not null && current.FileVersionId == previous.FileVersionId)
+                continue;
+
+            var kind = ResolveChangeKind(current, previous);
+            var previousSize = previous?.SizeBytes ?? 0;
+
+            changes.Add(new RepositorySnapshotFileChangeDto(
+                snapshotId,
+                current.FileIdentityId,
+                current.FileVersionId,
+                current.RelativePath,
+                current.Name,
+                kind,
+                current.SizeBytes,
+                previousSize,
+                current.VersionCreatedAtUtc));
+        }
+
+        return changes
+            .OrderBy(c => c.ChangeKind switch
+            {
+                "added" => 0,
+                "modified" => 1,
+                "deleted" => 2,
+                _ => 9
+            })
+            .ThenBy(c => c.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToList();
+    }
     public async Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
         long fileVersionId,
         CancellationToken ct = default)
@@ -556,6 +723,49 @@ public sealed class EfRepositorySnapshotRepository(
             blocks);
     }
 
+    private static readonly IReadOnlyDictionary<long, SnapshotLinkState> EmptyLinkStateMap =
+        new Dictionary<long, SnapshotLinkState>();
+
+    private static string? NormalizeSnapshotTitle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var title = value.Trim();
+        if (title.Length <= 256)
+            return title;
+
+        return title[..256];
+    }
+
+    private static int CountChangedFiles(
+        IReadOnlyDictionary<long, SnapshotLinkState> current,
+        IReadOnlyDictionary<long, SnapshotLinkState> previous)
+    {
+        var changed = 0;
+
+        foreach (var state in current.Values)
+        {
+            if (!previous.TryGetValue(state.FileIdentityId, out var previousState)
+                || previousState.FileVersionId != state.FileVersionId)
+            {
+                changed++;
+            }
+        }
+
+        return changed;
+    }
+
+    private static string ResolveChangeKind(SnapshotLinkState current, SnapshotLinkState? previous)
+    {
+        if (current.IsDeletionMarker)
+            return "deleted";
+
+        if (previous is null || previous.IsDeletionMarker)
+            return "added";
+
+        return "modified";
+    }
     private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/');
 
@@ -593,6 +803,21 @@ public sealed class EfRepositorySnapshotRepository(
         }
     }
 
+    private sealed record SnapshotLight(
+        long SnapshotId,
+        string? Title,
+        DateTime CreatedAtUtc,
+        string Trigger);
+
+    private sealed record SnapshotLinkState(
+        long SnapshotId,
+        long FileIdentityId,
+        long FileVersionId,
+        bool IsDeletionMarker,
+        long SizeBytes,
+        DateTime VersionCreatedAtUtc,
+        string RelativePath,
+        string Name);
     private sealed record SnapshotEntryLight(
         string RelativePath,
         string Name,
@@ -600,3 +825,5 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+

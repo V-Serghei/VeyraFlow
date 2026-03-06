@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 
@@ -161,6 +161,7 @@ public class VeyraDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Trigger).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Title).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasOne(e => e.Repository)
                 .WithMany(r => r.Snapshots)
@@ -196,3 +197,4 @@ public class VeyraDbContext : DbContext
         });
     }
 }
+
