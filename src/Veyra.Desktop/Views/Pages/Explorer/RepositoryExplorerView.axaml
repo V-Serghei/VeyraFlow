@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:explorer="clr-namespace:Veyra.Desktop.ViewModels.Pages.Explorer"
@@ -15,20 +15,52 @@
                 <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="{Binding RepositoryName}" FontSize="20" FontWeight="SemiBold"/>
                     <TextBlock Text="{Binding RepositoryPath}" Opacity="0.7" FontSize="12" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="Live sync включен"
+                               Opacity="0.7"
+                               FontSize="11"
+                               IsVisible="{Binding IsLiveSyncActive}"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Синхронизировать" Command="{Binding RescanCommand}"/>
+                    <Button Content="Синхронизировать"
+                            Command="{Binding RescanCommand}"
+                            IsEnabled="{Binding CanRunScanActions}"/>
+                    <Button Content="Снимок версии"
+                            Command="{Binding CreateSnapshotCommand}"
+                            IsEnabled="{Binding CanRunScanActions}"/>
                     <Button Content="Настройки" Command="{Binding OpenSettingsCommand}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
-                   Text="{Binding ErrorMessage}" Foreground="#F87171"
-                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        <Border DockPanel.Dock="Top"
+                Background="#131820"
+                BorderBrush="#1F2937"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="12"
+                Margin="0,0,0,10"
+                IsVisible="{Binding IsScanRunning}">
+            <Grid ColumnDefinitions="*,100,40" ColumnSpacing="10" VerticalAlignment="Center">
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="{Binding ScanMessage}" FontWeight="SemiBold"/>
+                    <ProgressBar Minimum="0" Maximum="100" Value="{Binding ScanPercent}" Height="8" IsIndeterminate="{Binding ScanIsIndeterminate}"/>
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding ScanPercent, StringFormat='{}{0}%'}"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Right"
+                           FontWeight="SemiBold"/>
+            </Grid>
+        </Border>
 
-        <Grid ColumnDefinitions="260,*,340" ColumnSpacing="12">
+        <TextBlock DockPanel.Dock="Top"
+                   Margin="0,0,0,8"
+                   Text="{Binding ErrorMessage}"
+                   Foreground="#F87171"
+                   IsVisible="{Binding HasErrorMessage}"/>
+
+        <Grid ColumnDefinitions="260,*,360" ColumnSpacing="12">
             <Border Grid.Column="0" Background="#121212" CornerRadius="10" Padding="12">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="Структура папок" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
@@ -83,7 +115,37 @@
             <Border Grid.Column="2" Background="#121212" CornerRadius="10" Padding="12">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Детали" FontSize="13" FontWeight="SemiBold"/>
+                        <TextBlock Text="Текущие изменения" FontSize="13" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding LastSnapshotLabel}" Opacity="0.75"/>
+                        <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.85" TextWrapping="Wrap"/>
+
+                        <ListBox ItemsSource="{Binding PendingChanges}" MaxHeight="220" IsVisible="{Binding HasPendingChanges}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="explorer:RepositoryPendingChangeViewModel">
+                                    <Border Background="#161616" CornerRadius="8" Padding="8" Margin="0,0,0,6">
+                                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
+                                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                                       Text="{Binding ChangeKindLabel}"
+                                                       Foreground="{Binding ChangeKindColor}"
+                                                       FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                       Text="{Binding RelativePath}"
+                                                       Opacity="0.65"
+                                                       FontSize="11"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <TextBlock Text="Нет изменений для фиксации" Opacity="0.7" IsVisible="{Binding HasNoPendingChanges}"/>
+
+                        <Border Height="1" Background="#1E1E1E" Margin="0,4"/>
+
+                        <TextBlock Text="Детали файла" FontSize="13" FontWeight="SemiBold"/>
 
                         <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
                             <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
@@ -111,21 +173,37 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
+                            <TextBlock Text="Для выбранной версии нет блоков содержимого. Восстановление и diff недоступны."
+                                       Foreground="#FBBF24"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                <Button Content="В новый файл" Command="{Binding RestoreVersionAsCopyCommand}"/>
-                                <Button Content="Поверх текущего" Command="{Binding RestoreVersionOverwriteCommand}"/>
+                                <Button Content="В новый файл"
+                                        Command="{Binding RestoreVersionAsCopyCommand}"
+                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                                <Button Content="Поверх текущего"
+                                        Command="{Binding RestoreVersionOverwriteCommand}"
+                                        IsEnabled="{Binding CanRestoreSelectedVersion}"/>
                             </StackPanel>
 
-                            <Button Content="Diff с предыдущей" Command="{Binding CompareSelectedWithPreviousCommand}"/>
+                            <Button Content="Diff с предыдущей"
+                                    Command="{Binding CompareSelectedWithPreviousCommand}"
+                                    IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
 
-                            <TextBlock Text="{Binding VersionActionMessage}" TextWrapping="Wrap" Opacity="0.9"
-                                       IsVisible="{Binding VersionActionMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            <TextBlock Text="{Binding VersionActionMessage}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.9"
+                                       IsVisible="{Binding HasVersionActionMessage}"/>
 
-                            <TextBox Text="{Binding DiffPreview}" AcceptsReturn="True" IsReadOnly="True" Height="220"
-                                     IsVisible="{Binding DiffPreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            <TextBox Text="{Binding DiffPreview}"
+                                     AcceptsReturn="True"
+                                     IsReadOnly="True"
+                                     Height="220"
+                                     IsVisible="{Binding HasDiffPreview}"/>
                         </StackPanel>
 
-                        <StackPanel IsVisible="{Binding !HasSelectedItem}" Spacing="6">
+                        <StackPanel IsVisible="{Binding HasNoSelectedItem}" Spacing="6">
                             <TextBlock Text="Выберите файл или папку" Opacity="0.75"/>
                         </StackPanel>
                     </StackPanel>
@@ -134,3 +212,4 @@
         </Grid>
     </DockPanel>
 </UserControl>
+

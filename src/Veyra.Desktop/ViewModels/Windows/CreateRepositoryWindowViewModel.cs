@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -53,7 +53,10 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isCompleted;
-    [ObservableProperty] private string? _errorMessage;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
+    private string? _errorMessage;
 
     [ObservableProperty] private string _repositoryName = string.Empty;
     [ObservableProperty] private string? _description;
@@ -62,8 +65,19 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     [ObservableProperty] private int _progressPercent;
     [ObservableProperty] private string _progressMessage = "Ожидание запуска";
-    [ObservableProperty] private int _filesProcessed;
-    [ObservableProperty] private int _filesTotal;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
+    private int _filesProcessed;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
+    private int _filesTotal;
+
+    [ObservableProperty] private bool _isProgressIndeterminate;
+
+    public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
+    public string FilesProgressLabel => FilesTotal > 0 ? $"{FilesProcessed} / {FilesTotal}" : FilesProcessed.ToString();
 
     public ObservableCollection<RepositoryFormatOptionViewModel> Formats { get; } = [];
 
@@ -110,7 +124,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         get
         {
             if (IsStepScan)
-                return IsCompleted ? "Готово" : "Закрыть";
+                return IsCompleted ? "Готово" : "Выполняется...";
 
             return "Далее";
         }
@@ -134,7 +148,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         if (IsStepFormats)
             return SelectedFormats.Any();
 
-        return true;
+        return IsCompleted;
     }
 
     partial void OnRepositoryNameChanged(string value) => RefreshCommands();
@@ -240,31 +254,40 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             ProgressMessage = "Запуск процесса";
             FilesProcessed = 0;
             FilesTotal = 0;
+            IsProgressIndeterminate = true;
+            await Task.Yield();
 
             var progress = new Progress<RepositoryCreationProgressDto>(p =>
             {
-                ProgressPercent = Math.Clamp(p.Percent, 0, 100);
+                var nextPercent = Math.Clamp(p.Percent, 0, 100);
+                if (nextPercent < ProgressPercent)
+                    nextPercent = ProgressPercent;
+
+                ProgressPercent = nextPercent;
                 ProgressMessage = p.Message;
                 FilesProcessed = p.FilesProcessed;
                 FilesTotal = p.FilesTotal;
+                IsProgressIndeterminate = p.FilesTotal <= 0 && p.Percent < 100;
             });
 
-            var result = await _mediator.Send(new CreateRepositoryWithFormatsCommand(
+            var result = await Task.Run(() => _mediator.Send(new CreateRepositoryWithFormatsCommand(
                 RepositoryName,
                 Description,
                 DirectoryPath,
                 SelectedFormats.ToList(),
-                progress));
+                progress)));
 
             if (!result.Success)
             {
                 ErrorMessage = result.Error ?? "Не удалось создать репозиторий.";
                 ProgressMessage = "Ошибка создания";
+                IsProgressIndeterminate = false;
                 return;
             }
 
             ProgressPercent = 100;
             ProgressMessage = "Репозиторий успешно создан";
+            IsProgressIndeterminate = false;
             IsCompleted = true;
             RefreshCommands();
         }
@@ -273,10 +296,12 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             _log.LogError(ex, "Failed to create repository in wizard");
             ErrorMessage = "Не удалось завершить создание репозитория.";
             ProgressMessage = "Ошибка создания";
+            IsProgressIndeterminate = false;
         }
         finally
         {
             IsBusy = false;
+            IsProgressIndeterminate = false;
             RefreshCommands();
         }
     }
@@ -326,3 +351,4 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
     }
 }
+

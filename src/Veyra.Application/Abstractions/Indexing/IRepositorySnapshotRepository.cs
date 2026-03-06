@@ -9,6 +9,7 @@ public interface IRepositorySnapshotRepository
         string trigger,
         DateTime scannedAtUtc,
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
+        bool saveFileVersions = true,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
@@ -19,6 +20,11 @@ public interface IRepositorySnapshotRepository
         int repositoryId,
         string relativePath,
         int take = 50,
+        CancellationToken ct = default);
+
+    Task<RepositoryPendingChangesDto> GetPendingChangesAsync(
+        int repositoryId,
+        int take = 200,
         CancellationToken ct = default);
 
     Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(

@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,9 @@ public sealed class RustFileContentStore(
     IConfiguration configuration,
     ILogger<RustFileContentStore> log) : IFileContentStore
 {
+    private const int DefaultChunkSize = 64 * 1024;
+    private const string ManagedHashPrefix = "sha256-";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -19,7 +23,7 @@ public sealed class RustFileContentStore(
 
     private readonly string _storeRoot = ResolveStoreRoot(configuration);
 
-    public Task<StoredFileContentDto> StoreFileAsync(string filePath, CancellationToken ct = default)
+    public async Task<StoredFileContentDto> StoreFileAsync(string filePath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -27,37 +31,49 @@ public sealed class RustFileContentStore(
             throw new ArgumentException("File path is required.", nameof(filePath));
 
         var fullPath = Path.GetFullPath(filePath);
-        var json = VeyraCoreNative.StoreFileBlocksJson(fullPath, _storeRoot, 64 * 1024);
 
-        var payload = JsonSerializer.Deserialize<StorePayload>(json, JsonOptions)
-                      ?? throw new InvalidOperationException("Native block-store returned empty payload.");
+        try
+        {
+            var json = VeyraCoreNative.StoreFileBlocksJson(fullPath, _storeRoot, DefaultChunkSize);
 
-        var blocks = payload.Blocks
-            .OrderBy(b => b.Sequence)
-            .Select(b => new StoredFileBlockDto(
-                b.Sequence,
-                b.BlockHashBlake3,
-                b.LengthBytes,
-                b.StoredSizeBytes))
-            .ToList();
+            var payload = JsonSerializer.Deserialize<StorePayload>(json, JsonOptions)
+                          ?? throw new InvalidOperationException("Native block-store returned empty payload.");
 
-        log.LogInformation(
-            "Stored file in block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
-            fullPath,
-            payload.BlockCount,
-            payload.DedupedBlocks,
-            payload.NewBlocks);
+            var blocks = payload.Blocks
+                .OrderBy(b => b.Sequence)
+                .Select(b => new StoredFileBlockDto(
+                    b.Sequence,
+                    b.BlockHashBlake3,
+                    b.LengthBytes,
+                    b.StoredSizeBytes))
+                .ToList();
 
-        return Task.FromResult(new StoredFileContentDto(
-            payload.FileSizeBytes,
-            payload.StoredSizeBytes,
-            payload.BlockCount,
-            payload.DedupedBlocks,
-            payload.NewBlocks,
-            blocks));
+            log.LogInformation(
+                "Stored file in native block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
+                fullPath,
+                payload.BlockCount,
+                payload.DedupedBlocks,
+                payload.NewBlocks);
+
+            return new StoredFileContentDto(
+                payload.FileSizeBytes,
+                payload.StoredSizeBytes,
+                payload.BlockCount,
+                payload.DedupedBlocks,
+                payload.NewBlocks,
+                blocks);
+        }
+        catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
+        {
+            log.LogWarning(ex,
+                "Native block-store entrypoints are unavailable. Falling back to managed block-store for {Path}",
+                fullPath);
+
+            return await StoreFileManagedAsync(fullPath, ct);
+        }
     }
 
-    public Task<long> RestoreFileAsync(
+    public async Task<long> RestoreFileAsync(
         IReadOnlyList<StoredFileBlockDto> blocks,
         string targetPath,
         bool overwriteExisting,
@@ -65,33 +81,250 @@ public sealed class RustFileContentStore(
     {
         ct.ThrowIfCancellationRequested();
 
-        if (blocks.Count == 0)
-            throw new InvalidOperationException("No blocks provided for restore.");
-
         if (string.IsNullOrWhiteSpace(targetPath))
             throw new ArgumentException("Target path is required.", nameof(targetPath));
 
         var fullTarget = Path.GetFullPath(targetPath);
+        if (blocks.Count == 0)
+            return await CreateEmptyFileAsync(fullTarget, overwriteExisting, ct);
 
-        var payload = blocks
-            .OrderBy(b => b.Sequence)
-            .Select(b => new RestoreBlockPayload
-            {
-                BlockHashBlake3 = b.BlockHashBlake3,
-                LengthBytes = b.LengthBytes
-            })
-            .ToList();
+        try
+        {
+            var payload = blocks
+                .OrderBy(b => b.Sequence)
+                .Select(b => new RestoreBlockPayload
+                {
+                    BlockHashBlake3 = b.BlockHashBlake3,
+                    LengthBytes = b.LengthBytes
+                })
+                .ToList();
 
-        var json = JsonSerializer.Serialize(payload);
-        var written = VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
+            var json = JsonSerializer.Serialize(payload);
+            var written = VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
+
+            log.LogInformation(
+                "Restored file from native block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
+                fullTarget,
+                written,
+                blocks.Count);
+
+            return written;
+        }
+        catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
+        {
+            log.LogWarning(ex,
+                "Native block restore entrypoints are unavailable. Falling back to managed block restore for {Target}",
+                fullTarget);
+
+            return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+        }
+    }
+
+    private async Task<long> CreateEmptyFileAsync(string fullTarget, bool overwriteExisting, CancellationToken ct)
+    {
+        if (File.Exists(fullTarget) && !overwriteExisting)
+            throw new IOException($"Target file already exists {fullTarget}");
+
+        var dir = Path.GetDirectoryName(fullTarget);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        await using var stream = new FileStream(
+            fullTarget,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 1,
+            useAsync: true);
+
+        await stream.FlushAsync(ct);
 
         log.LogInformation(
-            "Restored file from block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
+            "Restored empty file version. Target {Target}. Bytes 0. Blocks 0",
+            fullTarget);
+
+        return 0;
+    }
+
+    private async Task<StoredFileContentDto> StoreFileManagedAsync(string fullPath, CancellationToken ct)
+    {
+        var blocks = new List<StoredFileBlockDto>();
+
+        var fileSizeBytes = 0L;
+        var storedSizeBytes = 0L;
+        var dedupedBlocks = 0;
+        var newBlocks = 0;
+        var sequence = 0;
+
+        await using var stream = new FileStream(
+            fullPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: DefaultChunkSize,
+            useAsync: true);
+
+        var buffer = new byte[DefaultChunkSize];
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+            if (read == 0)
+                break;
+
+            fileSizeBytes += read;
+
+            var hash = ComputeSha256(buffer.AsSpan(0, read));
+            var blockHash = ManagedHashPrefix + hash;
+            var blockPath = GetManagedBlockPath(hash);
+
+            var created = false;
+            if (!File.Exists(blockPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(blockPath)!);
+
+                    await using var outStream = new FileStream(
+                        blockPath,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        bufferSize: DefaultChunkSize,
+                        useAsync: true);
+
+                    await outStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                    created = true;
+                    newBlocks++;
+                    storedSizeBytes += read;
+                }
+                catch (IOException)
+                {
+                    dedupedBlocks++;
+                }
+            }
+            else
+            {
+                dedupedBlocks++;
+            }
+
+            blocks.Add(new StoredFileBlockDto(
+                sequence,
+                blockHash,
+                read,
+                created ? read : 0));
+
+            sequence++;
+        }
+
+        log.LogInformation(
+            "Stored file in managed block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
+            fullPath,
+            blocks.Count,
+            dedupedBlocks,
+            newBlocks);
+
+        return new StoredFileContentDto(
+            fileSizeBytes,
+            storedSizeBytes,
+            blocks.Count,
+            dedupedBlocks,
+            newBlocks,
+            blocks);
+    }
+
+    private async Task<long> RestoreFileManagedAsync(
+        IReadOnlyList<StoredFileBlockDto> blocks,
+        string fullTarget,
+        bool overwriteExisting,
+        CancellationToken ct)
+    {
+        if (File.Exists(fullTarget) && !overwriteExisting)
+            throw new IOException($"Target file already exists {fullTarget}");
+
+        var dir = Path.GetDirectoryName(fullTarget);
+        if (!string.IsNullOrWhiteSpace(dir))
+            Directory.CreateDirectory(dir);
+
+        await using var outStream = new FileStream(
             fullTarget,
-            written,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: DefaultChunkSize,
+            useAsync: true);
+
+        var totalWritten = 0L;
+        var buffer = new byte[DefaultChunkSize];
+
+        foreach (var block in blocks.OrderBy(b => b.Sequence))
+        {
+            if (!block.BlockHashBlake3.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Managed fallback cannot restore native block hash {block.BlockHashBlake3}. Rebuild native veyra_core with block entrypoints.");
+
+            var hash = block.BlockHashBlake3[ManagedHashPrefix.Length..];
+            var blockPath = GetManagedBlockPath(hash);
+
+            if (!File.Exists(blockPath))
+                throw new FileNotFoundException("Block file not found for restore.", blockPath);
+
+            await using var inStream = new FileStream(
+                blockPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: DefaultChunkSize,
+                useAsync: true);
+
+            var remaining = block.LengthBytes;
+            while (remaining > 0)
+            {
+                var read = await inStream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), ct);
+                if (read == 0)
+                    throw new InvalidOperationException($"Block {block.BlockHashBlake3} is shorter than expected.");
+
+                await outStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                totalWritten += read;
+                remaining -= read;
+            }
+        }
+
+        log.LogInformation(
+            "Restored file from managed block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
+            fullTarget,
+            totalWritten,
             blocks.Count);
 
-        return Task.FromResult(written);
+        return totalWritten;
+    }
+
+    private static bool IsNativeBlocksUnavailable(Exception ex)
+    {
+        if (ex is EntryPointNotFoundException or DllNotFoundException or BadImageFormatException)
+            return true;
+
+        if (ex is InvalidOperationException ioe)
+        {
+            return ioe.Message.Contains("entry point", StringComparison.OrdinalIgnoreCase)
+                   || ioe.Message.Contains("Native block", StringComparison.OrdinalIgnoreCase)
+                   || ioe.Message.Contains("Unable to load DLL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string ComputeSha256(ReadOnlySpan<byte> data)
+        => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    private string GetManagedBlockPath(string hash)
+    {
+        var normalized = hash.Trim().ToLowerInvariant();
+
+        var p1 = normalized.Length >= 2 ? normalized[..2] : "00";
+        var p2 = normalized.Length >= 4 ? normalized[2..4] : "00";
+
+        return Path.Combine(_storeRoot, "managed", "blocks", p1, p2, $"{normalized}.bin");
     }
 
     private static string ResolveStoreRoot(IConfiguration cfg)

@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
@@ -21,7 +21,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
         {
             var path = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                return OperationResult<int>.Fail("Невалидная директория репозитория.");
+                return OperationResult<int>.Fail("Указанная директория не существует.");
 
             var name = string.IsNullOrWhiteSpace(request.Name)
                 ? Path.GetFileName(path.TrimEnd('\\', '/'))
@@ -29,7 +29,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             var formats = NormalizeFormats(request.Formats);
             if (formats.Count == 0)
-                return OperationResult<int>.Fail("Выберите хотя бы один формат.");
+                return OperationResult<int>.Fail("Не выбран ни один формат.");
 
             log.LogInformation(
                 "Creating repository. Name {Name}. Path {Path}. Formats {FormatCount}",
@@ -57,10 +57,10 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "formats",
-                20,
+                10,
                 0,
                 0,
-                "Применение форматов"));
+                "Привязка форматов"));
 
             var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
             var missingGlobal = formats
@@ -88,29 +88,43 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "scan",
-                40,
+                12,
                 0,
                 0,
-                "Сканирование файлов"));
+                "Сканирование директории"));
+
+            var reportedPercent = 12;
 
             var scanProgress = new Progress<RepositoryScanProgressDto>(p =>
             {
+                var mapped = Math.Clamp(p.Percent, 0, 100);
+                if (mapped < reportedPercent)
+                    mapped = reportedPercent;
+
+                reportedPercent = mapped;
+
                 request.Progress?.Report(new RepositoryCreationProgressDto(
                     p.Stage,
-                    Math.Max(40, p.Percent),
+                    mapped,
                     p.FilesProcessed,
                     p.FilesTotal,
                     p.Message));
             });
 
-            await scanner.ScanRepositoryAsync(repo.Id, scanProgress, null, ct);
+            await scanner.ScanRepositoryAsync(
+                repo.Id,
+                scanProgress,
+                new RepositoryScanOptionsDto(
+                    SaveFileVersions: false,
+                    TriggerOverride: "sync_index_initial"),
+                ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
-                95,
+                Math.Max(reportedPercent, 99),
                 0,
                 0,
-                "Синхронизация локальной конфигурации"));
+                "Применение системной конфигурации"));
 
             await native.ApplySetupAsync(ct);
 

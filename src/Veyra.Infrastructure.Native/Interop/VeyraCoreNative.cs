@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -121,31 +122,43 @@ internal static class VeyraCoreNative
 
         return status;
     }
-
     private static string ReadJsonResult(NativeUtf8Writer invoker, string errorPrefix)
     {
-        var status = invoker(null, 0, out var needed);
-        if (status != 0)
-            throw new InvalidOperationException($"{errorPrefix} {GetLastError()}".Trim());
+        const int initialBufferSize = 8 * 1024 * 1024;
+        var buffer = ArrayPool<byte>.Shared.Rent(initialBufferSize);
 
-        if (needed == 0)
-            return "[]";
+        try
+        {
+            while (true)
+            {
+                var status = invoker(buffer, (ulong)buffer.Length, out var written);
 
-        if (needed > int.MaxValue)
-            throw new InvalidOperationException($"{errorPrefix}. Native result is too large.");
+                if (status == 0)
+                {
+                    if (written == 0)
+                        return "[]";
 
-        var buffer = new byte[(int)needed];
-        status = invoker(buffer, (ulong)buffer.Length, out var written);
+                    if (written > (ulong)buffer.Length || written > int.MaxValue)
+                        throw new InvalidOperationException($"{errorPrefix}. Native returned invalid length.");
 
-        if (status != 0)
-            throw new InvalidOperationException($"{errorPrefix} {GetLastError()}".Trim());
+                    return Encoding.UTF8.GetString(buffer, 0, (int)written);
+                }
 
-        if (written > (ulong)buffer.Length)
-            throw new InvalidOperationException($"{errorPrefix}. Native returned invalid length.");
+                if (written > (ulong)buffer.Length && written <= int.MaxValue)
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = ArrayPool<byte>.Shared.Rent((int)written);
+                    continue;
+                }
 
-        return Encoding.UTF8.GetString(buffer, 0, (int)written);
+                throw new InvalidOperationException($"{errorPrefix} {GetLastError()}".Trim());
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
-
     private static string BuildExtensionsCsv(IReadOnlyCollection<string> extensions)
     {
         if (extensions.Count == 0)

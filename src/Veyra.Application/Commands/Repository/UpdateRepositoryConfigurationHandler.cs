@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Results;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Commands.Repository;
 
@@ -26,11 +27,11 @@ public sealed class UpdateRepositoryConfigurationHandler(
 
             var normalizedPath = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(normalizedPath) || !Directory.Exists(normalizedPath))
-                return OperationResult.Fail("Невалидная директория репозитория.");
+                return OperationResult.Fail("Указанная директория не существует.");
 
             var normalizedFormats = NormalizeFormats(request.Formats);
             if (normalizedFormats.Count == 0)
-                return OperationResult.Fail("Выберите хотя бы один формат.");
+                return OperationResult.Fail("Не выбран ни один формат.");
 
             var safeName = string.IsNullOrWhiteSpace(request.Name)
                 ? repo.Name
@@ -65,7 +66,14 @@ public sealed class UpdateRepositoryConfigurationHandler(
             if (toLink.Count > 0)
                 await setup.LinkDirectoryToFormatsAsync(normalizedPath, toLink, ct);
 
-            await scanner.ScanRepositoryAsync(repo.Id, null, null, ct);
+            await scanner.ScanRepositoryAsync(
+                repo.Id,
+                null,
+                new RepositoryScanOptionsDto(
+                    SaveFileVersions: false,
+                    TriggerOverride: "sync_index_config_update"),
+                ct);
+
             await native.ApplySetupAsync(ct);
 
             log.LogInformation(
@@ -112,4 +120,3 @@ public sealed class UpdateRepositoryConfigurationHandler(
             .ToList();
     }
 }
-

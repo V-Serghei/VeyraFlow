@@ -1,8 +1,9 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Results;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Commands.Repository;
 
@@ -29,7 +30,14 @@ public sealed class CreateRepositoryHandler(
                 if (!string.IsNullOrWhiteSpace(request.Name))
                     await repo.UpdateRepositoryAsync(match.Id, request.Name, request.Description, ct);
 
-                await scanner.ScanRepositoryAsync(match.Id, null, null, ct);
+                await scanner.ScanRepositoryAsync(
+                    match.Id,
+                    null,
+                    new RepositoryScanOptionsDto(
+                        SaveFileVersions: false,
+                        TriggerOverride: "sync_index_setup"),
+                    ct);
+
                 log.LogInformation("Repository ensured for {Path}: Id={Id}", request.DirectoryPath, match.Id);
                 return OperationResult<int>.Ok(match.Id);
             }
@@ -43,5 +51,4 @@ public sealed class CreateRepositoryHandler(
         }
     }
 }
-
 

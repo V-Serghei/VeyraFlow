@@ -149,7 +149,8 @@ public sealed class SnapshotSchedulerService(
                     new RepositoryScanOptionsDto(
                         IsScheduled: true,
                         MaxReadBytesPerSecond: Math.Max(0, options.MaxReadBytesPerSecond),
-                        MaxIoOperationsPerSecond: Math.Max(0, options.MaxIoOperationsPerSecond)),
+                        MaxIoOperationsPerSecond: Math.Max(0, options.MaxIoOperationsPerSecond),
+                        SaveFileVersions: false),
                     ct);
 
                 return;
@@ -196,4 +197,7 @@ public sealed class SnapshotSchedulerService(
         return hour >= start || hour < end;
     }
 }
+
+
+
 

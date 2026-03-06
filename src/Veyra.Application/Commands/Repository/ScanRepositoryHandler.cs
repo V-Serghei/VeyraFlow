@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Results;
@@ -17,7 +17,7 @@ public sealed class ScanRepositoryHandler(
         {
             log.LogInformation("Manual scan requested for repository {RepositoryId}", request.RepositoryId);
 
-            var result = await scanner.ScanRepositoryAsync(request.RepositoryId, request.Progress, null, ct);
+            var result = await scanner.ScanRepositoryAsync(request.RepositoryId, request.Progress, request.Options, ct);
 
             log.LogInformation(
                 "Manual scan finished for repository {RepositoryId}. Files {Files}. Entries {Entries}. Trigger {Trigger}",

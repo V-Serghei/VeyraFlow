@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
@@ -35,7 +35,7 @@ public sealed class RestoreFileVersionHandler(
             if (restoreData.IsDeletionMarker)
                 return OperationResult<string>.Fail("Эта версия помечена как удаление и не содержит данных для восстановления.");
 
-            if (restoreData.Blocks.Count == 0)
+            if (restoreData.Blocks.Count == 0 && restoreData.SizeBytes > 0)
                 return OperationResult<string>.Fail("Для версии отсутствуют блоки содержимого.");
 
             var targetPath = ResolveTargetPath(repo.DirectoryPath, restoreData.RelativePath, request.OverwriteCurrent, request.TargetPath);

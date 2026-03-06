@@ -1,4 +1,4 @@
-﻿namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs;
 
 public sealed record FileVersionInfoDto(
     long FileVersionId,
@@ -7,4 +7,5 @@ public sealed record FileVersionInfoDto(
     DateTime CreatedAtUtc,
     long SizeBytes,
     bool IsDeletionMarker,
-    string ContentHashSha256);
+    string ContentHashSha256,
+    bool HasContentBlocks);

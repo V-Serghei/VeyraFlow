@@ -9,11 +9,20 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
     public DateTime CreatedAtUtc { get; init; }
     public long SizeBytes { get; init; }
     public bool IsDeletionMarker { get; init; }
+    public bool HasContentBlocks { get; init; }
     public string ContentHashSha256 { get; init; } = string.Empty;
 
-    public string Title => IsDeletionMarker
-        ? $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss} · удаление"
-        : $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss}";
+    public string Title
+    {
+        get
+        {
+            var baseTitle = IsDeletionMarker
+                ? $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss} · удаление"
+                : $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss}";
+
+            return HasContentBlocks ? baseTitle : baseTitle + " · без данных";
+        }
+    }
 
     public string SizeDisplay => IsDeletionMarker ? "—" : FormatSize(SizeBytes);
 

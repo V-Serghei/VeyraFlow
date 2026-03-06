@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Results;
@@ -45,7 +45,7 @@ public sealed class GetTextDiffHandler(
             if (string.IsNullOrWhiteSpace(extension) || !TextExtensions.Contains(extension))
                 return OperationResult<TextDiffResultDto>.Fail("Формат файла не поддерживает текстовый diff.");
 
-            if (left.Blocks.Count == 0 || right.Blocks.Count == 0)
+            if ((left.Blocks.Count == 0 && left.SizeBytes > 0) || (right.Blocks.Count == 0 && right.SizeBytes > 0))
                 return OperationResult<TextDiffResultDto>.Fail("Для одной из версий отсутствуют блоки данных.");
 
             await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);

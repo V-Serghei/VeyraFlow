@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -41,17 +41,18 @@ public sealed class RustRepositoryScanner(
         }
 
         log.LogInformation(
-            "Starting scan for repository {RepositoryId}. Root {Root}. Formats {FormatCount}. Scheduled {Scheduled}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}",
+            "Starting scan for repository {RepositoryId}. Root {Root}. Formats {FormatCount}. Scheduled {Scheduled}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}. SaveVersions {SaveVersions}",
             repositoryId,
             repo.DirectoryPath,
             repo.LinkedFormats.Count,
             scanOptions.IsScheduled,
             scanOptions.MaxReadBytesPerSecond,
-            scanOptions.MaxIoOperationsPerSecond);
+            scanOptions.MaxIoOperationsPerSecond,
+            scanOptions.SaveFileVersions);
 
         progress?.Report(new RepositoryScanProgressDto(
             "prepare",
-            5,
+            2,
             0,
             0,
             "Preparing scan"));
@@ -63,16 +64,18 @@ public sealed class RustRepositoryScanner(
         {
             progress?.Report(new RepositoryScanProgressDto(
                 "scan",
-                25,
+                10,
                 0,
                 0,
                 "Scanning directory"));
 
-            var json = VeyraCoreNative.ScanDirectoryJson(
-                repo.DirectoryPath,
-                repo.LinkedFormats,
-                scanOptions.MaxReadBytesPerSecond,
-                scanOptions.MaxIoOperationsPerSecond);
+            var json = await Task.Run(() =>
+                    VeyraCoreNative.ScanDirectoryJson(
+                        repo.DirectoryPath,
+                        repo.LinkedFormats,
+                        scanOptions.MaxReadBytesPerSecond,
+                        scanOptions.MaxIoOperationsPerSecond),
+                ct);
 
             var nativeEntries = JsonSerializer.Deserialize<List<NativeScanEntry>>(json, JsonOptions) ?? [];
 
@@ -81,8 +84,15 @@ public sealed class RustRepositoryScanner(
                 .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
                 .ToList();
 
-            trigger = scanOptions.TriggerOverride
-                ?? (scanOptions.IsScheduled ? "scheduled_scan_rust" : "initial_scan_rust");
+            var scannedFiles = entries.Count(e => !e.IsDirectory);
+            progress?.Report(new RepositoryScanProgressDto(
+                "scan",
+                70,
+                scannedFiles,
+                scannedFiles,
+                $"Scanned files: {scannedFiles}"));
+
+            trigger = ResolveTrigger(scanOptions, "rust");
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
@@ -98,20 +108,25 @@ public sealed class RustRepositoryScanner(
                 progress,
                 ct);
 
-            trigger = scanOptions.TriggerOverride
-                ?? (scanOptions.IsScheduled ? "scheduled_scan_managed_fallback" : "initial_scan_managed_fallback");
+            trigger = ResolveTrigger(scanOptions, "managed_fallback");
         }
 
         var fileCount = entries.Count(e => !e.IsDirectory);
 
         progress?.Report(new RepositoryScanProgressDto(
             "save",
-            85,
+            92,
             fileCount,
             fileCount,
             "Saving scan results"));
 
-        await snapshots.SaveSnapshotAsync(repositoryId, trigger, DateTime.UtcNow, entries, ct);
+        await snapshots.SaveSnapshotAsync(
+            repositoryId,
+            trigger,
+            DateTime.UtcNow,
+            entries,
+            scanOptions.SaveFileVersions,
+            ct);
 
         progress?.Report(new RepositoryScanProgressDto(
             "done",
@@ -137,6 +152,17 @@ public sealed class RustRepositoryScanner(
             ct.ThrowIfCancellationRequested();
             await ScanRepositoryAsync(repo.Id, null, null, ct);
         }
+    }
+
+    private static string ResolveTrigger(RepositoryScanOptionsDto options, string engine)
+    {
+        if (!string.IsNullOrWhiteSpace(options.TriggerOverride))
+            return options.TriggerOverride.Trim();
+
+        if (options.IsScheduled)
+            return options.SaveFileVersions ? $"scheduled_snapshot_{engine}" : $"scheduled_sync_{engine}";
+
+        return options.SaveFileVersions ? $"manual_snapshot_{engine}" : $"sync_index_{engine}";
     }
 
     private static RepositoryScanEntryDto ToEntry(NativeScanEntry src)
@@ -179,7 +205,7 @@ public sealed class RustRepositoryScanner(
             processedFiles++;
             if (processedFiles % 25 == 0)
             {
-                var percent = Math.Min(80, 30 + (processedFiles / 25) * 3);
+                var percent = Math.Min(80, 20 + (processedFiles / 25) * 4);
                 progress?.Report(new RepositoryScanProgressDto(
                     "scan",
                     percent,
@@ -405,4 +431,3 @@ public sealed class RustRepositoryScanner(
         public string? ContentHashSha256 { get; init; }
     }
 }
-

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
@@ -17,8 +17,11 @@ public sealed class EfRepositorySnapshotRepository(
         string trigger,
         DateTime scannedAtUtc,
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
+        bool saveFileVersions = true,
         CancellationToken ct = default)
     {
+        db.ChangeTracker.Clear();
+
         var repo = await db.Set<Repository>()
             .Include(r => r.Directory)
             .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
@@ -39,8 +42,16 @@ public sealed class EfRepositorySnapshotRepository(
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-        var previousSnapshotId = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
+        var previousSnapshotsQuery = db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId);
+
+        if (saveFileVersions)
+        {
+            previousSnapshotsQuery = previousSnapshotsQuery
+                .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id));
+        }
+
+        var previousSnapshotId = await previousSnapshotsQuery
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => s.Id)
@@ -88,6 +99,26 @@ public sealed class EfRepositorySnapshotRepository(
             }).ToList();
 
             db.AddRange(rows);
+        }
+
+        if (!saveFileVersions)
+        {
+            repo.FileCount = fileEntries;
+            repo.TotalSizeBytes = totalFileBytes;
+            repo.LastScannedAt = scannedAtUtc;
+            repo.UpdatedAt = scannedAtUtc;
+
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            log.LogInformation(
+                "Repository sync saved without file versions. RepositoryId {RepositoryId}. Entries {Entries}. Files {Files}. Trigger {Trigger}",
+                repositoryId,
+                totalEntries,
+                fileEntries,
+                safeTrigger);
+
+            return;
         }
 
         var currentFilesByPath = entries
@@ -145,6 +176,21 @@ public sealed class EfRepositorySnapshotRepository(
                 .ToDictionary(g => g.Key, g => g.First());
         }
 
+        var latestVersionIds = latestVersionsByIdentityId.Values
+            .Select(v => v.Id)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        var latestVersionIdsWithBlocks = latestVersionIds.Count == 0
+            ? new HashSet<long>()
+            : (await db.Set<FileVersionBlock>()
+                    .Where(b => latestVersionIds.Contains(b.FileVersionId))
+                    .Select(b => b.FileVersionId)
+                    .Distinct()
+                    .ToListAsync(ct))
+                .ToHashSet();
+
         var newVersions = new List<FileVersion>();
         var links = new List<SnapshotFileLink>();
         var pendingBlocks = new Dictionary<FileVersion, IReadOnlyList<StoredFileBlockDto>>();
@@ -153,7 +199,7 @@ public sealed class EfRepositorySnapshotRepository(
         {
             var identity = identitiesByPath[path];
             currentFilesByPath.TryGetValue(path, out var current);
-            previousFilesByPath.TryGetValue(path, out var previous);
+            var hadPrevious = previousFilesByPath.TryGetValue(path, out var previous);
 
             FileVersion selectedVersion;
 
@@ -164,13 +210,24 @@ public sealed class EfRepositorySnapshotRepository(
                 identity.IsDeleted = false;
                 identity.UpdatedAt = scannedAtUtc;
 
-                var changed = previous.Hash is null
-                    || !string.Equals(previous.Hash, current.ContentHashSha256, StringComparison.OrdinalIgnoreCase)
+                var previousHash = previous.Hash ?? string.Empty;
+                var currentHash = current.ContentHashSha256 ?? string.Empty;
+
+                var changed = !hadPrevious
+                    || !string.Equals(previousHash, currentHash, StringComparison.OrdinalIgnoreCase)
                     || previous.SizeBytes != current.SizeBytes;
 
-                if (changed
-                    || !latestVersionsByIdentityId.TryGetValue(identity.Id, out selectedVersion!)
-                    || selectedVersion.IsDeletionMarker)
+                var hasLatest = latestVersionsByIdentityId.TryGetValue(identity.Id, out selectedVersion!);
+                var latestHasBlocks = hasLatest
+                                      && selectedVersion.Id > 0
+                                      && (selectedVersion.SizeBytes == 0 || latestVersionIdsWithBlocks.Contains(selectedVersion.Id));
+
+                var shouldCreateNewVersion = changed
+                                             || !hasLatest
+                                             || selectedVersion.IsDeletionMarker
+                                             || !latestHasBlocks;
+
+                if (shouldCreateNewVersion)
                 {
                     selectedVersion = new FileVersion
                     {
@@ -183,10 +240,11 @@ public sealed class EfRepositorySnapshotRepository(
                     };
 
                     var absolutePath = ToAbsolutePath(repo.Directory.Path, path);
-                    var stored = await TryStoreBlocksAsync(absolutePath, ct);
-                    if (stored is not null && stored.Blocks.Count > 0)
-                        pendingBlocks[selectedVersion] = stored.Blocks;
+                    var stored = await TryStoreBlocksAsync(absolutePath, throwOnFailure: true, ct);
+                    if (stored is null || (current.SizeBytes > 0 && stored.Blocks.Count == 0))
+                        throw new InvalidOperationException($"Failed to store blocks for file {path}.");
 
+                    pendingBlocks[selectedVersion] = stored.Blocks;
                     newVersions.Add(selectedVersion);
                     latestVersionsByIdentityId[identity.Id] = selectedVersion;
                 }
@@ -334,8 +392,136 @@ public sealed class EfRepositorySnapshotRepository(
                 v.CreatedAt,
                 v.SizeBytes,
                 v.IsDeletionMarker,
-                v.ContentHashSha256))
+                v.ContentHashSha256,
+                v.SizeBytes == 0 || v.Blocks.Any()))
             .ToListAsync(ct);
+    }
+
+    public async Task<RepositoryPendingChangesDto> GetPendingChangesAsync(
+        int repositoryId,
+        int take = 200,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0)
+            return RepositoryPendingChangesDto.Empty;
+
+        var latestSnapshot = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId)
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new { s.Id, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+
+        if (latestSnapshot is null)
+            return RepositoryPendingChangesDto.Empty;
+
+        var currentFiles = await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == latestSnapshot.Id && !e.IsDirectory)
+            .Select(e => new SnapshotEntryLight(
+                e.RelativePath,
+                e.Name,
+                e.SizeBytes,
+                e.LastWriteUtc,
+                e.ContentHashSha256))
+            .ToListAsync(ct);
+
+        var baselineSnapshot = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new { s.Id, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+
+        var baselineFiles = baselineSnapshot is null
+            ? []
+            : await db.Set<RepositorySnapshotEntry>()
+                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == baselineSnapshot.Id && !e.IsDirectory)
+                .Select(e => new SnapshotEntryLight(
+                    e.RelativePath,
+                    e.Name,
+                    e.SizeBytes,
+                    e.LastWriteUtc,
+                    e.ContentHashSha256))
+                .ToListAsync(ct);
+
+        var currentByPath = currentFiles.ToDictionary(x => x.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var baselineByPath = baselineFiles.ToDictionary(x => x.RelativePath, StringComparer.OrdinalIgnoreCase);
+
+        var changes = new List<RepositoryPendingChangeEntryDto>();
+        var added = 0;
+        var modified = 0;
+        var deleted = 0;
+
+        foreach (var current in currentByPath.Values.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!baselineByPath.TryGetValue(current.RelativePath, out var previous))
+            {
+                added++;
+                changes.Add(new RepositoryPendingChangeEntryDto(
+                    current.RelativePath,
+                    current.Name,
+                    "added",
+                    current.SizeBytes,
+                    0,
+                    current.LastWriteUtc,
+                    null));
+                continue;
+            }
+
+            var isModified = !string.Equals(previous.ContentHashSha256, current.ContentHashSha256, StringComparison.OrdinalIgnoreCase)
+                             || previous.SizeBytes != current.SizeBytes;
+
+            if (!isModified)
+                continue;
+
+            modified++;
+            changes.Add(new RepositoryPendingChangeEntryDto(
+                current.RelativePath,
+                current.Name,
+                "modified",
+                current.SizeBytes,
+                previous.SizeBytes,
+                current.LastWriteUtc,
+                previous.LastWriteUtc));
+        }
+
+        foreach (var previous in baselineByPath.Values.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (currentByPath.ContainsKey(previous.RelativePath))
+                continue;
+
+            deleted++;
+            changes.Add(new RepositoryPendingChangeEntryDto(
+                previous.RelativePath,
+                previous.Name,
+                "deleted",
+                0,
+                previous.SizeBytes,
+                previous.LastWriteUtc,
+                previous.LastWriteUtc));
+        }
+
+        var limit = Math.Clamp(take, 1, 2000);
+
+        var ordered = changes
+            .OrderBy(x => x.ChangeKind switch
+            {
+                "added" => 0,
+                "modified" => 1,
+                "deleted" => 2,
+                _ => 9
+            })
+            .ThenBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .ToList();
+
+        return new RepositoryPendingChangesDto(
+            baselineSnapshot?.CreatedAt,
+            added,
+            modified,
+            deleted,
+            ordered);
     }
 
     public async Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
@@ -379,19 +565,38 @@ public sealed class EfRepositorySnapshotRepository(
         return Path.Combine(rootPath, rel);
     }
 
-    private async Task<StoredFileContentDto?> TryStoreBlocksAsync(string absolutePath, CancellationToken ct)
+    private async Task<StoredFileContentDto?> TryStoreBlocksAsync(
+        string absolutePath,
+        bool throwOnFailure,
+        CancellationToken ct)
     {
         try
         {
             if (!File.Exists(absolutePath))
+            {
+                if (throwOnFailure)
+                    throw new FileNotFoundException("File not found for block storage.", absolutePath);
+
                 return null;
+            }
 
             return await contentStore.StoreFileAsync(absolutePath, ct);
         }
         catch (Exception ex)
         {
             log.LogWarning(ex, "Failed to store file blocks for {Path}", absolutePath);
+
+            if (throwOnFailure)
+                throw new InvalidOperationException($"Failed to store file blocks {absolutePath}", ex);
+
             return null;
         }
     }
+
+    private sealed record SnapshotEntryLight(
+        string RelativePath,
+        string Name,
+        long SizeBytes,
+        DateTime LastWriteUtc,
+        string? ContentHashSha256);
 }
