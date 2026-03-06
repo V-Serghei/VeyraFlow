@@ -1,4 +1,4 @@
-using Veyra.Application.DTOs;
+﻿using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Abstractions.Indexing;
 
@@ -9,5 +9,9 @@ public interface IRepositorySnapshotRepository
         string trigger,
         DateTime scannedAtUtc,
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
+        int repositoryId,
         CancellationToken ct = default);
 }

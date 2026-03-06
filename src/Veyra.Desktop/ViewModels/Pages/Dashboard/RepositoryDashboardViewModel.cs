@@ -5,15 +5,14 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Queries;
-using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.Dashboard;
 
@@ -22,21 +21,16 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly ILogger<RepositoryDashboardViewModel> _log;
     private readonly IWindowService _windows;
+    private readonly List<RepositoryCardViewModel> _allRepositories = [];
+
+    public event Func<int, Task>? OpenRepositoryRequested;
+    public event Func<int, Task>? OpenRepositorySettingsRequested;
 
     public ObservableCollection<RepositoryCardViewModel> Repositories { get; } = new();
 
-    [ObservableProperty] private RepositoryCardViewModel? _selectedRepository;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private bool _isEmpty;
-
-    [ObservableProperty] private bool _isDetailVisible;
-    [ObservableProperty] private string _detailName = string.Empty;
-    [ObservableProperty] private string? _detailDescription;
-    [ObservableProperty] private string _detailPath = string.Empty;
-    [ObservableProperty] private ObservableCollection<string> _detailFormats = new();
-    [ObservableProperty] private ObservableCollection<string> _availableFormats = new();
-
     [ObservableProperty] private string _searchQuery = string.Empty;
 
     public RepositoryDashboardViewModel(
@@ -60,7 +54,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             await _mediator.Send(new EnsureRepositoriesCommand());
 
             var repos = await _mediator.Send(new GetAllRepositoriesQuery());
-            Repositories.Clear();
+            _allRepositories.Clear();
 
             foreach (var r in repos)
             {
@@ -82,18 +76,18 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                     card.LinkedFormats.Add(f);
 
                 card.RefreshFormatsDisplay();
-                Repositories.Add(card);
+                _allRepositories.Add(card);
             }
 
+            ApplyFilter();
             IsEmpty = Repositories.Count == 0;
-
-            List<string> allExts = await _mediator.Send(new GetTrackedExtensionsQuery());
-            AvailableFormats = new ObservableCollection<string>(allExts);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load repositories");
             ErrorMessage = "Не удалось загрузить репозитории.";
+            Repositories.Clear();
+            IsEmpty = true;
         }
         finally
         {
@@ -101,68 +95,59 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private void SelectRepository(RepositoryCardViewModel? repo)
-    {
-        SelectedRepository = repo;
-        if (repo is null)
-        {
-            IsDetailVisible = false;
-            return;
-        }
+    partial void OnSearchQueryChanged(string value) => ApplyFilter();
 
-        DetailName = repo.Name;
-        DetailDescription = repo.Description;
-        DetailPath = repo.DirectoryPath;
-        DetailFormats = new ObservableCollection<string>(repo.LinkedFormats.ToList());
-        IsDetailVisible = true;
+    [RelayCommand]
+    private async Task OpenRepositoryAsync(RepositoryCardViewModel? repo)
+    {
+        if (repo is null)
+            return;
+
+        if (OpenRepositoryRequested is not null)
+            await OpenRepositoryRequested.Invoke(repo.Id);
     }
 
     [RelayCommand]
-    private void CloseDetail()
+    private async Task OpenRepositorySettingsAsync(RepositoryCardViewModel? repo)
     {
-        IsDetailVisible = false;
-        SelectedRepository = null;
+        if (repo is null)
+            return;
+
+        if (OpenRepositorySettingsRequested is not null)
+            await OpenRepositorySettingsRequested.Invoke(repo.Id);
     }
 
     [RelayCommand]
     private async Task AddRepositoryAsync()
     {
-        Window? owner = _windows.GetActiveWindow();
-        if (owner is null) return;
-
-        var res = await owner.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions { Title = "Выберите папку для нового репозитория", AllowMultiple = false });
-
-        var folder = res.FirstOrDefault();
-        var local = folder?.Path.LocalPath;
-        if (string.IsNullOrWhiteSpace(local) || !Directory.Exists(local)) return;
-
         try
         {
-            var result = await _mediator.Send(new AddDirectoryAndCreateRepositoryCommand(local, null));
-            if (result.Success)
-                await LoadAsync();
+            var wizard = _windows.Create<CreateRepositoryWindow>();
+            var owner = _windows.GetActiveWindow();
+
+            if (owner is not null)
+                await _windows.ShowDialogAsync(wizard, owner);
             else
-                ErrorMessage = result.Error;
+                _windows.Show(wizard);
+
+            await LoadAsync();
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Failed to add repository");
-            ErrorMessage = "Не удалось добавить репозиторий.";
+            _log.LogError(ex, "Failed to open repository creation wizard");
+            ErrorMessage = "Не удалось открыть мастер создания репозитория.";
         }
     }
 
     [RelayCommand]
-    private async Task DeleteRepositoryAsync()
+    private async Task DeleteRepositoryAsync(RepositoryCardViewModel? repo)
     {
-        if (SelectedRepository is null) return;
+        if (repo is null)
+            return;
 
         try
         {
-            await _mediator.Send(new DeleteRepositoryCommand(SelectedRepository.Id));
-            IsDetailVisible = false;
-            SelectedRepository = null;
+            await _mediator.Send(new DeleteRepositoryCommand(repo.Id));
             await LoadAsync();
         }
         catch (Exception ex)
@@ -172,70 +157,24 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private async Task SaveDetailAsync()
+    private void ApplyFilter()
     {
-        if (SelectedRepository is null) return;
+        var query = SearchQuery.Trim();
 
-        try
+        IEnumerable<RepositoryCardViewModel> source = _allRepositories;
+        if (!string.IsNullOrWhiteSpace(query))
         {
-            await _mediator.Send(new UpdateRepositoryCommand(
-                SelectedRepository.Id, DetailName, DetailDescription));
-
-            var savedId = SelectedRepository.Id;
-            await LoadAsync();
-
-            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
-            if (updated is not null)
-                SelectRepository(updated);
+            source = source.Where(r =>
+                r.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                r.DirectoryPath.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                r.LinkedFormats.Any(f => f.Contains(query, StringComparison.OrdinalIgnoreCase)));
         }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to save repository details");
-            ErrorMessage = "Не удалось сохранить изменения.";
-        }
-    }
 
-    [RelayCommand]
-    private async Task LinkFormatAsync(string format)
-    {
-        if (SelectedRepository is null || string.IsNullOrWhiteSpace(format)) return;
+        Repositories.Clear();
+        foreach (var repo in source.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            Repositories.Add(repo);
 
-        try
-        {
-            await _mediator.Send(new LinkFormatsToRepositoryCommand(
-                SelectedRepository.Id, new[] { format }));
-
-            var savedId = SelectedRepository.Id;
-            await LoadAsync();
-            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
-            if (updated is not null) SelectRepository(updated);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to link format");
-        }
-    }
-
-    [RelayCommand]
-    private async Task UnlinkFormatAsync(string format)
-    {
-        if (SelectedRepository is null || string.IsNullOrWhiteSpace(format)) return;
-
-        try
-        {
-            await _mediator.Send(new UnlinkFormatsFromRepositoryCommand(
-                SelectedRepository.Id, new[] { format }));
-
-            var savedId = SelectedRepository.Id;
-            await LoadAsync();
-            var updated = Repositories.FirstOrDefault(r => r.Id == savedId);
-            if (updated is not null) SelectRepository(updated);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to unlink format");
-        }
+        IsEmpty = Repositories.Count == 0;
     }
 
     private static string FormatLastActivity(DateTime? utc)
@@ -258,3 +197,4 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
     }
 }
+

@@ -1,4 +1,4 @@
-using Avalonia.Controls.ApplicationLifetimes;
+﻿﻿using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using System;
 using System.IO;
@@ -6,6 +6,8 @@ using Avalonia.Controls;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
+using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Setup;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Infrastructure.Data.Persistence;
 using AvaloniaApplication = Avalonia.Application;
@@ -29,19 +31,36 @@ public partial class App : AvaloniaApplication
 
         _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
 
+        var shouldOpenMain = false;
+
         using (var scope = _serviceProvider.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
             db.Database.Migrate();
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
             db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+
+            var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
+            var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
+
+            var activeUsername = userProfiles.GetActiveUsernameAsync().GetAwaiter().GetResult();
+            if (!string.IsNullOrWhiteSpace(activeUsername))
+            {
+                var dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
+                var exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+                shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
+            }
         }
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
         {
             classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
             var nav = _serviceProvider.GetRequiredService<INavigationService>();
-            nav.ShowWelcome();
+
+            if (shouldOpenMain)
+                nav.GoToMain();
+            else
+                nav.ShowWelcome();
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -51,4 +70,6 @@ public partial class App : AvaloniaApplication
     {
         Log.CloseAndFlush();
     }
+
+
 }

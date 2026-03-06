@@ -7,125 +7,44 @@
              x:DataType="vm:RepositoryDashboardViewModel"
              Background="#0D0D0D">
 
-    <UserControl.Styles>
-        <Style Selector="Button.sidebarItem">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#BBBBBB"/>
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="14,10"/>
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Margin" Value="0,1"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-        <Style Selector="Button.sidebarItem:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#1A1A1A"/>
-        </Style>
-
-        <Style Selector="Border.repoCard">
-            <Setter Property="Background" Value="#141414"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="20"/>
-            <Setter Property="BorderBrush" Value="#1E1E1E"/>
-            <Setter Property="BorderThickness" Value="1"/>
-        </Style>
-        <Style Selector="Border.repoCard:pointerover">
-            <Setter Property="BorderBrush" Value="#333333"/>
-            <Setter Property="Background" Value="#181818"/>
-        </Style>
-
-        <Style Selector="TextBlock.statValue">
-            <Setter Property="FontSize" Value="22"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-        </Style>
-        <Style Selector="TextBlock.statLabel">
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Foreground" Value="#666666"/>
-            <Setter Property="Margin" Value="0,2,0,0"/>
-        </Style>
-
-        <Style Selector="Border.badge">
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="10,4"/>
-        </Style>
-
-        <Style Selector="Border.formatChip">
-            <Setter Property="Background" Value="#1E1E1E"/>
-            <Setter Property="CornerRadius" Value="4"/>
-            <Setter Property="Padding" Value="8,3"/>
-            <Setter Property="Margin" Value="0,0,4,4"/>
-        </Style>
-
-        <Style Selector="Button.action">
-            <Setter Property="Background" Value="#1A1A1A"/>
-            <Setter Property="Foreground" Value="#CCCCCC"/>
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#2A2A2A"/>
-        </Style>
-        <Style Selector="Button.action:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#252525"/>
-        </Style>
-
-        <Style Selector="Button.primary">
-            <Setter Property="Background" Value="#1A6DFF"/>
-            <Setter Property="Foreground" Value="#FFFFFF"/>
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="BorderThickness" Value="0"/>
-        </Style>
-
-        <Style Selector="Button.danger">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#F44336"/>
-            <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#3A1A1A"/>
-        </Style>
-    </UserControl.Styles>
-
-    <Grid ColumnDefinitions="220,*">
-
-        <!-- ═══════════════ LEFT SIDEBAR ═══════════════ -->
-        <Border Grid.Column="0" Background="#0D0D0D" Padding="12,16"
-                BorderBrush="#1A1A1A" BorderThickness="0,0,1,0">
+    <Grid ColumnDefinitions="240,*">
+        <Border Grid.Column="0" Background="#0D0D0D" Padding="12,16" BorderBrush="#1A1A1A" BorderThickness="0,0,1,0">
             <DockPanel>
                 <Button DockPanel.Dock="Top"
                         Content="＋ Создать проект"
                         HorizontalAlignment="Stretch"
                         Padding="12,10"
-                        CornerRadius="8"
-                        Background="#1A1A1A"
-                        Foreground="#CCCCCC"
-                        BorderThickness="1"
-                        BorderBrush="#2A2A2A"
                         Command="{Binding AddRepositoryCommand}"
                         Margin="0,0,0,16"/>
 
                 <TextBlock DockPanel.Dock="Top"
                            Text="РАБОЧИЕ ПРОСТРАНСТВА"
-                           FontSize="10" Foreground="#555555"
+                           FontSize="10" Foreground="#666666"
                            FontWeight="SemiBold"
-                           Margin="14,0,0,8"
+                           Margin="8,0,0,8"
                            LetterSpacing="1"/>
 
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Repositories}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                                <Button Classes="sidebarItem"
-                                        Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).SelectRepositoryCommand}"
-                                        CommandParameter="{Binding .}">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding Name}" FontWeight="Medium"
-                                                   FontSize="13" Foreground="#DDDDDD"/>
-                                        <TextBlock Text="{Binding ShortPath}" FontSize="10"
-                                                   Foreground="#555555" TextTrimming="CharacterEllipsis"/>
-                                    </StackPanel>
-                                </Button>
+                                <Border Background="#151515" CornerRadius="8" Padding="8" Margin="0,0,0,6">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                        <Button Grid.Column="0" Background="Transparent" BorderThickness="0"
+                                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                CommandParameter="{Binding .}">
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding ShortPath}" FontSize="10" Opacity="0.65"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Grid.Column="1" Content="⚙" Padding="8,4"
+                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
+                                                CommandParameter="{Binding .}"/>
+                                    </Grid>
+                                </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -133,189 +52,64 @@
             </DockPanel>
         </Border>
 
-        <!-- ═══════════════ MAIN CONTENT ═══════════════ -->
         <DockPanel Grid.Column="1" Background="#0D0D0D">
-
-            <!-- Top bar -->
-            <Border DockPanel.Dock="Top" Padding="24,16"
-                    BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
-                <Grid ColumnDefinitions="*,Auto">
-                    <Border Background="#141414" CornerRadius="8" Padding="12,8"
-                            MaxWidth="500" HorizontalAlignment="Left">
-                        <Grid ColumnDefinitions="Auto,*">
-                            <TextBlock Grid.Column="0" Text="🔍" Margin="0,0,8,0"
-                                       VerticalAlignment="Center" Opacity="0.4"/>
-                            <TextBox Grid.Column="1" BorderThickness="0" Background="Transparent"
-                                     Foreground="#AAAAAA" Watermark="Поиск по проектам, папкам..."
-                                     Text="{Binding SearchQuery, Mode=TwoWay}"
-                                     MinWidth="350"/>
-                        </Grid>
-                    </Border>
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                        <Border Background="#1A6DFF" CornerRadius="6" Padding="12,6">
-                            <TextBlock Text="Все" Foreground="White" FontSize="12"/>
-                        </Border>
-                        <Border Background="#1A1A1A" CornerRadius="6" Padding="12,6">
-                            <TextBlock Text="Активные" Foreground="#888" FontSize="12"/>
-                        </Border>
-                    </StackPanel>
-                </Grid>
+            <Border DockPanel.Dock="Top" Padding="20,14" BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
+                <TextBox Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Поиск по проектам, папкам..."/>
             </Border>
 
-            <!-- Error bar -->
-            <Border DockPanel.Dock="Top" Padding="24,8" Background="#2A1515"
-                    IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="#FF6B6B" FontSize="12"/>
-            </Border>
+            <TextBlock DockPanel.Dock="Top" Margin="20,8,20,0"
+                       Text="{Binding ErrorMessage}" Foreground="#F87171"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
-            <!-- Content area -->
-            <Grid>
-                <!-- Repository cards grid -->
-                <ScrollViewer Padding="24,20" VerticalScrollBarVisibility="Auto"
-                              IsVisible="{Binding !IsDetailVisible}">
-                    <ItemsControl ItemsSource="{Binding Repositories}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                                <Button Background="Transparent" BorderThickness="0"
-                                        Padding="0" Margin="0,0,16,16"
-                                        Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).SelectRepositoryCommand}"
-                                        CommandParameter="{Binding .}">
-                                    <Border Classes="repoCard" Width="320" MinHeight="200">
-                                        <DockPanel>
-                                            <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,16">
-                                                <TextBlock Text="{Binding Name}"
-                                                           FontSize="16" FontWeight="SemiBold"
-                                                           Foreground="#EEEEEE"/>
-                                                <TextBlock Text="{Binding DirectoryPath}"
-                                                           FontSize="11" Foreground="#555555"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
-                                                    <Ellipse Width="6" Height="6" VerticalAlignment="Center">
-                                                        <Ellipse.Fill>
-                                                            <SolidColorBrush Color="{Binding StatusColor}"/>
-                                                        </Ellipse.Fill>
-                                                    </Ellipse>
-                                                    <TextBlock Text="{Binding LastActivity}"
-                                                               FontSize="11" Foreground="#666666"/>
-                                                    <TextBlock Text="•" Foreground="#333" FontSize="11"/>
-                                                    <TextBlock Text="{Binding StatusText}"
-                                                               FontSize="11" Foreground="#888888"/>
-                                                </StackPanel>
+            <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Repositories}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RepositoryCardViewModel">
+                            <Border Width="340" MinHeight="220" Margin="0,0,14,14"
+                                    Background="#141414" CornerRadius="12" Padding="14">
+                                <DockPanel>
+                                    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                                        <StackPanel Grid.Column="0" Spacing="4">
+                                            <Button Background="Transparent" BorderThickness="0" Padding="0"
+                                                    HorizontalAlignment="Left"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                    CommandParameter="{Binding .}">
+                                                <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
+                                            </Button>
+                                            <TextBlock Text="{Binding DirectoryPath}" FontSize="11" Opacity="0.65"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding LastActivity}" FontSize="11" Opacity="0.75"/>
+                                                <TextBlock Text="•" Opacity="0.4"/>
+                                                <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.85"/>
                                             </StackPanel>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="⚙" Padding="8,4"
+                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
+                                                CommandParameter="{Binding .}"/>
+                                    </Grid>
 
-                                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
-                                                        Spacing="24" Margin="0,0,0,14">
-                                                <StackPanel>
-                                                    <TextBlock Classes="statValue"
-                                                               Text="{Binding FileCount}"
-                                                               Foreground="#8B5CF6"/>
-                                                    <TextBlock Classes="statLabel" Text="Файлов"/>
-                                                </StackPanel>
-                                                <StackPanel>
-                                                    <TextBlock Classes="statValue"
-                                                               Text="{Binding VersionCount}"
-                                                               Foreground="#3B82F6"/>
-                                                    <TextBlock Classes="statLabel" Text="Версий"/>
-                                                </StackPanel>
-                                                <StackPanel>
-                                                    <TextBlock Classes="statValue"
-                                                               Text="{Binding SizeDisplay}"
-                                                               Foreground="#10B981"/>
-                                                    <TextBlock Classes="statLabel" Text="Размер"/>
-                                                </StackPanel>
-                                            </StackPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="18" Margin="0,0,0,10">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding FileCount}" FontSize="24" Foreground="#8B5CF6" FontWeight="Bold"/>
+                                            <TextBlock Text="Файлов" FontSize="11" Opacity="0.65"/>
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding VersionCount}" FontSize="24" Foreground="#3B82F6" FontWeight="Bold"/>
+                                            <TextBlock Text="Версий" FontSize="11" Opacity="0.65"/>
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding SizeDisplay}" FontSize="24" Foreground="#10B981" FontWeight="Bold"/>
+                                            <TextBlock Text="Размер" FontSize="11" Opacity="0.65"/>
+                                        </StackPanel>
+                                    </StackPanel>
 
-                                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                                <ItemsControl ItemsSource="{Binding LinkedFormats}">
-                                                    <ItemsControl.ItemsPanel>
-                                                        <ItemsPanelTemplate>
-                                                            <WrapPanel/>
-                                                        </ItemsPanelTemplate>
-                                                    </ItemsControl.ItemsPanel>
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <Border Classes="formatChip">
-                                                                <TextBlock Text="{Binding .}"
-                                                                           FontSize="11"
-                                                                           Foreground="#888888"/>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </StackPanel>
-
-                                            <Border DockPanel.Dock="Bottom" Classes="badge"
-                                                    Background="#0D2818" HorizontalAlignment="Left">
-                                                <TextBlock Text="{Binding StatusText}"
-                                                           FontSize="11" Foreground="#4CAF50"/>
-                                            </Border>
-                                        </DockPanel>
-                                    </Border>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-
-                <!-- ═══════════════ DETAIL PANEL ═══════════════ -->
-                <Border IsVisible="{Binding IsDetailVisible}"
-                        Background="#0D0D0D" Padding="24,20">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Top" Spacing="16" Margin="0,0,0,20">
-                            <Button Classes="action" Content="← Назад к списку"
-                                    Command="{Binding CloseDetailCommand}"
-                                    HorizontalAlignment="Left"/>
-                            <TextBlock Text="Настройки репозитория"
-                                       FontSize="20" FontWeight="SemiBold" Foreground="#EEEEEE"/>
-                        </StackPanel>
-
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                                    Spacing="12" HorizontalAlignment="Right" Margin="0,20,0,0">
-                            <Button Classes="danger" Content="Удалить"
-                                    Command="{Binding DeleteRepositoryCommand}"/>
-                            <Button Classes="primary" Content="Сохранить"
-                                    Command="{Binding SaveDetailCommand}"/>
-                        </StackPanel>
-
-                        <ScrollViewer VerticalScrollBarVisibility="Auto">
-                            <StackPanel Spacing="20" MaxWidth="600">
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Имя репозитория" Foreground="#888" FontSize="12"/>
-                                    <TextBox Text="{Binding DetailName, Mode=TwoWay}"
-                                             Background="#141414" Foreground="#EEE"
-                                             BorderBrush="#2A2A2A" CornerRadius="8" Padding="12,10"/>
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Описание" Foreground="#888" FontSize="12"/>
-                                    <TextBox Text="{Binding DetailDescription, Mode=TwoWay}"
-                                             AcceptsReturn="True" Height="80"
-                                             Background="#141414" Foreground="#EEE"
-                                             BorderBrush="#2A2A2A" CornerRadius="8" Padding="12,10"/>
-                                </StackPanel>
-
-                                <StackPanel Spacing="6">
-                                    <TextBlock Text="Директория" Foreground="#888" FontSize="12"/>
-                                    <Border Background="#0F0F0F" CornerRadius="8" Padding="12,10"
-                                            BorderBrush="#1E1E1E" BorderThickness="1">
-                                        <TextBlock Text="{Binding DetailPath}" Foreground="#666"
-                                                   FontSize="12"/>
-                                    </Border>
-                                </StackPanel>
-
-                                <Border Height="1" Background="#1E1E1E" Margin="0,4"/>
-
-                                <!-- Linked formats -->
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Привязанные форматы" Foreground="#AAA"
-                                               FontSize="13" FontWeight="SemiBold"/>
-                                    <ItemsControl ItemsSource="{Binding DetailFormats}">
+                                    <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding LinkedFormats}" Margin="0,0,0,10">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <WrapPanel/>
@@ -323,63 +117,32 @@
                                         </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="x:String">
-                                                <Border Background="#1A1A1A" CornerRadius="6"
-                                                        Padding="10,5" Margin="0,0,6,6">
-                                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                                        <TextBlock Text="{Binding .}" FontSize="12"
-                                                                   Foreground="#AAAAAA"
-                                                                   VerticalAlignment="Center"/>
-                                                        <Button Content="✕" Padding="2" FontSize="10"
-                                                                Background="Transparent"
-                                                                Foreground="#555555" BorderThickness="0"
-                                                                VerticalAlignment="Center"
-                                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).UnlinkFormatCommand}"
-                                                                CommandParameter="{Binding .}"/>
-                                                    </StackPanel>
+                                                <Border Background="#1E1E1E" CornerRadius="6" Padding="8,3" Margin="0,0,4,4">
+                                                    <TextBlock Text="{Binding .}" FontSize="11" Opacity="0.85"/>
                                                 </Border>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-                                </StackPanel>
 
-                                <!-- Available formats -->
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="Добавить формат" Foreground="#666"
-                                               FontSize="12"/>
-                                    <ItemsControl ItemsSource="{Binding AvailableFormats}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <WrapPanel/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="x:String">
-                                                <Button Padding="10,5" Margin="0,0,6,6"
-                                                        Background="#0F0F0F" Foreground="#666"
-                                                        CornerRadius="6" FontSize="12"
-                                                        BorderThickness="1" BorderBrush="#1E1E1E"
-                                                        Content="{Binding .}"
-                                                        Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).LinkFormatCommand}"
-                                                        CommandParameter="{Binding .}"/>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </StackPanel>
-                        </ScrollViewer>
-                    </DockPanel>
-                </Border>
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8">
+                                        <Button Content="Открыть" Padding="10,6"
+                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                CommandParameter="{Binding .}"/>
+                                        <Button Content="Удалить" Padding="10,6" Foreground="#F87171"
+                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).DeleteRepositoryCommand}"
+                                                CommandParameter="{Binding .}"/>
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
-                <!-- Empty state -->
-                <StackPanel IsVisible="{Binding IsEmpty}"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Spacing="12">
-                    <TextBlock Text="Нет репозиториев" FontSize="18"
-                               Foreground="#555" HorizontalAlignment="Center"/>
-                    <TextBlock Text="Создайте первый проект, нажав кнопку слева"
-                               Foreground="#333" FontSize="13" HorizontalAlignment="Center"/>
-                </StackPanel>
-            </Grid>
+            <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                <TextBlock Text="Нет репозиториев" FontSize="18" Opacity="0.7" HorizontalAlignment="Center"/>
+                <TextBlock Text="Создайте первый проект кнопкой слева" Opacity="0.55"/>
+            </StackPanel>
         </DockPanel>
     </Grid>
 </UserControl>

@@ -58,5 +58,8 @@
       <DependentUpon>RepositoryNamePage.axaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
+    <Compile Update="Views\Pages\Explorer\RepositoryExplorerView.axaml.cs">
+      <DependentUpon>RepositoryExplorerView.axaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>
