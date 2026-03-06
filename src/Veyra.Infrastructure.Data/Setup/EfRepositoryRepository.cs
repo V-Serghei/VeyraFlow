@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
@@ -13,13 +13,11 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
     {
         var now = DateTime.UtcNow;
 
-        // Check if a repo for this directory already exists (including soft-deleted)
         var existing = await db.Set<Repository>()
             .FirstOrDefaultAsync(r => r.DirectoryId == directoryId, ct);
 
         if (existing is not null)
         {
-            // Restore if soft-deleted
             existing.IsDeleted = false;
             existing.DeletedAt = null;
             existing.Name = name;
@@ -34,6 +32,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             Name = name,
             Description = description,
             DirectoryId = directoryId,
+            FileCount = 0,
+            VersionCount = 0,
+            TotalSizeBytes = 0,
+            LastScannedAt = null,
             CreatedAt = now,
             UpdatedAt = now,
             IsDeleted = false,
@@ -78,7 +80,6 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         entity.DeletedAt = null;
         entity.UpdatedAt = now;
 
-        // Also restore the directory if it was soft-deleted
         var dir = await db.Set<WatchedDirectory>().FindAsync(new object[] { entity.DirectoryId }, ct);
         if (dir is not null && dir.IsDeleted)
         {
@@ -106,9 +107,17 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .ToListAsync(ct);
 
         return new RepositoryDto(
-            repo.Id, repo.Name, repo.Description,
-            repo.DirectoryId, repo.Directory.Path,
-            formats, repo.IsDeleted);
+            repo.Id,
+            repo.Name,
+            repo.Description,
+            repo.DirectoryId,
+            repo.Directory.Path,
+            formats,
+            repo.IsDeleted,
+            repo.FileCount,
+            repo.VersionCount,
+            repo.TotalSizeBytes,
+            repo.LastScannedAt);
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -131,10 +140,17 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Pattern).OrderBy(p => p).ToList());
 
         return repos.Select(r => new RepositoryDto(
-            r.Id, r.Name, r.Description,
-            r.DirectoryId, r.Directory.Path,
+            r.Id,
+            r.Name,
+            r.Description,
+            r.DirectoryId,
+            r.Directory.Path,
             formatsByDir.GetValueOrDefault(r.DirectoryId, Array.Empty<string>()),
-            r.IsDeleted)).ToList();
+            r.IsDeleted,
+            r.FileCount,
+            r.VersionCount,
+            r.TotalSizeBytes,
+            r.LastScannedAt)).ToList();
     }
 
     public async Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default)
@@ -163,7 +179,6 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             }
             else
             {
-                // Auto-name from folder name
                 var folderName = Path.GetFileName(dir.Path.TrimEnd('\\', '/'));
                 if (string.IsNullOrWhiteSpace(folderName))
                     folderName = dir.Path;
@@ -172,6 +187,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 {
                     Name = folderName,
                     DirectoryId = dir.Id,
+                    FileCount = 0,
+                    VersionCount = 0,
+                    TotalSizeBytes = 0,
+                    LastScannedAt = null,
                     CreatedAt = now,
                     UpdatedAt = now,
                     IsDeleted = false,
@@ -180,10 +199,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             }
         }
 
-        // Soft-delete repos whose directories are deleted
         foreach (var repo in existingRepos)
         {
-            if (!repo.IsDeleted && !activeDirs.Any(d => d.Id == repo.DirectoryId))
+            if (!repo.IsDeleted && activeDirs.All(d => d.Id != repo.DirectoryId))
             {
                 repo.IsDeleted = true;
                 repo.DeletedAt = now;

@@ -3,10 +3,32 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char *veyra_get_version(void);
-
 int32_t veyra_last_error_utf8(uint8_t *out, uint64_t out_len, uint64_t *written);
 
-int32_t veyra_file_size_utf8(const char *path, uint64_t *size_out);
+int veyra_blake3_hash(const uint8_t *data, int data_len, uint8_t *output, int output_len);
 
-int32_t veyra_read_file_utf8(const char *path, uint8_t *out, uint64_t out_len, uint64_t *written);
+int veyra_blake3_hash_file(const char *path_ptr, uint8_t *output, int output_len);
+
+int veyra_sha256_hash_file_utf8(const char *path_ptr, uint8_t *output, int output_len);
+
+int32_t veyra_scan_directory_utf8(const char *root_path_ptr,
+                                  const char *extensions_csv_ptr,
+                                  uint8_t *out,
+                                  uint64_t out_len,
+                                  uint64_t *written);
+
+int veyra_zstd_compress(const uint8_t *data,
+                        int data_len,
+                        uint8_t *output,
+                        int output_len,
+                        int level);
+
+int veyra_zstd_decompress(const uint8_t *data, int data_len, uint8_t *output, int output_len);
+
+int64_t veyra_zstd_compress_file(const char *src_path_ptr, const char *dst_path_ptr, int level);
+
+int64_t veyra_zstd_decompress_file(const char *src_path_ptr, const char *dst_path_ptr);
+
+char *veyra_get_version(void);
+
+void veyra_free_string(char *s);

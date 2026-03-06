@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Infrastructure.Data.Auth;
 using Veyra.Infrastructure.Data.Persistence;
@@ -25,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<ISqliteConnectionFactory>(_ => new SqliteConnectionFactory(connectionString));
         services.AddScoped<ISetupRepository, EfSetupRepository>();
         services.AddScoped<IRepositoryRepository, EfRepositoryRepository>();
+        services.AddScoped<IRepositorySnapshotRepository, EfRepositorySnapshotRepository>();
         services.AddScoped<IUserProfileRepository, EfUserProfileRepository>();
 
         return services;
@@ -40,4 +42,3 @@ public sealed class SqliteConnectionFactory(string connectionString) : ISqliteCo
 {
     public SqliteConnection CreateConnection() => new(connectionString);
 }
-

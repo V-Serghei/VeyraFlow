@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -15,7 +15,6 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
     [ObservableProperty] private string _statusColor = "#9E9E9E";
     [ObservableProperty] private string _lastActivity = "Только что";
 
-    // Stats (placeholder values for now, will come from scanning later)
     [ObservableProperty] private int _fileCount;
     [ObservableProperty] private int _versionCount;
     [ObservableProperty] private string _sizeDisplay = "0 МБ";
@@ -35,7 +34,6 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
         get
         {
             if (string.IsNullOrEmpty(DirectoryPath)) return "";
-            // Show last 2 segments
             var parts = DirectoryPath.Replace('/', '\\').Split('\\');
             return parts.Length <= 2
                 ? DirectoryPath

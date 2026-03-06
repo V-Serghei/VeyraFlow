@@ -30,7 +30,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private bool _isEmpty;
 
-    // Detail panel
     [ObservableProperty] private bool _isDetailVisible;
     [ObservableProperty] private string _detailName = string.Empty;
     [ObservableProperty] private string? _detailDescription;
@@ -38,7 +37,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<string> _detailFormats = new();
     [ObservableProperty] private ObservableCollection<string> _availableFormats = new();
 
-    // Search
     [ObservableProperty] private string _searchQuery = string.Empty;
 
     public RepositoryDashboardViewModel(
@@ -72,36 +70,16 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                     Name = r.Name,
                     Description = r.Description,
                     DirectoryPath = r.DirectoryPath,
-                    StatusText = "Локально",
-                    StatusColor = "#4CAF50",
-                    LastActivity = "Только что"
+                    StatusText = Directory.Exists(r.DirectoryPath) ? "Локально" : "Недоступен",
+                    StatusColor = Directory.Exists(r.DirectoryPath) ? "#4CAF50" : "#F44336",
+                    LastActivity = FormatLastActivity(r.LastScannedAt),
+                    FileCount = r.FileCount,
+                    VersionCount = r.VersionCount,
+                    SizeDisplay = FormatSize(r.TotalSizeBytes)
                 };
 
                 foreach (var f in r.LinkedFormats)
                     card.LinkedFormats.Add(f);
-
-                // Try to get basic dir info
-                try
-                {
-                    if (Directory.Exists(r.DirectoryPath))
-                    {
-                        var dirInfo = new DirectoryInfo(r.DirectoryPath);
-                        var files = dirInfo.GetFiles("*", SearchOption.TopDirectoryOnly);
-                        card.FileCount = files.Length;
-                        var totalSize = files.Sum(f => f.Length);
-                        card.SizeDisplay = FormatSize(totalSize);
-                    }
-                    else
-                    {
-                        card.StatusText = "Недоступен";
-                        card.StatusColor = "#F44336";
-                    }
-                }
-                catch
-                {
-                    card.StatusText = "Ошибка чтения";
-                    card.StatusColor = "#FF9800";
-                }
 
                 card.RefreshFormatsDisplay();
                 Repositories.Add(card);
@@ -109,7 +87,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
             IsEmpty = Repositories.Count == 0;
 
-            // Available formats
             List<string> allExts = await _mediator.Send(new GetTrackedExtensionsQuery());
             AvailableFormats = new ObservableCollection<string>(allExts);
         }
@@ -259,6 +236,18 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             _log.LogError(ex, "Failed to unlink format");
         }
+    }
+
+    private static string FormatLastActivity(DateTime? utc)
+    {
+        if (utc is null)
+            return "Нет скана";
+
+        var delta = DateTime.UtcNow - utc.Value;
+        if (delta.TotalSeconds < 60) return "Только что";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} мин назад";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} ч назад";
+        return $"{(int)delta.TotalDays} дн назад";
     }
 
     private static string FormatSize(long bytes)

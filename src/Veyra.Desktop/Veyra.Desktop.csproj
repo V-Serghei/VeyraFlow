@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -19,7 +19,6 @@
     <PackageReference Include="Avalonia.Labs.CommandManager" Version="11.3.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
-    <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
     <PackageReference Include="Avalonia.Diagnostics" Version="11.3.11">
       <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
@@ -36,13 +35,18 @@
     <ProjectReference Include="..\Veyra.Infrastructure.Data\Veyra.Infrastructure.Data.csproj" />
     <ProjectReference Include="..\Veyra.Infrastructure.Native\Veyra.Infrastructure.Native.csproj" />
     <ProjectReference Include="..\Veyra.Shared.Logging\Veyra.Shared.Logging.csproj" />
-
   </ItemGroup>
 
   <ItemGroup>
     <None Include="runtimes\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+
+    <None Include="..\..\native\veyra_core\target\release\veyra_core.dll"
+          Condition="Exists('..\..\native\veyra_core\target\release\veyra_core.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>runtimes\win-x64\native\veyra_core.dll</Link>
     </None>
   </ItemGroup>
 

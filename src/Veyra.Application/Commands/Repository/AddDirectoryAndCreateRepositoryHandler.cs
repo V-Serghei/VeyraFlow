@@ -1,5 +1,6 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Results;
 
@@ -8,6 +9,7 @@ namespace Veyra.Application.Commands.Repository;
 public sealed class AddDirectoryAndCreateRepositoryHandler(
     ISetupRepository setup,
     IRepositoryRepository repo,
+    IRepositoryScanner scanner,
     INativeSetupApplier native,
     ILogger<AddDirectoryAndCreateRepositoryHandler> log)
     : IRequestHandler<AddDirectoryAndCreateRepositoryCommand, OperationResult<int>>
@@ -29,7 +31,9 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
             if (!string.IsNullOrWhiteSpace(request.RepositoryName))
                 await repo.UpdateRepositoryAsync(match.Id, request.RepositoryName, null, ct);
 
+            await scanner.ScanRepositoryAsync(match.Id, ct);
             await native.ApplySetupAsync(ct);
+
             log.LogInformation("Added directory and created repository for {Path}", request.DirectoryPath);
             return OperationResult<int>.Ok(match.Id);
         }

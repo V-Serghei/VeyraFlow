@@ -1,4 +1,4 @@
-﻿namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs;
 
 public sealed record RepositoryDto(
     int Id,
@@ -7,4 +7,8 @@ public sealed record RepositoryDto(
     int DirectoryId,
     string DirectoryPath,
     IReadOnlyList<string> LinkedFormats,
-    bool IsDeleted);
+    bool IsDeleted,
+    int FileCount,
+    int VersionCount,
+    long TotalSizeBytes,
+    DateTime? LastScannedAt);
