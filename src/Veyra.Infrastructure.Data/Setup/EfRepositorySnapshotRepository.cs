@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
@@ -76,5 +76,34 @@ public sealed class EfRepositorySnapshotRepository(VeyraDbContext db) : IReposit
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
+        int repositoryId,
+        CancellationToken ct = default)
+    {
+        var snapshotId = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId)
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (snapshotId == 0)
+            return Array.Empty<RepositoryScanEntryDto>();
+
+        return await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshotId)
+            .OrderBy(e => e.RelativePath)
+            .Select(e => new RepositoryScanEntryDto(
+                e.RelativePath,
+                e.ParentRelativePath,
+                e.Name,
+                e.IsDirectory,
+                e.Extension,
+                e.SizeBytes,
+                e.LastWriteUtc,
+                e.ContentHashSha256))
+            .ToListAsync(ct);
     }
 }

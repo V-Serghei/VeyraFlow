@@ -1,4 +1,4 @@
-using MediatR;
+﻿using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
@@ -31,7 +31,7 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
             if (!string.IsNullOrWhiteSpace(request.RepositoryName))
                 await repo.UpdateRepositoryAsync(match.Id, request.RepositoryName, null, ct);
 
-            await scanner.ScanRepositoryAsync(match.Id, ct);
+            await scanner.ScanRepositoryAsync(match.Id, null, ct);
             await native.ApplySetupAsync(ct);
 
             log.LogInformation("Added directory and created repository for {Path}", request.DirectoryPath);
@@ -44,3 +44,4 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
         }
     }
 }
+
