@@ -29,7 +29,11 @@ public class ViewLocator : IDataTemplate
 
         try
         {
-            return (Control)ActivatorUtilities.CreateInstance(App._serviceProvider, viewType);
+            var provider = App._serviceProvider;
+            if (provider is not null)
+                return (Control)ActivatorUtilities.CreateInstance(provider, viewType);
+
+            return (Control)Activator.CreateInstance(viewType)!;
         }
         catch
         {
@@ -39,3 +43,4 @@ public class ViewLocator : IDataTemplate
 
     public bool Match(object? data) => data is ObservableObject;
 }
+

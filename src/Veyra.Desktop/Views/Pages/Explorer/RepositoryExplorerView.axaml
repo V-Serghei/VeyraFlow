@@ -254,7 +254,7 @@
                                             IsEnabled="{Binding CanRestoreSelectedVersion}"/>
                                 </StackPanel>
 
-                                <Button Content="Diff with previous"
+                                <Button Content="Preview diff"
                                         Command="{Binding CompareSelectedWithPreviousCommand}"
                                         IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
 
@@ -262,14 +262,7 @@
                                            TextWrapping="Wrap"
                                            Opacity="0.9"
                                            IsVisible="{Binding HasVersionActionMessage}"/>
-
-                                <TextBox Text="{Binding DiffPreview}"
-                                         AcceptsReturn="True"
-                                         IsReadOnly="True"
-                                         Height="160"
-                                         TextWrapping="Wrap"
-                                         IsVisible="{Binding HasDiffPreview}"/>
-                            </StackPanel>
+                                </StackPanel>
 
                             <TextBlock Text="Select a file from current index or from snapshot history."
                                        Opacity="0.7"
@@ -428,7 +421,7 @@
                                                         IsEnabled="{Binding CanRestoreSelectedVersion}"/>
                                             </StackPanel>
 
-                                            <Button Content="Diff with previous"
+                                            <Button Content="Preview diff"
                                                     Command="{Binding CompareSelectedWithPreviousCommand}"
                                                     IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
 
@@ -436,13 +429,7 @@
                                                        TextWrapping="Wrap"
                                                        Opacity="0.9"
                                                        IsVisible="{Binding HasVersionActionMessage}"/>
-
-                                            <TextBox Text="{Binding DiffPreview}"
-                                                     AcceptsReturn="True"
-                                                     IsReadOnly="True"
-                                                     Height="220"
-                                                     IsVisible="{Binding HasDiffPreview}"/>
-                                        </StackPanel>
+                                </StackPanel>
 
                                         <TextBlock Text="Select a file in commit list to open version controls."
                                                    Opacity="0.75"
@@ -455,8 +442,98 @@
                     </Grid>
                 </Border>
             </Border>
+
+            <Border IsVisible="{Binding IsDiffPreviewMenuOpen}"
+                    Background="#B60A0F16"
+                    CornerRadius="0"
+                    Padding="24">
+                <Border HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        CornerRadius="14"
+                        BorderBrush="#33506E"
+                        BorderThickness="1"
+                        Padding="14"
+                        MaxHeight="920">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#0E1723" Offset="0"/>
+                            <GradientStop Color="#0A121D" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="Diff preview" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding DiffPreviewTitle}" Opacity="0.8" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="Close"
+                                    Command="{Binding CloseDiffPreviewMenuCommand}"
+                                    Padding="14,8"/>
+                        </Grid>
+
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding DiffPreviewSummary}"
+                                   Opacity="0.8"
+                                   TextWrapping="Wrap"/>
+
+                        <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
+                            <TextBlock Grid.Row="0"
+                                       Text="Building preview..."
+                                       Opacity="0.75"
+                                       IsVisible="{Binding IsDiffPreviewLoading}"/>
+
+                            <Grid Grid.Row="1"
+                                  ColumnDefinitions="*,*"
+                                  ColumnSpacing="10"
+                                  IsVisible="{Binding HasDiffPreviewColumns}">
+                                <Border Grid.Column="0"
+                                        Background="#101927"
+                                        BorderBrush="#22384D"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="10">
+                                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                        <TextBlock Text="Before" FontWeight="SemiBold"/>
+                                        <TextBox Grid.Row="1"
+                                                 Text="{Binding DiffPreviewLeftColumn}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="NoWrap"
+                                                 FontFamily="Cascadia Code,Consolas,Monospace"
+                                                 FontSize="12"/>
+                                    </Grid>
+                                </Border>
+
+                                <Border Grid.Column="1"
+                                        Background="#0F1A27"
+                                        BorderBrush="#22485A"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="10">
+                                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                        <TextBlock Text="After" FontWeight="SemiBold"/>
+                                        <TextBox Grid.Row="1"
+                                                 Text="{Binding DiffPreviewRightColumn}"
+                                                 IsReadOnly="True"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="NoWrap"
+                                                 FontFamily="Cascadia Code,Consolas,Monospace"
+                                                 FontSize="12"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <TextBlock Grid.Row="1"
+                                       Text="Diff data is unavailable for this file/version pair."
+                                       Opacity="0.75"
+                                       IsVisible="{Binding HasNoDiffPreviewColumns}"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Border>
         </Grid>
     </DockPanel>
 </UserControl>
-
 
