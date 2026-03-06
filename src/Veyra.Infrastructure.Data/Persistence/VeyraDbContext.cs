@@ -14,6 +14,8 @@ public class VeyraDbContext : DbContext
     public DbSet<D_WatchedFormat> WatchedFormats { get; set; } = null!;
     public DbSet<WatchedDirectoryFormat> WatchedDirectoryFormats { get; set; } = null!;
     public DbSet<Repository> Repositories { get; set; } = null!;
+    public DbSet<RepositorySnapshot> RepositorySnapshots { get; set; } = null!;
+    public DbSet<RepositorySnapshotEntry> RepositorySnapshotEntries { get; set; } = null!;
     public DbSet<UserProfile> UserProfiles { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -71,6 +73,40 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => e.DirectoryId).IsUnique();
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.FileCount).HasDefaultValue(0);
+            entity.Property(e => e.VersionCount).HasDefaultValue(0);
+            entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
+        });
+
+        modelBuilder.Entity<RepositorySnapshot>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Trigger).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasOne(e => e.Repository)
+                .WithMany(r => r.Snapshots)
+                .HasForeignKey(e => e.RepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.RepositoryId, e.CreatedAt });
+        });
+
+        modelBuilder.Entity<RepositorySnapshotEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RelativePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.ParentRelativePath).HasMaxLength(2048);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Extension).HasMaxLength(32);
+            entity.Property(e => e.ContentHashSha256).HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasOne(e => e.Snapshot)
+                .WithMany(s => s.Entries)
+                .HasForeignKey(e => e.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(e => new { e.SnapshotId, e.RelativePath }).IsUnique();
+            entity.HasIndex(e => new { e.SnapshotId, e.ParentRelativePath });
+            entity.HasIndex(e => new { e.RepositoryId, e.RelativePath });
+            entity.HasIndex(e => e.ContentHashSha256);
         });
 
         modelBuilder.Entity<UserProfile>(entity =>

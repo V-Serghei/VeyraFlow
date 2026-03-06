@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.IO;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Infrastructure.Data.Persistence;
@@ -14,7 +15,7 @@ public class DbContextTests
         var services = new ServiceCollection();
         services.AddInfrastructureData("Data Source=:memory:");
 
-        var sp = services.BuildServiceProvider();
+        using var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<VeyraDbContext>();
 
         Assert.NotNull(db);
@@ -32,7 +33,7 @@ public class DbContextTests
             var services = new ServiceCollection();
             services.AddInfrastructureData(cs);
 
-            var sp = services.BuildServiceProvider();
+            using var sp = services.BuildServiceProvider();
             using var scope = sp.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
 
@@ -43,7 +44,23 @@ public class DbContextTests
         }
         finally
         {
-            if (File.Exists(dbPath)) File.Delete(dbPath);
+            SqliteConnection.ClearAllPools();
+
+            if (File.Exists(dbPath))
+            {
+                for (var i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        File.Delete(dbPath);
+                        break;
+                    }
+                    catch (IOException) when (i < 4)
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                }
+            }
         }
     }
 }

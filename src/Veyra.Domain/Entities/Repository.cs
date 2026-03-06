@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class Repository
 {
@@ -9,8 +9,15 @@ public class Repository
     public int DirectoryId { get; set; }
     public Watched.WatchedDirectory Directory { get; set; } = null!;
 
+    public int FileCount { get; set; }
+    public int VersionCount { get; set; }
+    public long TotalSizeBytes { get; set; }
+    public DateTime? LastScannedAt { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }
+
+    public ICollection<RepositorySnapshot> Snapshots { get; set; } = new List<RepositorySnapshot>();
 }

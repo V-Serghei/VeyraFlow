@@ -88,3 +88,23 @@ src/Veyra.Desktop/runtimes/*/native/*.dylib
 *.env
 *.env.*
 !.env.example
+
+
+# Local dotnet and nuget caches
+.dotnet_home2/
+**/.dotnet_home2/
+.nuget/
+**/.nuget/
+.dotnet/
+**/.dotnet/
+
+# SDK advertising / temp
+**/sdk-advertising/
+**/workloadAdvertising*/
+**/useSharedDesignerContext.txt
+**/workloadVersion.txt
+
+# User and IDE files
+*.user
+*.suo
+*.userprefs
