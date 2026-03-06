@@ -1,4 +1,4 @@
-﻿﻿using Avalonia.Controls.ApplicationLifetimes;
+﻿using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using System;
 using System.IO;
@@ -9,6 +9,7 @@ using Serilog;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Scheduling;
 using Veyra.Infrastructure.Data.Persistence;
 using AvaloniaApplication = Avalonia.Application;
 using DependencyInjection = Veyra.Desktop.CompositionRoot.DependencyInjection;
@@ -18,6 +19,7 @@ namespace Veyra.Desktop;
 public partial class App : AvaloniaApplication
 {
     public static IServiceProvider? _serviceProvider { get; private set; } = null!;
+    private static ISnapshotScheduler? _snapshotScheduler;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -52,9 +54,14 @@ public partial class App : AvaloniaApplication
             }
         }
 
+        _snapshotScheduler = _serviceProvider.GetService<ISnapshotScheduler>();
+        _snapshotScheduler?.Start();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
         {
             classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            classicDesktop.Exit += OnDesktopExit;
+
             var nav = _serviceProvider.GetRequiredService<INavigationService>();
 
             if (shouldOpenMain)
@@ -68,8 +75,14 @@ public partial class App : AvaloniaApplication
 
     private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {
+        try
+        {
+            _snapshotScheduler?.StopAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
         Log.CloseAndFlush();
     }
-
-
 }

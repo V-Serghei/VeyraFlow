@@ -17,6 +17,6 @@ public partial class WelcomeIntroViewModel(INavigationService navigationService)
     [RelayCommand]
     private async Task LearnMore() => await _navigationService.ShowInfoAsync();
 
-    public string Title => "Welcome to the Versioned Explorer";
-    public string Subtitle => "A file explorer with version control. Track changes, create snapshots, and never lose your data.";
+    public string Title => "Версионный проводник для локальных проектов";
+    public string Subtitle => "Выбирай папки, задавай форматы, получай историю изменений и безопасное восстановление версий без ручной работы в консоли.";
 }

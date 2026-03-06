@@ -4,12 +4,12 @@ use std::ffi::{CStr, CString};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::os::raw::{c_char, c_int};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 thread_local! {
@@ -166,9 +166,17 @@ fn blake3_file_hex(path: &Path) -> Result<String, String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 fn sha256_file_hex(path: &Path) -> Result<String, String> {
+    sha256_file_hex_with_limit(path, 0)
+}
+
+fn sha256_file_hex_with_limit(path: &Path, max_read_bytes_per_sec: u64) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
+
+    let throttled = max_read_bytes_per_sec > 0;
+    let start = Instant::now();
+    let mut total_read = 0_u64;
 
     loop {
         let read = file
@@ -180,12 +188,251 @@ fn sha256_file_hex(path: &Path) -> Result<String, String> {
         }
 
         hasher.update(&buffer[..read]);
+
+        if throttled {
+            total_read += read as u64;
+
+            let expected = Duration::from_secs_f64(total_read as f64 / max_read_bytes_per_sec as f64);
+            let elapsed = start.elapsed();
+            if expected > elapsed {
+                std::thread::sleep(expected - elapsed);
+            }
+        }
     }
 
     let digest = hasher.finalize();
     Ok(bytes_to_hex(&digest))
 }
 
+#[derive(Serialize)]
+struct StoredBlockRef {
+    sequence: u32,
+    block_hash_blake3: String,
+    length_bytes: u32,
+    stored_size_bytes: u64,
+}
+
+#[derive(Serialize)]
+struct StoreFileBlocksResult {
+    file_size_bytes: u64,
+    stored_size_bytes: u64,
+    block_count: u32,
+    deduped_blocks: u32,
+    new_blocks: u32,
+    blocks: Vec<StoredBlockRef>,
+}
+
+#[derive(Deserialize)]
+struct RestoreBlockRef {
+    block_hash_blake3: String,
+    length_bytes: u32,
+}
+
+fn block_path_for_hash(store_root: &Path, hash: &str) -> PathBuf {
+    let p1 = hash.get(0..2).unwrap_or("00");
+    let p2 = hash.get(2..4).unwrap_or("00");
+
+    store_root
+        .join("blocks")
+        .join(p1)
+        .join(p2)
+        .join(format!("{hash}.zst"))
+}
+
+fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bool), String> {
+    let block_path = block_path_for_hash(store_root, hash);
+
+    if block_path.exists() {
+        let sz = fs::metadata(&block_path)
+            .map_err(|e| format!("metadata {}: {e}", block_path.display()))?
+            .len();
+        return Ok((sz, false));
+    }
+
+    let parent = block_path
+        .parent()
+        .ok_or_else(|| format!("no parent for {}", block_path.display()))?;
+
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("create_dir_all {}: {e}", parent.display()))?;
+
+    if block_path.exists() {
+        let sz = fs::metadata(&block_path)
+            .map_err(|e| format!("metadata {}: {e}", block_path.display()))?
+            .len();
+        return Ok((sz, false));
+    }
+
+    let compressed = zstd::encode_all(bytes, 3)
+        .map_err(|e| format!("compress block {hash}: {e}"))?;
+
+    let temp_path = block_path.with_extension(format!("{}.tmp", std::process::id()));
+    if temp_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    {
+        let mut out = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .map_err(|e| format!("create temp block {}: {e}", temp_path.display()))?;
+
+        out.write_all(&compressed)
+            .map_err(|e| format!("write temp block {}: {e}", temp_path.display()))?;
+    }
+
+    if let Err(e) = fs::rename(&temp_path, &block_path) {
+        if block_path.exists() {
+            let _ = fs::remove_file(&temp_path);
+        } else {
+            return Err(format!(
+                "rename temp block {} -> {}: {e}",
+                temp_path.display(),
+                block_path.display()
+            ));
+        }
+    }
+
+    let stored_size = fs::metadata(&block_path)
+        .map_err(|e| format!("metadata {}: {e}", block_path.display()))?
+        .len();
+
+    Ok((stored_size, true))
+}
+
+fn store_file_blocks(file_path: &Path, store_root: &Path, chunk_size: usize) -> Result<Vec<u8>, String> {
+    if !file_path.exists() {
+        return Err(format!("file not found: {}", file_path.display()));
+    }
+
+    if !file_path.is_file() {
+        return Err(format!("path is not a file: {}", file_path.display()));
+    }
+
+    if chunk_size == 0 {
+        return Err("chunk size must be positive".to_string());
+    }
+
+    let mut file = File::open(file_path)
+        .map_err(|e| format!("open {}: {e}", file_path.display()))?;
+
+    let mut buffer = vec![0_u8; chunk_size];
+    let mut blocks = Vec::new();
+
+    let mut sequence = 0_u32;
+    let mut total_file_size = 0_u64;
+    let mut total_stored_size = 0_u64;
+    let mut deduped_blocks = 0_u32;
+    let mut new_blocks = 0_u32;
+
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("read {}: {e}", file_path.display()))?;
+
+        if read == 0 {
+            break;
+        }
+
+        let chunk = &buffer[..read];
+        let hash = blake3::hash(chunk).to_hex().to_string();
+        let (stored_size, is_new) = persist_block(store_root, &hash, chunk)?;
+
+        total_file_size += read as u64;
+        total_stored_size += stored_size;
+
+        if is_new {
+            new_blocks += 1;
+        } else {
+            deduped_blocks += 1;
+        }
+
+        blocks.push(StoredBlockRef {
+            sequence,
+            block_hash_blake3: hash,
+            length_bytes: read as u32,
+            stored_size_bytes: stored_size,
+        });
+
+        sequence += 1;
+    }
+
+    let payload = StoreFileBlocksResult {
+        file_size_bytes: total_file_size,
+        stored_size_bytes: total_stored_size,
+        block_count: blocks.len() as u32,
+        deduped_blocks,
+        new_blocks,
+        blocks,
+    };
+
+    serde_json::to_vec(&payload).map_err(|e| format!("serialize block-store result: {e}"))
+}
+
+fn restore_file_from_blocks(
+    store_root: &Path,
+    blocks_json: &str,
+    target_path: &Path,
+    overwrite_existing: bool,
+) -> Result<i64, String> {
+    let blocks: Vec<RestoreBlockRef> = serde_json::from_str(blocks_json)
+        .map_err(|e| format!("parse blocks json: {e}"))?;
+
+    if blocks.is_empty() {
+        return Err("blocks list is empty".to_string());
+    }
+
+    if target_path.exists() && !overwrite_existing {
+        return Err(format!("target already exists: {}", target_path.display()));
+    }
+
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create target directory {}: {e}", parent.display()))?;
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true);
+    if overwrite_existing {
+        options.truncate(true);
+    } else {
+        options.create_new(true);
+    }
+
+    let mut out = options
+        .open(target_path)
+        .map_err(|e| format!("open target {}: {e}", target_path.display()))?;
+
+    let mut written = 0_i64;
+
+    for block in blocks {
+        let block_path = block_path_for_hash(store_root, &block.block_hash_blake3);
+
+        let compressed = fs::read(&block_path)
+            .map_err(|e| format!("read block {}: {e}", block_path.display()))?;
+
+        let decompressed = zstd::decode_all(compressed.as_slice())
+            .map_err(|e| format!("decompress block {}: {e}", block_path.display()))?;
+
+        let len = block.length_bytes as usize;
+        if decompressed.len() < len {
+            return Err(format!(
+                "block {} is shorter than expected {} < {}",
+                block.block_hash_blake3,
+                decompressed.len(),
+                len
+            ));
+        }
+
+        out.write_all(&decompressed[..len])
+            .map_err(|e| format!("write target {}: {e}", target_path.display()))?;
+
+        written += len as i64;
+    }
+
+    Ok(written)
+}
 #[derive(Serialize)]
 struct ScanEntry {
     relative_path: String,
@@ -198,10 +445,33 @@ struct ScanEntry {
     content_hash_sha256: Option<String>,
 }
 
+struct IopsState {
+    started_at: Instant,
+    operations: u64,
+}
+
+fn maybe_throttle_iops(max_file_ops_per_sec: u64, state: &mut IopsState) {
+    if max_file_ops_per_sec == 0 {
+        return;
+    }
+
+    state.operations += 1;
+
+    let expected = Duration::from_secs_f64(state.operations as f64 / max_file_ops_per_sec as f64);
+    let elapsed = state.started_at.elapsed();
+
+    if expected > elapsed {
+        std::thread::sleep(expected - elapsed);
+    }
+}
+
 fn collect_entries(
     root: &Path,
     current: &Path,
     extension_filters: &HashSet<String>,
+    max_read_bytes_per_sec: u64,
+    max_file_ops_per_sec: u64,
+    iops_state: &mut IopsState,
     entries: &mut Vec<ScanEntry>,
 ) -> Result<(), String> {
     let read_dir = fs::read_dir(current)
@@ -237,7 +507,15 @@ fn collect_entries(
                 content_hash_sha256: None,
             });
 
-            collect_entries(root, &path, extension_filters, entries)?;
+            collect_entries(
+                root,
+                &path,
+                extension_filters,
+                max_read_bytes_per_sec,
+                max_file_ops_per_sec,
+                iops_state,
+                entries,
+            )?;
             continue;
         }
 
@@ -255,8 +533,9 @@ fn collect_entries(
             }
         }
 
+        maybe_throttle_iops(max_file_ops_per_sec, iops_state);
 
-        let hash = blake3_file_hex(&path)?;
+        let hash = sha256_file_hex_with_limit(&path, max_read_bytes_per_sec)?;
         entries.push(ScanEntry {
             relative_path: relative.clone(),
             parent_relative_path: parent_relative_path(&relative),
@@ -272,7 +551,12 @@ fn collect_entries(
     Ok(())
 }
 
-fn run_directory_scan(root_path: &Path, extension_filters: &HashSet<String>) -> Result<Vec<u8>, String> {
+fn run_directory_scan(
+    root_path: &Path,
+    extension_filters: &HashSet<String>,
+    max_read_bytes_per_sec: u64,
+    max_file_ops_per_sec: u64,
+) -> Result<Vec<u8>, String> {
     if !root_path.exists() {
         return Err(format!("path not found: {}", root_path.display()));
     }
@@ -282,12 +566,25 @@ fn run_directory_scan(root_path: &Path, extension_filters: &HashSet<String>) -> 
     }
 
     let mut entries = Vec::new();
-    collect_entries(root_path, root_path, extension_filters, &mut entries)?;
+    let mut iops_state = IopsState {
+        started_at: Instant::now(),
+        operations: 0,
+    };
+
+    collect_entries(
+        root_path,
+        root_path,
+        extension_filters,
+        max_read_bytes_per_sec,
+        max_file_ops_per_sec,
+        &mut iops_state,
+        &mut entries,
+    )?;
+
     entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
 
     serde_json::to_vec(&entries).map_err(|e| format!("serialize scan result: {e}"))
 }
-
 #[no_mangle]
 pub extern "C" fn veyra_last_error_utf8(out: *mut u8, out_len: u64, written: *mut u64) -> i32 {
     let data = get_last_error();
@@ -334,34 +631,14 @@ pub extern "C" fn veyra_blake3_hash_file(
     };
 
     let path = Path::new(path_str);
-    let mut file = match File::open(path) {
+    let hex = match blake3_file_hex(path) {
         Ok(v) => v,
         Err(e) => {
-            set_error_from("open file", e);
+            set_last_error(&e);
             return -1;
         }
     };
 
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = [0_u8; 64 * 1024];
-
-    loop {
-        let read = match file.read(&mut buf) {
-            Ok(v) => v,
-            Err(e) => {
-                set_error_from("read file", e);
-                return -1;
-            }
-        };
-
-        if read == 0 {
-            break;
-        }
-
-        hasher.update(&buf[..read]);
-    }
-
-    let hex = hasher.finalize().to_hex();
     copy_bytes_to_out(hex.as_bytes(), output, output_len)
 }
 
@@ -413,7 +690,7 @@ pub extern "C" fn veyra_scan_directory_utf8(
     let filters = parse_extension_filters(extensions_csv_ptr);
     let root = Path::new(root_path_str);
 
-    let data = match run_directory_scan(root, &filters) {
+    let data = match run_directory_scan(root, &filters, 0, 0) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);
@@ -422,6 +699,140 @@ pub extern "C" fn veyra_scan_directory_utf8(
     };
 
     write_bytes(out, out_len, &data, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_scan_directory_limited_utf8(
+    root_path_ptr: *const c_char,
+    extensions_csv_ptr: *const c_char,
+    max_read_bytes_per_sec: u64,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(root_path_str) = ptr_to_str(root_path_ptr) else {
+        set_last_error("root path is null or invalid utf-8");
+        return -1;
+    };
+
+    let filters = parse_extension_filters(extensions_csv_ptr);
+    let root = Path::new(root_path_str);
+
+    let data = match run_directory_scan(root, &filters, max_read_bytes_per_sec, 0) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &data, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_scan_directory_limited_v2_utf8(
+    root_path_ptr: *const c_char,
+    extensions_csv_ptr: *const c_char,
+    max_read_bytes_per_sec: u64,
+    max_file_ops_per_sec: u64,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(root_path_str) = ptr_to_str(root_path_ptr) else {
+        set_last_error("root path is null or invalid utf-8");
+        return -1;
+    };
+
+    let filters = parse_extension_filters(extensions_csv_ptr);
+    let root = Path::new(root_path_str);
+
+    let data = match run_directory_scan(root, &filters, max_read_bytes_per_sec, max_file_ops_per_sec) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &data, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_store_file_blocks_utf8(
+    file_path_ptr: *const c_char,
+    store_root_ptr: *const c_char,
+    chunk_size: u32,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(file_path_str) = ptr_to_str(file_path_ptr) else {
+        set_last_error("file path is null or invalid utf-8");
+        return -1;
+    };
+
+    let Some(store_root_str) = ptr_to_str(store_root_ptr) else {
+        set_last_error("store root is null or invalid utf-8");
+        return -1;
+    };
+
+    let effective_chunk = if chunk_size == 0 { 65536 } else { chunk_size as usize }.clamp(4096, 4 * 1024 * 1024);
+
+    let file_path = Path::new(file_path_str);
+    let store_root = Path::new(store_root_str);
+
+    let data = match store_file_blocks(file_path, store_root, effective_chunk) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &data, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_restore_file_blocks_utf8(
+    store_root_ptr: *const c_char,
+    blocks_json_ptr: *const c_char,
+    target_path_ptr: *const c_char,
+    overwrite_existing: c_int,
+) -> i64 {
+    clear_last_error();
+
+    let Some(store_root_str) = ptr_to_str(store_root_ptr) else {
+        set_last_error("store root is null or invalid utf-8");
+        return -1;
+    };
+
+    let Some(blocks_json_str) = ptr_to_str(blocks_json_ptr) else {
+        set_last_error("blocks json is null or invalid utf-8");
+        return -1;
+    };
+
+    let Some(target_path_str) = ptr_to_str(target_path_ptr) else {
+        set_last_error("target path is null or invalid utf-8");
+        return -1;
+    };
+
+    let store_root = Path::new(store_root_str);
+    let target_path = Path::new(target_path_str);
+
+    match restore_file_from_blocks(store_root, blocks_json_str, target_path, overwrite_existing != 0) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            -1
+        }
+    }
 }
 
 #[no_mangle]
@@ -620,3 +1031,4 @@ pub extern "C" fn veyra_free_string(s: *mut c_char) {
         }
     }
 }
+

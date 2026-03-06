@@ -28,7 +28,7 @@
                    Text="{Binding ErrorMessage}" Foreground="#F87171"
                    IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
-        <Grid ColumnDefinitions="260,*,300" ColumnSpacing="12">
+        <Grid ColumnDefinitions="260,*,340" ColumnSpacing="12">
             <Border Grid.Column="0" Background="#121212" CornerRadius="10" Padding="12">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="Структура папок" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
@@ -81,22 +81,55 @@
             </Border>
 
             <Border Grid.Column="2" Background="#121212" CornerRadius="10" Padding="12">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Детали" FontSize="13" FontWeight="SemiBold"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Детали" FontSize="13" FontWeight="SemiBold"/>
 
-                    <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
-                        <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding SelectedItem.Type}"/>
-                        <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
-                        <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
-                        <TextBlock Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap" Opacity="0.7"/>
-                    </StackPanel>
+                        <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
+                            <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding SelectedItem.Type}"/>
+                            <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
+                            <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
+                            <TextBlock Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap" Opacity="0.7"/>
 
-                    <StackPanel IsVisible="{Binding !HasSelectedItem}" Spacing="6">
-                        <TextBlock Text="Выберите файл или папку" Opacity="0.75"/>
+                            <Border Height="1" Background="#1E1E1E" Margin="0,4"/>
+
+                            <TextBlock Text="Версии файла" FontWeight="SemiBold"/>
+                            <TextBlock Text="Загрузка версий..." Opacity="0.7" IsVisible="{Binding IsVersionLoading}"/>
+
+                            <ListBox ItemsSource="{Binding FileVersions}"
+                                     SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                     MaxHeight="180">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                        <StackPanel Margin="2" Spacing="2">
+                                            <TextBlock Text="{Binding Title}"/>
+                                            <TextBlock Text="{Binding SizeDisplay}" Opacity="0.7" FontSize="11"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Button Content="В новый файл" Command="{Binding RestoreVersionAsCopyCommand}"/>
+                                <Button Content="Поверх текущего" Command="{Binding RestoreVersionOverwriteCommand}"/>
+                            </StackPanel>
+
+                            <Button Content="Diff с предыдущей" Command="{Binding CompareSelectedWithPreviousCommand}"/>
+
+                            <TextBlock Text="{Binding VersionActionMessage}" TextWrapping="Wrap" Opacity="0.9"
+                                       IsVisible="{Binding VersionActionMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+                            <TextBox Text="{Binding DiffPreview}" AcceptsReturn="True" IsReadOnly="True" Height="220"
+                                     IsVisible="{Binding DiffPreview, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding !HasSelectedItem}" Spacing="6">
+                            <TextBlock Text="Выберите файл или папку" Opacity="0.75"/>
+                        </StackPanel>
                     </StackPanel>
-                </StackPanel>
+                </ScrollViewer>
             </Border>
         </Grid>
     </DockPanel>

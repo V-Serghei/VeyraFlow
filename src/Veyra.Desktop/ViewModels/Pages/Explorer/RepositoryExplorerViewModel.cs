@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -38,8 +39,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty] private ExplorerItemViewModel? _selectedItem;
     [ObservableProperty] private bool _hasSelectedItem;
 
+    [ObservableProperty] private ExplorerFileVersionViewModel? _selectedVersion;
+    [ObservableProperty] private bool _isVersionLoading;
+    [ObservableProperty] private string? _versionActionMessage;
+    [ObservableProperty] private string? _diffPreview;
+
     public ObservableCollection<ExplorerTreeNodeViewModel> TreeNodes { get; } = [];
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
+    public ObservableCollection<ExplorerFileVersionViewModel> FileVersions { get; } = [];
 
     public RepositoryExplorerViewModel(
         IMediator mediator,
@@ -55,7 +62,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = null;
+            VersionActionMessage = null;
+            DiffPreview = null;
             SelectedItem = null;
+            SelectedVersion = null;
+            FileVersions.Clear();
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
@@ -80,6 +91,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ErrorMessage = "Не удалось загрузить содержимое репозитория.";
             Items.Clear();
             TreeNodes.Clear();
+            FileVersions.Clear();
             IsEmpty = true;
         }
         finally
@@ -99,6 +111,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnSelectedItemChanged(ExplorerItemViewModel? value)
     {
         HasSelectedItem = value is not null;
+        _ = LoadVersionsForSelectedItemAsync(value);
     }
 
     [RelayCommand]
@@ -180,6 +193,160 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             node.IsExpanded = true;
             SelectedTreeNode = node;
             SelectTreeNode(node);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreVersionOverwriteAsync()
+    {
+        var selectedItem = SelectedItem;
+        var selectedVersion = SelectedVersion;
+
+        if (selectedItem is null || selectedItem.IsDirectory || selectedVersion is null)
+            return;
+
+        VersionActionMessage = null;
+        ErrorMessage = null;
+
+        var result = await _mediator.Send(new RestoreFileVersionCommand(
+            RepositoryId,
+            selectedItem.RelativePath,
+            selectedVersion.FileVersionId,
+            OverwriteCurrent: true));
+
+        if (!result.Success)
+        {
+            ErrorMessage = result.Error ?? "Не удалось восстановить файл.";
+            return;
+        }
+
+        VersionActionMessage = $"Файл восстановлен поверх текущего\n{result.Value}";
+    }
+
+    [RelayCommand]
+    private async Task RestoreVersionAsCopyAsync()
+    {
+        var selectedItem = SelectedItem;
+        var selectedVersion = SelectedVersion;
+
+        if (selectedItem is null || selectedItem.IsDirectory || selectedVersion is null)
+            return;
+
+        VersionActionMessage = null;
+        ErrorMessage = null;
+
+        var result = await _mediator.Send(new RestoreFileVersionCommand(
+            RepositoryId,
+            selectedItem.RelativePath,
+            selectedVersion.FileVersionId,
+            OverwriteCurrent: false,
+            TargetPath: null));
+
+        if (!result.Success)
+        {
+            ErrorMessage = result.Error ?? "Не удалось восстановить копию файла.";
+            return;
+        }
+
+        VersionActionMessage = $"Файл восстановлен в новый путь\n{result.Value}";
+    }
+
+    [RelayCommand]
+    private async Task CompareSelectedWithPreviousAsync()
+    {
+        var selectedVersion = SelectedVersion;
+        if (selectedVersion is null)
+            return;
+
+        var ordered = FileVersions.ToList();
+        var index = ordered.FindIndex(v => v.FileVersionId == selectedVersion.FileVersionId);
+        if (index < 0 || index + 1 >= ordered.Count)
+        {
+            ErrorMessage = "Недостаточно версий для сравнения.";
+            return;
+        }
+
+        var previous = ordered[index + 1];
+
+        ErrorMessage = null;
+        DiffPreview = null;
+
+        var diffResult = await _mediator.Send(new GetTextDiffQuery(
+            selectedVersion.FileVersionId,
+            previous.FileVersionId,
+            4000));
+
+        if (!diffResult.Success || diffResult.Value is null)
+        {
+            ErrorMessage = diffResult.Error ?? "Не удалось построить diff.";
+            return;
+        }
+
+        var value = diffResult.Value;
+        VersionActionMessage = $"Diff готов\n+{value.AddedLines} / -{value.RemovedLines}";
+
+        var lines = value.Lines.Take(60)
+            .Select(line => line.Kind switch
+            {
+                "add" => "+ " + line.Text,
+                "remove" => "- " + line.Text,
+                _ => "  " + line.Text
+            });
+
+        var builder = new StringBuilder();
+        foreach (var line in lines)
+            builder.AppendLine(line);
+
+        if (value.IsTruncated)
+            builder.AppendLine("... diff обрезан по лимиту строк ...");
+
+        DiffPreview = builder.ToString().TrimEnd();
+    }
+
+    private async Task LoadVersionsForSelectedItemAsync(ExplorerItemViewModel? item)
+    {
+        FileVersions.Clear();
+        SelectedVersion = null;
+        DiffPreview = null;
+        VersionActionMessage = null;
+
+        if (item is null || item.IsDirectory || RepositoryId == 0)
+            return;
+
+        try
+        {
+            IsVersionLoading = true;
+
+            var versions = await _mediator.Send(new GetFileVersionHistoryQuery(
+                RepositoryId,
+                item.RelativePath,
+                40));
+
+            foreach (var version in versions)
+            {
+                FileVersions.Add(new ExplorerFileVersionViewModel
+                {
+                    FileVersionId = version.FileVersionId,
+                    CreatedAtUtc = version.CreatedAtUtc,
+                    SizeBytes = version.SizeBytes,
+                    IsDeletionMarker = version.IsDeletionMarker,
+                    ContentHashSha256 = version.ContentHashSha256
+                });
+            }
+
+            SelectedVersion = FileVersions.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load file versions. RepositoryId {RepositoryId}. Path {Path}",
+                RepositoryId,
+                item.RelativePath);
+            ErrorMessage = "Не удалось загрузить версии файла.";
+        }
+        finally
+        {
+            IsVersionLoading = false;
         }
     }
 

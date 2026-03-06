@@ -1,13 +1,15 @@
-﻿using System;
+using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
 using Veyra.Desktop.ViewModels.Pages.SetupWizard;
+using Veyra.Desktop.ViewModels.Pages.Settings;
 using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views;
@@ -33,12 +35,29 @@ public static class DependencyInjection
 
         var services = new ServiceCollection();
 
+        services.AddSingleton<IConfiguration>(cfg);
         services.AddVeyraLogging();
 
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
         services.AddInfrastructureNative(cfg);
+
+        var schedulerOptions = new SnapshotSchedulerOptions
+        {
+            Enabled = cfg.GetValue<bool?>("SnapshotScheduler:Enabled") ?? true,
+            PollSeconds = cfg.GetValue<int?>("SnapshotScheduler:PollSeconds") ?? 30,
+            IntervalMinutes = cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? 15,
+            QuietHoursStartHour = cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0,
+            QuietHoursEndHour = cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0,
+            MaxReadBytesPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? 0,
+            MaxIoOperationsPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? 0,
+            RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,
+            RetryDelaySeconds = cfg.GetValue<int?>("SnapshotScheduler:RetryDelaySeconds") ?? 10
+        };
+
+        services.AddSingleton(schedulerOptions);
+        services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
@@ -55,6 +74,7 @@ public static class DependencyInjection
         services.AddTransient<RepositoryDashboardViewModel>();
         services.AddTransient<RepositoryExplorerViewModel>();
         services.AddTransient<RepositorySettingsViewModel>();
+        services.AddTransient<AppSettingsViewModel>();
 
         services.AddTransient<CreateRepositoryWindowViewModel>();
 
@@ -78,3 +98,4 @@ public static class DependencyInjection
         return services.BuildServiceProvider();
     }
 }
+

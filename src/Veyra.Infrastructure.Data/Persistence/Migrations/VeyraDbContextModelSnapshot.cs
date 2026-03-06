@@ -17,6 +17,48 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Extension")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RepositoryId", "IsDeleted");
+
+                    b.HasIndex("RepositoryId", "RelativePath")
+                        .IsUnique();
+
+                    b.ToTable("FileIdentities");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.FileSnapshot", b =>
                 {
                     b.Property<int>("Id")
@@ -49,6 +91,77 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasIndex("FilePath");
 
                     b.ToTable("FileSnapshots");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHashSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeletionMarker")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastWriteUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentHashSha256");
+
+                    b.HasIndex("FileIdentityId", "CreatedAt");
+
+                    b.ToTable("FileVersions");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionBlock", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BlockHashBlake3")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LengthBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StoredSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockHashBlake3");
+
+                    b.HasIndex("FileVersionId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("FileVersionBlocks");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
@@ -203,6 +316,36 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.ToTable("RepositorySnapshotEntries");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.SnapshotFileLink", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileVersionId");
+
+                    b.HasIndex("FileIdentityId", "SnapshotId");
+
+                    b.HasIndex("SnapshotId", "FileIdentityId")
+                        .IsUnique();
+
+                    b.ToTable("SnapshotFileLinks");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.UserProfile", b =>
                 {
                     b.Property<int>("Id")
@@ -340,6 +483,39 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.ToTable("WatchedDirectoryFormats");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.Repository", "Repository")
+                        .WithMany("FileIdentities")
+                        .HasForeignKey("RepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Repository");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileIdentity", "FileIdentity")
+                        .WithMany("Versions")
+                        .HasForeignKey("FileIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileIdentity");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionBlock", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", "FileVersion")
+                        .WithMany("Blocks")
+                        .HasForeignKey("FileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileVersion");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
                 {
                     b.HasOne("Veyra.Domain.Entities.Watched.WatchedDirectory", "Directory")
@@ -373,6 +549,33 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Navigation("Snapshot");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.SnapshotFileLink", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileIdentity", "FileIdentity")
+                        .WithMany("SnapshotLinks")
+                        .HasForeignKey("FileIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", "FileVersion")
+                        .WithMany("SnapshotLinks")
+                        .HasForeignKey("FileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.RepositorySnapshot", "Snapshot")
+                        .WithMany("FileLinks")
+                        .HasForeignKey("SnapshotId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileIdentity");
+
+                    b.Navigation("FileVersion");
+
+                    b.Navigation("Snapshot");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectoryFormat", b =>
                 {
                     b.HasOne("Veyra.Domain.Entities.Watched.WatchedDirectory", "Directory")
@@ -392,14 +595,32 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Navigation("Format");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.Navigation("SnapshotLinks");
+
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.Navigation("Blocks");
+
+                    b.Navigation("SnapshotLinks");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
                 {
+                    b.Navigation("FileIdentities");
+
                     b.Navigation("Snapshots");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.RepositorySnapshot", b =>
                 {
                     b.Navigation("Entries");
+
+                    b.Navigation("FileLinks");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.D_WatchedFormat", b =>

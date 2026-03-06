@@ -3,26 +3,31 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         x:Class="Veyra.Desktop.Views.Windows.InfoWindow"
-        Width="640" Height="420"
+        Width="700" Height="470"
         WindowStartupLocation="CenterOwner"
         CanResize="False"
+        Background="#0F1116"
         Title="О проекте"
         d:DataContext="{d:DesignInstance vm:InfoWindowViewModel, IsDesignTimeCreatable=True}"
         x:DataType="vm:InfoWindowViewModel">
-    <ScrollViewer Padding="24">
-        <StackPanel Spacing="12">
-            <TextBlock Text="О VeyraFlow" FontSize="22" FontWeight="SemiBold"/>
-            <TextBlock TextWrapping="Wrap">
-                VeyraFlow is a desktop file explorer with content-based versioning,
-                snapshots, block-level deduplication, encryption, and a local SQLite index.
-                Cloud sync is optional (S3/WebDAV/SFTP).
-            </TextBlock>
-            <TextBlock Text="• Snapshots and change history"/>
-            <TextBlock Text="• Block deduplication and space saving"/>
-            <TextBlock Text="• End-to-end encryption"/>
-            <TextBlock Text="• Cross-language architecture: C# / Rust / Go"/>
-            <Button Content="Close" HorizontalAlignment="Right" Width="120" IsDefault="True"
-                    Command="{Binding CloseCommand}"/>
-        </StackPanel>
-    </ScrollViewer>
+    <Border Padding="20" Background="#0F1116">
+        <Border Background="#141922" CornerRadius="14" Padding="20" BorderBrush="#253246" BorderThickness="1">
+            <ScrollViewer>
+                <StackPanel Spacing="12">
+                    <TextBlock Text="VeyraFlow" FontSize="28" FontWeight="SemiBold" Foreground="#7DD3FC"/>
+                    <TextBlock Text="Desktop файловый менеджер с версионным контролем" FontSize="16" Opacity="0.82"/>
+                    <TextBlock TextWrapping="Wrap">
+                        Приложение отслеживает изменения в выбранных папках, хранит историю состояний,
+                        поддерживает восстановление и готовится к dedup/compression/encryption на ядре Rust.
+                    </TextBlock>
+                    <TextBlock Text="• Автоматическое и ручное сканирование"/>
+                    <TextBlock Text="• История по snapshot и детализация файлов"/>
+                    <TextBlock Text="• Локальная база SQLite"/>
+                    <TextBlock Text="• Архитектура C# + Rust + Go"/>
+                    <Button Content="Закрыть" HorizontalAlignment="Right" Width="120" IsDefault="True"
+                            Command="{Binding CloseCommand}"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
 </Window>

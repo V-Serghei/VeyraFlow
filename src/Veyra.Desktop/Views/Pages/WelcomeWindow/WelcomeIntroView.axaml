@@ -6,17 +6,32 @@
              d:DataContext="{d:DesignInstance vm:WelcomeIntroViewModel, IsDesignTimeCreatable=True}"
              x:DataType="vm:WelcomeIntroViewModel">
 
-    <Grid RowDefinitions="Auto,*,Auto" Margin="24">
-        <StackPanel Spacing="8">
-            <TextBlock Text="{Binding Title}" FontSize="32" FontWeight="SemiBold"/>
-            <TextBlock Text="{Binding Subtitle}" Opacity="0.85" TextWrapping="Wrap"/>
-        </StackPanel>
+    <Grid ColumnDefinitions="*,420" Margin="24">
+        <Border Grid.Column="0" Background="#111821" CornerRadius="14" Padding="26" Margin="0,0,16,0">
+            <StackPanel Spacing="12" VerticalAlignment="Center">
+                <TextBlock Text="VeyraFlow" FontSize="38" FontWeight="Bold" Foreground="#7DD3FC"/>
+                <TextBlock Text="{Binding Title}" FontSize="30" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding Subtitle}" Opacity="0.82" TextWrapping="Wrap" MaxWidth="520"/>
 
-        <Border Grid.Row="1" Margin="0,24,0,24" />
+                <Border Background="#142332" CornerRadius="10" Padding="14" Margin="0,8,0,0">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Что уже работает" FontWeight="SemiBold"/>
+                        <TextBlock Text="• Создание репозитория с выбором форматов"/>
+                        <TextBlock Text="• Рекурсивное сканирование и хеширование"/>
+                        <TextBlock Text="• История состояния по snapshot"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="12">
-            <Button Content="Начать" Width="140" Command="{Binding StartCommand}"/>
-            <Button Content="Узнать больше" Width="140" Command="{Binding LearnMoreCommand}"/>
-        </StackPanel>
+        <Border Grid.Column="1" Background="#131313" CornerRadius="14" Padding="24">
+            <StackPanel Spacing="14" VerticalAlignment="Center">
+                <TextBlock Text="Начало работы" FontSize="24" FontWeight="SemiBold"/>
+                <TextBlock Text="Пройдите короткие шаги перед входом в рабочее окно" Opacity="0.75" TextWrapping="Wrap"/>
+
+                <Button Content="Начать" Height="40" Command="{Binding StartCommand}"/>
+                <Button Content="О проекте" Height="40" Command="{Binding LearnMoreCommand}"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </UserControl>

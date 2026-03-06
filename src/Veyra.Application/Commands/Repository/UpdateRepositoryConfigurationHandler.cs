@@ -18,6 +18,8 @@ public sealed class UpdateRepositoryConfigurationHandler(
     {
         try
         {
+            log.LogInformation("Updating repository configuration {RepositoryId}", request.RepositoryId);
+
             var repo = await repositories.GetRepositoryByIdAsync(request.RepositoryId, ct);
             if (repo is null || repo.IsDeleted)
                 return OperationResult.Fail("Репозиторий не найден.");
@@ -63,8 +65,14 @@ public sealed class UpdateRepositoryConfigurationHandler(
             if (toLink.Count > 0)
                 await setup.LinkDirectoryToFormatsAsync(normalizedPath, toLink, ct);
 
-            await scanner.ScanRepositoryAsync(repo.Id, null, ct);
+            await scanner.ScanRepositoryAsync(repo.Id, null, null, ct);
             await native.ApplySetupAsync(ct);
+
+            log.LogInformation(
+                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}",
+                repo.Id,
+                normalizedPath,
+                normalizedFormats.Count);
 
             return OperationResult.Ok();
         }
@@ -104,3 +112,4 @@ public sealed class UpdateRepositoryConfigurationHandler(
             .ToList();
     }
 }
+

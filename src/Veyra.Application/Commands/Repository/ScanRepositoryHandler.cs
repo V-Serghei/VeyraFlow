@@ -15,7 +15,17 @@ public sealed class ScanRepositoryHandler(
     {
         try
         {
-            var result = await scanner.ScanRepositoryAsync(request.RepositoryId, request.Progress, ct);
+            log.LogInformation("Manual scan requested for repository {RepositoryId}", request.RepositoryId);
+
+            var result = await scanner.ScanRepositoryAsync(request.RepositoryId, request.Progress, null, ct);
+
+            log.LogInformation(
+                "Manual scan finished for repository {RepositoryId}. Files {Files}. Entries {Entries}. Trigger {Trigger}",
+                request.RepositoryId,
+                result.FileEntries,
+                result.TotalEntries,
+                result.Trigger);
+
             return OperationResult<RepositoryScanResultDto>.Ok(result);
         }
         catch (Exception ex)
@@ -25,3 +35,4 @@ public sealed class ScanRepositoryHandler(
         }
     }
 }
+

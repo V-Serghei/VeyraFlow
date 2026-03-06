@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 
@@ -10,6 +10,11 @@ public class VeyraDbContext : DbContext
         : base(options) { }
 
     public DbSet<FileSnapshot> FileSnapshots { get; set; } = null!;
+    public DbSet<FileIdentity> FileIdentities { get; set; } = null!;
+    public DbSet<FileVersion> FileVersions { get; set; } = null!;
+    public DbSet<FileVersionBlock> FileVersionBlocks { get; set; } = null!;
+    public DbSet<SnapshotFileLink> SnapshotFileLinks { get; set; } = null!;
+
     public DbSet<WatchedDirectory> WatchedDirectories { get; set; } = null!;
     public DbSet<D_WatchedFormat> WatchedFormats { get; set; } = null!;
     public DbSet<WatchedDirectoryFormat> WatchedDirectoryFormats { get; set; } = null!;
@@ -31,6 +36,80 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.ContentHash).IsRequired().HasMaxLength(128);
             entity.HasIndex(e => e.ContentHash);
             entity.HasIndex(e => e.FilePath);
+        });
+
+        modelBuilder.Entity<FileIdentity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RelativePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Extension).HasMaxLength(32);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+
+            entity.HasOne(e => e.Repository)
+                .WithMany(r => r.FileIdentities)
+                .HasForeignKey(e => e.RepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.RepositoryId, e.RelativePath }).IsUnique();
+            entity.HasIndex(e => new { e.RepositoryId, e.IsDeleted });
+        });
+
+        modelBuilder.Entity<FileVersion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ContentHashSha256).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.LastWriteUtc).IsRequired();
+
+            entity.HasOne(e => e.FileIdentity)
+                .WithMany(i => i.Versions)
+                .HasForeignKey(e => e.FileIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.FileIdentityId, e.CreatedAt });
+            entity.HasIndex(e => e.ContentHashSha256);
+        });
+
+        modelBuilder.Entity<FileVersionBlock>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.BlockHashBlake3).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasOne(e => e.FileVersion)
+                .WithMany(v => v.Blocks)
+                .HasForeignKey(e => e.FileVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.FileVersionId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => e.BlockHashBlake3);
+        });
+
+        modelBuilder.Entity<SnapshotFileLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasOne(e => e.Snapshot)
+                .WithMany(s => s.FileLinks)
+                .HasForeignKey(e => e.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.FileIdentity)
+                .WithMany(i => i.SnapshotLinks)
+                .HasForeignKey(e => e.FileIdentityId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.FileVersion)
+                .WithMany(v => v.SnapshotLinks)
+                .HasForeignKey(e => e.FileVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.SnapshotId, e.FileIdentityId }).IsUnique();
+            entity.HasIndex(e => new { e.FileIdentityId, e.SnapshotId });
+            entity.HasIndex(e => e.FileVersionId);
         });
 
         modelBuilder.Entity<WatchedDirectory>(entity =>

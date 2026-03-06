@@ -29,7 +29,7 @@ public sealed class CreateRepositoryHandler(
                 if (!string.IsNullOrWhiteSpace(request.Name))
                     await repo.UpdateRepositoryAsync(match.Id, request.Name, request.Description, ct);
 
-                await scanner.ScanRepositoryAsync(match.Id, null, ct);
+                await scanner.ScanRepositoryAsync(match.Id, null, null, ct);
                 log.LogInformation("Repository ensured for {Path}: Id={Id}", request.DirectoryPath, match.Id);
                 return OperationResult<int>.Ok(match.Id);
             }
@@ -43,4 +43,5 @@ public sealed class CreateRepositoryHandler(
         }
     }
 }
+
 

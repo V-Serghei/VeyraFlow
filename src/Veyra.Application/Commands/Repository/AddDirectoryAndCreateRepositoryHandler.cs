@@ -31,7 +31,7 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
             if (!string.IsNullOrWhiteSpace(request.RepositoryName))
                 await repo.UpdateRepositoryAsync(match.Id, request.RepositoryName, null, ct);
 
-            await scanner.ScanRepositoryAsync(match.Id, null, ct);
+            await scanner.ScanRepositoryAsync(match.Id, null, null, ct);
             await native.ApplySetupAsync(ct);
 
             log.LogInformation("Added directory and created repository for {Path}", request.DirectoryPath);
@@ -44,4 +44,5 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
         }
     }
 }
+
 

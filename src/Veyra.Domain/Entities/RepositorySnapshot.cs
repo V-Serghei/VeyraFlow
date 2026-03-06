@@ -1,4 +1,4 @@
-namespace Veyra.Domain.Entities;
+﻿namespace Veyra.Domain.Entities;
 
 public class RepositorySnapshot
 {
@@ -15,4 +15,5 @@ public class RepositorySnapshot
     public long TotalFileBytes { get; set; }
 
     public ICollection<RepositorySnapshotEntry> Entries { get; set; } = new List<RepositorySnapshotEntry>();
+    public ICollection<SnapshotFileLink> FileLinks { get; set; } = new List<SnapshotFileLink>();
 }

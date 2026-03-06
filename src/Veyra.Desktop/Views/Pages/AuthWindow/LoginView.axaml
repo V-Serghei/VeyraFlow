@@ -6,23 +6,34 @@
     xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.AuthWindow"
     d:DataContext="{d:DesignInstance vm:LoginViewModel, IsDesignTimeCreatable=True}"
     xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
-    x:DataType="vm:LoginViewModel">
+    x:DataType="vm:LoginViewModel"
+    Background="#0D0D0D">
 
-    <Border Padding="24">
-        <StackPanel Spacing="12" Width="360" HorizontalAlignment="Center">
-            <TextBlock Text="Sign in" FontSize="24" FontWeight="SemiBold" />
+    <Grid>
+        <Border Width="440" Padding="28" Background="#131313" CornerRadius="14"
+                BorderBrush="#272727" BorderThickness="1"
+                HorizontalAlignment="Center" VerticalAlignment="Center">
+            <StackPanel Spacing="14">
+                <TextBlock Text="Вход в VeyraFlow" FontSize="26" FontWeight="SemiBold"/>
+                <TextBlock Text="Локальный профиль и доступ к рабочим пространствам" Opacity="0.75"/>
 
-            <TextBlock Text="Username" />
-            <TextBox Text="{Binding Username}" />
+                <StackPanel Spacing="6" Margin="0,8,0,0">
+                    <TextBlock Text="Логин" Opacity="0.8"/>
+                    <TextBox Text="{Binding Username}" Watermark="Введите логин"/>
+                </StackPanel>
 
-            <TextBlock Text="Password" />
-            <TextBox PasswordChar="•" Text="{Binding Password}" />
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Пароль" Opacity="0.8"/>
+                    <TextBox PasswordChar="•" Text="{Binding Password}" Watermark="Введите пароль"/>
+                </StackPanel>
 
-            <Button Content="Sign in"
-                    Command="{Binding LoginCommand}"
-                    IsEnabled="{Binding IsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}" />
+                <Button Content="Войти"
+                        Command="{Binding LoginCommand}"
+                        IsEnabled="{Binding IsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                        Height="38"/>
 
-            <TextBlock Foreground="Red" Text="{Binding Error}" />
-        </StackPanel>
-    </Border>
+                <TextBlock Foreground="#F87171" Text="{Binding Error}" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </UserControl>

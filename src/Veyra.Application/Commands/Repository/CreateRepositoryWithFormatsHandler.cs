@@ -31,6 +31,12 @@ public sealed class CreateRepositoryWithFormatsHandler(
             if (formats.Count == 0)
                 return OperationResult<int>.Fail("Выберите хотя бы один формат.");
 
+            log.LogInformation(
+                "Creating repository. Name {Name}. Path {Path}. Formats {FormatCount}",
+                name,
+                path,
+                formats.Count);
+
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "prepare",
                 5,
@@ -97,7 +103,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
                     p.Message));
             });
 
-            await scanner.ScanRepositoryAsync(repo.Id, scanProgress, ct);
+            await scanner.ScanRepositoryAsync(repo.Id, scanProgress, null, ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
@@ -115,6 +121,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 0,
                 "Репозиторий создан"));
 
+            log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
             return OperationResult<int>.Ok(repo.Id);
         }
         catch (Exception ex)
@@ -153,3 +160,4 @@ public sealed class CreateRepositoryWithFormatsHandler(
             .ToList();
     }
 }
+

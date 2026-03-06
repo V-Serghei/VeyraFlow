@@ -5,43 +5,56 @@
         xmlns:pages="clr-namespace:Veyra.Desktop.Views.Pages.SetupWizard"
         x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SetupWizardWindow"
         x:DataType="vm:SetupWizardViewModel"
-        Width="920" Height="640" Title="Первичная настройка"
-        Background="#121212" Foreground="#EEEEEE" CanResize="False">
+        Width="980" Height="680" Title="Первичная настройка"
+        Background="#0E1014" Foreground="#EEEEEE" CanResize="False"
+        WindowStartupLocation="CenterOwner">
 
-    <DockPanel Margin="24">
+    <Grid Margin="20" ColumnDefinitions="260,*" ColumnSpacing="14">
+        <Border Grid.Column="0" Background="#121823" CornerRadius="12" Padding="18">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Мастер запуска" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock Text="Настройка репозитория и отслеживания" Opacity="0.75" TextWrapping="Wrap"/>
 
-        <!-- Bottom: navigation buttons + step info -->
-        <Grid DockPanel.Dock="Bottom" Margin="0,16,0,0" ColumnDefinitions="Auto,*,Auto">
-            <TextBlock Grid.Column="0" Text="{Binding StepInfo}"
-                       VerticalAlignment="Center" Opacity="0.6"/>
+                <Border Background="#18273A" CornerRadius="10" Padding="12" Margin="0,10,0,0">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Шаги" FontWeight="SemiBold"/>
+                        <TextBlock Text="1. Директории"/>
+                        <TextBlock Text="2. Форматы"/>
+                        <TextBlock Text="3. Имя репозитория"/>
+                    </StackPanel>
+                </Border>
 
-            <TextBlock Grid.Column="1" Text="{Binding ErrorMessage}"
-                       Foreground="#FF5555" TextWrapping="Wrap"
-                       VerticalAlignment="Center" Margin="16,0"
-                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Content="Назад" Width="120" Margin="0,0,8,0"
-                        Command="{Binding BackCommand}"/>
-                <Button Content="{Binding NextButtonText}" Width="160"
-                        Command="{Binding NextCommand}"
-                        IsEnabled="{Binding CanGoNext}"/>
+                <TextBlock Text="{Binding StepInfo}" Opacity="0.7" Margin="0,10,0,0"/>
+                <TextBlock Text="{Binding ErrorMessage}"
+                           Foreground="#F87171" TextWrapping="Wrap"
+                           IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
             </StackPanel>
-        </Grid>
+        </Border>
 
-        <!-- Content: step views -->
-        <ContentControl Content="{Binding CurrentStep}">
-            <ContentControl.DataTemplates>
-                <DataTemplate DataType="vm:SelectDirectoriesViewModel">
-                    <pages:SelectDirectoriesPage/>
-                </DataTemplate>
-                <DataTemplate DataType="vm:SelectFormatsViewModel">
-                    <pages:SelectFormatsPage/>
-                </DataTemplate>
-                <DataTemplate DataType="vm:RepositoryNameViewModel">
-                    <pages:RepositoryNamePage/>
-                </DataTemplate>
-            </ContentControl.DataTemplates>
-        </ContentControl>
-    </DockPanel>
+        <DockPanel Grid.Column="1">
+            <Border DockPanel.Dock="Bottom" Background="#131313" CornerRadius="10" Padding="12" Margin="0,14,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Назад" Width="120" Command="{Binding BackCommand}"/>
+                    <Button Content="{Binding NextButtonText}" Width="170"
+                            Command="{Binding NextCommand}" IsEnabled="{Binding CanGoNext}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#131313" CornerRadius="12" Padding="18">
+                <ContentControl Content="{Binding CurrentStep}">
+                    <ContentControl.DataTemplates>
+                        <DataTemplate DataType="vm:SelectDirectoriesViewModel">
+                            <pages:SelectDirectoriesPage/>
+                        </DataTemplate>
+                        <DataTemplate DataType="vm:SelectFormatsViewModel">
+                            <pages:SelectFormatsPage/>
+                        </DataTemplate>
+                        <DataTemplate DataType="vm:RepositoryNameViewModel">
+                            <pages:RepositoryNamePage/>
+                        </DataTemplate>
+                    </ContentControl.DataTemplates>
+                </ContentControl>
+            </Border>
+        </DockPanel>
+    </Grid>
 </Window>

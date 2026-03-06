@@ -14,4 +14,14 @@ public interface IRepositorySnapshotRepository
     Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
         int repositoryId,
         CancellationToken ct = default);
+
+    Task<IReadOnlyList<FileVersionInfoDto>> GetFileVersionsAsync(
+        int repositoryId,
+        string relativePath,
+        int take = 50,
+        CancellationToken ct = default);
+
+    Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
+        long fileVersionId,
+        CancellationToken ct = default);
 }

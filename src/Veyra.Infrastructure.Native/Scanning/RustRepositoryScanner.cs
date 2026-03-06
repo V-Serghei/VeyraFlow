@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -23,9 +23,12 @@ public sealed class RustRepositoryScanner(
     public async Task<RepositoryScanResultDto> ScanRepositoryAsync(
         int repositoryId,
         IProgress<RepositoryScanProgressDto>? progress = null,
+        RepositoryScanOptionsDto? options = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+
+        var scanOptions = options ?? new RepositoryScanOptionsDto();
 
         var repo = await repositories.GetRepositoryByIdAsync(repositoryId, ct);
         if (repo is null || repo.IsDeleted)
@@ -37,12 +40,21 @@ public sealed class RustRepositoryScanner(
             return new RepositoryScanResultDto(0, 0, 0, "skipped_directory_not_found");
         }
 
+        log.LogInformation(
+            "Starting scan for repository {RepositoryId}. Root {Root}. Formats {FormatCount}. Scheduled {Scheduled}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}",
+            repositoryId,
+            repo.DirectoryPath,
+            repo.LinkedFormats.Count,
+            scanOptions.IsScheduled,
+            scanOptions.MaxReadBytesPerSecond,
+            scanOptions.MaxIoOperationsPerSecond);
+
         progress?.Report(new RepositoryScanProgressDto(
             "prepare",
             5,
             0,
             0,
-            "Подготовка сканирования"));
+            "Preparing scan"));
 
         List<RepositoryScanEntryDto> entries;
         string trigger;
@@ -54,9 +66,14 @@ public sealed class RustRepositoryScanner(
                 25,
                 0,
                 0,
-                "Сканирование директории"));
+                "Scanning directory"));
 
-            var json = VeyraCoreNative.ScanDirectoryJson(repo.DirectoryPath, repo.LinkedFormats);
+            var json = VeyraCoreNative.ScanDirectoryJson(
+                repo.DirectoryPath,
+                repo.LinkedFormats,
+                scanOptions.MaxReadBytesPerSecond,
+                scanOptions.MaxIoOperationsPerSecond);
+
             var nativeEntries = JsonSerializer.Deserialize<List<NativeScanEntry>>(json, JsonOptions) ?? [];
 
             entries = nativeEntries
@@ -64,7 +81,8 @@ public sealed class RustRepositoryScanner(
                 .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
                 .ToList();
 
-            trigger = "initial_scan_rust";
+            trigger = scanOptions.TriggerOverride
+                ?? (scanOptions.IsScheduled ? "scheduled_scan_rust" : "initial_scan_rust");
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
@@ -72,8 +90,16 @@ public sealed class RustRepositoryScanner(
                 "Rust scanner unavailable for repository {RepositoryId}. Falling back to managed scan.",
                 repositoryId);
 
-            entries = await BuildManagedEntriesAsync(repo.DirectoryPath, repo.LinkedFormats, progress, ct);
-            trigger = "initial_scan_managed_fallback";
+            entries = await BuildManagedEntriesAsync(
+                repo.DirectoryPath,
+                repo.LinkedFormats,
+                scanOptions.MaxReadBytesPerSecond,
+                scanOptions.MaxIoOperationsPerSecond,
+                progress,
+                ct);
+
+            trigger = scanOptions.TriggerOverride
+                ?? (scanOptions.IsScheduled ? "scheduled_scan_managed_fallback" : "initial_scan_managed_fallback");
         }
 
         var fileCount = entries.Count(e => !e.IsDirectory);
@@ -83,7 +109,7 @@ public sealed class RustRepositoryScanner(
             85,
             fileCount,
             fileCount,
-            "Сохранение результатов сканирования"));
+            "Saving scan results"));
 
         await snapshots.SaveSnapshotAsync(repositoryId, trigger, DateTime.UtcNow, entries, ct);
 
@@ -92,7 +118,7 @@ public sealed class RustRepositoryScanner(
             100,
             fileCount,
             fileCount,
-            "Сканирование завершено"));
+            "Scan completed"));
 
         log.LogInformation(
             "Repository {RepositoryId} scanned. Entries {EntryCount}. Trigger {Trigger}",
@@ -109,7 +135,7 @@ public sealed class RustRepositoryScanner(
         foreach (var repo in repos)
         {
             ct.ThrowIfCancellationRequested();
-            await ScanRepositoryAsync(repo.Id, null, ct);
+            await ScanRepositoryAsync(repo.Id, null, null, ct);
         }
     }
 
@@ -132,6 +158,8 @@ public sealed class RustRepositoryScanner(
     private static async Task<List<RepositoryScanEntryDto>> BuildManagedEntriesAsync(
         string rootPath,
         IReadOnlyCollection<string> linkedFormats,
+        int maxReadBytesPerSecond,
+        int maxIoOperationsPerSecond,
         IProgress<RepositoryScanProgressDto>? progress,
         CancellationToken ct)
     {
@@ -144,8 +172,9 @@ public sealed class RustRepositoryScanner(
         var root = new DirectoryInfo(rootPath);
         var entries = new List<RepositoryScanEntryDto>();
         var processedFiles = 0;
+        var iopsState = new IopsThrottleState();
 
-        await TraverseDirectoryAsync(root, rootPath, normalizedExt, entries, () =>
+        await TraverseDirectoryAsync(root, rootPath, normalizedExt, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, () =>
         {
             processedFiles++;
             if (processedFiles % 25 == 0)
@@ -156,7 +185,7 @@ public sealed class RustRepositoryScanner(
                     percent,
                     processedFiles,
                     0,
-                    $"Просканировано файлов: {processedFiles}"));
+                    $"Scanned files: {processedFiles}"));
             }
         }, ct);
 
@@ -169,6 +198,9 @@ public sealed class RustRepositoryScanner(
         DirectoryInfo current,
         string rootPath,
         HashSet<string> extFilter,
+        int maxReadBytesPerSecond,
+        int maxIoOperationsPerSecond,
+        IopsThrottleState iopsState,
         List<RepositoryScanEntryDto> entries,
         Action onFileProcessed,
         CancellationToken ct)
@@ -202,7 +234,7 @@ public sealed class RustRepositoryScanner(
                 dir.LastWriteTimeUtc,
                 null));
 
-            await TraverseDirectoryAsync(dir, rootPath, extFilter, entries, onFileProcessed, ct);
+            await TraverseDirectoryAsync(dir, rootPath, extFilter, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, onFileProcessed, ct);
         }
 
         IEnumerable<FileInfo> files;
@@ -226,7 +258,8 @@ public sealed class RustRepositoryScanner(
             string? hash;
             try
             {
-                hash = await ComputeSha256Async(file.FullName, ct);
+                await ApplyIoThrottleAsync(maxIoOperationsPerSecond, iopsState, ct);
+                hash = await ComputeSha256Async(file.FullName, maxReadBytesPerSecond, ct);
             }
             catch
             {
@@ -247,6 +280,24 @@ public sealed class RustRepositoryScanner(
                 hash));
 
             onFileProcessed();
+        }
+    }
+
+    private static async Task ApplyIoThrottleAsync(int maxIoOperationsPerSecond, IopsThrottleState state, CancellationToken ct)
+    {
+        if (maxIoOperationsPerSecond <= 0)
+            return;
+
+        state.TotalOperations++;
+
+        var expectedSeconds = state.TotalOperations / (double)maxIoOperationsPerSecond;
+        var elapsedSeconds = (DateTime.UtcNow - state.StartUtc).TotalSeconds;
+
+        if (expectedSeconds > elapsedSeconds)
+        {
+            var sleepMs = (int)Math.Ceiling((expectedSeconds - elapsedSeconds) * 1000.0);
+            if (sleepMs > 0)
+                await Task.Delay(sleepMs, ct);
         }
     }
 
@@ -277,7 +328,7 @@ public sealed class RustRepositoryScanner(
         return v.StartsWith('.') ? v : "." + v;
     }
 
-    private static async Task<string> ComputeSha256Async(string filePath, CancellationToken ct)
+    private static async Task<string> ComputeSha256Async(string filePath, int maxReadBytesPerSecond, CancellationToken ct)
     {
         await using var stream = new FileStream(
             filePath,
@@ -287,8 +338,44 @@ public sealed class RustRepositoryScanner(
             bufferSize: 1024 * 1024,
             useAsync: true);
 
-        var hash = await SHA256.HashDataAsync(stream, ct);
+        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[1024 * 1024];
+
+        var throttled = maxReadBytesPerSecond > 0;
+        var start = DateTime.UtcNow;
+        long totalRead = 0;
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, ct);
+            if (read == 0)
+                break;
+
+            hasher.AppendData(buffer, 0, read);
+
+            if (throttled)
+            {
+                totalRead += read;
+                var expectedSeconds = totalRead / (double)maxReadBytesPerSecond;
+                var elapsed = (DateTime.UtcNow - start).TotalSeconds;
+
+                if (expectedSeconds > elapsed)
+                {
+                    var sleepMs = (int)Math.Ceiling((expectedSeconds - elapsed) * 1000.0);
+                    if (sleepMs > 0)
+                        await Task.Delay(sleepMs, ct);
+                }
+            }
+        }
+
+        var hash = hasher.GetHashAndReset();
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private sealed class IopsThrottleState
+    {
+        public DateTime StartUtc { get; } = DateTime.UtcNow;
+        public long TotalOperations { get; set; }
     }
 
     private sealed record NativeScanEntry
@@ -318,6 +405,4 @@ public sealed class RustRepositoryScanner(
         public string? ContentHashSha256 { get; init; }
     }
 }
-
-
 

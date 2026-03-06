@@ -1,9 +1,64 @@
-﻿<Styles xmlns="https://github.com/avaloniaui">
+﻿<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Styles.Resources>
+        <Color x:Key="VeyraPrimary">#2563EB</Color>
+        <Color x:Key="VeyraPanel">#141414</Color>
+        <Color x:Key="VeyraBorder">#262626</Color>
+    </Styles.Resources>
+
+    <Style Selector="Button">
+        <Setter Property="Background" Value="#1C2430"/>
+        <Setter Property="Foreground" Value="#EDEDED"/>
+        <Setter Property="BorderBrush" Value="#324257"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="12,8"/>
+    </Style>
+
+    <Style Selector="Button:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#2A3950"/>
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="Background" Value="#101010"/>
+        <Setter Property="Foreground" Value="#EEEEEE"/>
+        <Setter Property="BorderBrush" Value="#2C2C2C"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="CornerRadius" Value="8"/>
+    </Style>
+
+    <Style Selector="ComboBox">
+        <Setter Property="Background" Value="#101010"/>
+        <Setter Property="Foreground" Value="#EEEEEE"/>
+        <Setter Property="BorderBrush" Value="#2C2C2C"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,8"/>
+    </Style>
+
+    <Style Selector="ToggleButton">
+        <Setter Property="Background" Value="#1A1A1A"/>
+        <Setter Property="Foreground" Value="#DDDDDD"/>
+        <Setter Property="BorderBrush" Value="#2A2A2A"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+    </Style>
+
+    <Style Selector="ToggleButton:checked /template/ ContentPresenter">
+        <Setter Property="Background" Value="#1E3A8A"/>
+    </Style>
+
+    <Style Selector="ProgressBar">
+        <Setter Property="Background" Value="#151515"/>
+        <Setter Property="Foreground" Value="#2563EB"/>
+    </Style>
+
     <Style Selector="Border.card">
-        <Setter Property="Background" Value="{DynamicResource ThemeBackgroundBrush}"/>
+        <Setter Property="Background" Value="#171717"/>
         <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="16"/>
         <Setter Property="Margin" Value="8"/>
-        <Setter Property="BoxShadow" Value="0 0 12 0 #22000000"/>
+        <Setter Property="BorderBrush" Value="#262626"/>
+        <Setter Property="BorderThickness" Value="1"/>
     </Style>
 </Styles>

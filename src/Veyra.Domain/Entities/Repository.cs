@@ -1,4 +1,4 @@
-namespace Veyra.Domain.Entities;
+﻿namespace Veyra.Domain.Entities;
 
 public class Repository
 {
@@ -20,4 +20,5 @@ public class Repository
     public DateTime? DeletedAt { get; set; }
 
     public ICollection<RepositorySnapshot> Snapshots { get; set; } = new List<RepositorySnapshot>();
+    public ICollection<FileIdentity> FileIdentities { get; set; } = new List<FileIdentity>();
 }
