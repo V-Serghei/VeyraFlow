@@ -1,3 +1,5 @@
+using System;
+
 namespace Veyra.Desktop.ViewModels.Windows;
 
 public sealed class SnapshotPendingFileItemViewModel

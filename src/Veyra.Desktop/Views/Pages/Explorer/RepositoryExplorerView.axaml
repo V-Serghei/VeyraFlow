@@ -61,7 +61,7 @@
                             IsEnabled="{Binding CanRunScanActions}"/>
                     <Button Content="Create snapshot"
                             Command="{Binding CreateSnapshotCommand}"
-                            IsEnabled="{Binding CanRunScanActions}"/>
+                            IsEnabled="{Binding CanCreateSnapshot}"/>
                     <Button Content="Snapshot history"
                             Command="{Binding ShowSnapshotHistoryCommand}"
                             IsEnabled="{Binding CanRunScanActions}"/>
@@ -211,10 +211,64 @@
                             <Border Height="1" Background="#1E2A38" Margin="0,4"/>
 
                             <TextBlock Text="Selected file" FontSize="13" FontWeight="SemiBold"/>
-                            <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="6">
-                                <TextBlock Text="{Binding SelectedItem.Name}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.7" TextWrapping="Wrap"/>
-                                <TextBlock Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.75"/>
+
+                            <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
+                                <TextBlock Text="{Binding SelectedItem.Name}" FontSize="15" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SelectedItem.Type}" Opacity="0.8"/>
+                                <TextBlock Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.8"/>
+                                <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}" Opacity="0.8"/>
+
+                                <Border Height="1" Background="#1E2A38" Margin="0,4"/>
+
+                                <TextBlock Text="File versions" FontWeight="SemiBold"/>
+                                <TextBlock Text="Loading versions..." Opacity="0.7" IsVisible="{Binding IsVersionLoading}"/>
+
+                                <ListBox Classes="flat-list"
+                                         ItemsSource="{Binding FileVersions}"
+                                         SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                         MaxHeight="190">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                            <Border Background="#0F1722" CornerRadius="8" Padding="8">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding Title}"/>
+                                                    <TextBlock Text="{Binding SizeDisplay}" Opacity="0.72" FontSize="11"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <TextBlock Text="No content blocks for selected version. Restore and diff are unavailable."
+                                           Foreground="#FBBF24"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Content="Restore as copy"
+                                            Command="{Binding RestoreVersionAsCopyCommand}"
+                                            IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                                    <Button Content="Restore overwrite"
+                                            Command="{Binding RestoreVersionOverwriteCommand}"
+                                            IsEnabled="{Binding CanRestoreSelectedVersion}"/>
+                                </StackPanel>
+
+                                <Button Content="Diff with previous"
+                                        Command="{Binding CompareSelectedWithPreviousCommand}"
+                                        IsEnabled="{Binding CanRunDiffForSelectedVersion}"/>
+
+                                <TextBlock Text="{Binding VersionActionMessage}"
+                                           TextWrapping="Wrap"
+                                           Opacity="0.9"
+                                           IsVisible="{Binding HasVersionActionMessage}"/>
+
+                                <TextBox Text="{Binding DiffPreview}"
+                                         AcceptsReturn="True"
+                                         IsReadOnly="True"
+                                         Height="160"
+                                         TextWrapping="Wrap"
+                                         IsVisible="{Binding HasDiffPreview}"/>
                             </StackPanel>
 
                             <TextBlock Text="Select a file from current index or from snapshot history."
@@ -404,4 +458,5 @@
         </Grid>
     </DockPanel>
 </UserControl>
+
 

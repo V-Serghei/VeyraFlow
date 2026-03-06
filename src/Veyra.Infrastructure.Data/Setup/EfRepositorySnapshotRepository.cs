@@ -68,6 +68,31 @@ public sealed class EfRepositorySnapshotRepository(
                     StringComparer.OrdinalIgnoreCase,
                     ct);
 
+        var currentFilesByPath = entries
+            .Where(e => !e.IsDirectory)
+            .ToDictionary(e => e.RelativePath, e => e, StringComparer.OrdinalIgnoreCase);
+
+        if (saveFileVersions
+            && previousSnapshotId > 0
+            && !HasTrackedFileChanges(currentFilesByPath, previousFilesByPath))
+        {
+            repo.FileCount = fileEntries;
+            repo.TotalSizeBytes = totalFileBytes;
+            repo.LastScannedAt = scannedAtUtc;
+            repo.UpdatedAt = scannedAtUtc;
+
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            log.LogInformation(
+                "Snapshot skipped (no changes). RepositoryId {RepositoryId}. Files {Files}. Trigger {Trigger}",
+                repositoryId,
+                fileEntries,
+                safeTrigger);
+
+            return;
+        }
+
         var snapshot = new RepositorySnapshot
         {
             RepositoryId = repositoryId,
@@ -122,11 +147,6 @@ public sealed class EfRepositorySnapshotRepository(
 
             return;
         }
-
-        var currentFilesByPath = entries
-            .Where(e => !e.IsDirectory)
-            .ToDictionary(e => e.RelativePath, e => e, StringComparer.OrdinalIgnoreCase);
-
         var allPaths = currentFilesByPath.Keys
             .Concat(previousFilesByPath.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -756,6 +776,30 @@ public sealed class EfRepositorySnapshotRepository(
         return changed;
     }
 
+    private static bool HasTrackedFileChanges(
+        IReadOnlyDictionary<string, RepositoryScanEntryDto> currentFilesByPath,
+        IReadOnlyDictionary<string, (string? Hash, long SizeBytes)> previousFilesByPath)
+    {
+        if (currentFilesByPath.Count != previousFilesByPath.Count)
+            return true;
+
+        foreach (var currentPair in currentFilesByPath)
+        {
+            if (!previousFilesByPath.TryGetValue(currentPair.Key, out var previous))
+                return true;
+
+            var currentHash = currentPair.Value.ContentHashSha256 ?? string.Empty;
+            var previousHash = previous.Hash ?? string.Empty;
+
+            if (!string.Equals(currentHash, previousHash, StringComparison.OrdinalIgnoreCase)
+                || currentPair.Value.SizeBytes != previous.SizeBytes)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
     private static string ResolveChangeKind(SnapshotLinkState current, SnapshotLinkState? previous)
     {
         if (current.IsDeletionMarker)
@@ -825,5 +869,7 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+
 
 
