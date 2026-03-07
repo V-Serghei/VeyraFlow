@@ -1,4 +1,4 @@
-﻿namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs;
 
 public sealed record RepositoryPathComparisonResultDto(
     int AddedCount,

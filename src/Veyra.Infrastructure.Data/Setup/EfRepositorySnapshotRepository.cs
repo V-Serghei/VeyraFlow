@@ -1067,7 +1067,9 @@ public sealed class EfRepositorySnapshotRepository(
             state.Name,
             state.SizeBytes,
             state.LastWriteUtc,
-            state.ContentHashSha256);private static string NormalizeRelativePath(string value)
+            state.ContentHashSha256);
+
+    private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/');
 
     private static string ToAbsolutePath(string rootPath, string relativePath)

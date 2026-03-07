@@ -1,4 +1,4 @@
-﻿mod block_store;
+mod block_store;
 mod compress;
 mod ffi;
 mod hash;
@@ -12,7 +12,9 @@ use std::path::Path;
 use std::ptr;
 use std::slice;
 
-use ffi::{clear_last_error, copy_bytes_to_out, ptr_to_str, set_error_from, set_last_error, write_bytes};
+use ffi::{
+    clear_last_error, copy_bytes_to_out, ptr_to_str, set_error_from, set_last_error, write_bytes,
+};
 
 #[no_mangle]
 pub extern "C" fn veyra_last_error_utf8(out: *mut u8, out_len: u64, written: *mut u64) -> i32 {
@@ -180,7 +182,12 @@ pub extern "C" fn veyra_scan_directory_limited_v2_utf8(
     let filters = scan::parse_extension_filters(ptr_to_str(extensions_csv_ptr));
     let root = Path::new(root_path_str);
 
-    let data = match scan::run_directory_scan(root, &filters, max_read_bytes_per_sec, max_file_ops_per_sec) {
+    let data = match scan::run_directory_scan(
+        root,
+        &filters,
+        max_read_bytes_per_sec,
+        max_file_ops_per_sec,
+    ) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);
@@ -215,7 +222,11 @@ pub extern "C" fn veyra_store_file_blocks_utf8(
     let path = Path::new(file_path_str);
     let store_root = Path::new(store_root_str);
 
-    let safe_chunk = if chunk_size == 0 { 64 * 1024 } else { chunk_size as usize };
+    let safe_chunk = if chunk_size == 0 {
+        64 * 1024
+    } else {
+        chunk_size as usize
+    };
     let chunk = safe_chunk.clamp(4 * 1024, 4 * 1024 * 1024);
 
     let data = match block_store::store_file_blocks(path, store_root, chunk) {
@@ -360,12 +371,18 @@ pub extern "C" fn veyra_build_text_diff_utf8(
         return -1;
     };
 
-    let effective_max_lines = if max_lines == 0 { 200 } else { max_lines as usize }.clamp(200, 20_000);
+    let effective_max_lines = if max_lines == 0 {
+        200
+    } else {
+        max_lines as usize
+    }
+    .clamp(200, 20_000);
 
     let left_path = Path::new(left_file_path_str);
     let right_path = Path::new(right_file_path_str);
 
-    let payload = match text_diff::build_text_diff_json(left_path, right_path, effective_max_lines) {
+    let payload = match text_diff::build_text_diff_json(left_path, right_path, effective_max_lines)
+    {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);
@@ -430,7 +447,11 @@ pub extern "C" fn veyra_compare_repository_paths_utf8(
 
     let effective_take = if take == 0 { 2000 } else { take as usize }.clamp(1, 5000);
 
-    let payload = match snapshot_compare::compare_repository_paths_json(current_json, baseline_json, effective_take) {
+    let payload = match snapshot_compare::compare_repository_paths_json(
+        current_json,
+        baseline_json,
+        effective_take,
+    ) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);

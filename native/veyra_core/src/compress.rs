@@ -1,4 +1,4 @@
-﻿use std::fs::File;
+use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_int;
 use std::path::Path;
@@ -15,7 +15,8 @@ pub fn zstd_compress_file(src_path: &Path, dst_path: &Path, level: c_int) -> Res
     let input = std::fs::read(src_path).map_err(|e| format!("read source file: {e}"))?;
     let compressed = zstd_compress_buffer(input.as_slice(), level)?;
 
-    let mut out_file = File::create(dst_path).map_err(|e| format!("create destination file: {e}"))?;
+    let mut out_file =
+        File::create(dst_path).map_err(|e| format!("create destination file: {e}"))?;
     out_file
         .write_all(&compressed)
         .map_err(|e| format!("write destination file: {e}"))?;
@@ -27,7 +28,8 @@ pub fn zstd_decompress_file(src_path: &Path, dst_path: &Path) -> Result<i64, Str
     let input = std::fs::read(src_path).map_err(|e| format!("read source file: {e}"))?;
     let decompressed = zstd_decompress_buffer(input.as_slice())?;
 
-    let mut out_file = File::create(dst_path).map_err(|e| format!("create destination file: {e}"))?;
+    let mut out_file =
+        File::create(dst_path).map_err(|e| format!("create destination file: {e}"))?;
     out_file
         .write_all(&decompressed)
         .map_err(|e| format!("write destination file: {e}"))?;

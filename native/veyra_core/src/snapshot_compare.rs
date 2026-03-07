@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -92,7 +92,10 @@ fn resolve_snapshot_change_kind(
     }
 }
 
-pub fn compare_snapshot_links_json(current_json: &str, previous_json: &str) -> Result<Vec<u8>, String> {
+pub fn compare_snapshot_links_json(
+    current_json: &str,
+    previous_json: &str,
+) -> Result<Vec<u8>, String> {
     let current_states: Vec<SnapshotLinkStateInput> = serde_json::from_str(current_json)
         .map_err(|e| format!("parse current snapshot links json: {e}"))?;
 
@@ -109,9 +112,7 @@ pub fn compare_snapshot_links_json(current_json: &str, previous_json: &str) -> R
 
     let mut changes = Vec::new();
     for current in current_states {
-        let previous = previous_by_identity
-            .get(&current.file_identity_id)
-            .copied();
+        let previous = previous_by_identity.get(&current.file_identity_id).copied();
 
         if matches!(previous, Some(prev) if prev.file_version_id == current.file_version_id) {
             continue;
@@ -198,7 +199,9 @@ pub fn compare_repository_paths_json(
                 let current_hash = normalize_hash(current.content_hash_sha256.as_deref());
                 let prev_hash = normalize_hash(prev.content_hash_sha256.as_deref());
 
-                if current.size_bytes == prev.size_bytes && current_hash.eq_ignore_ascii_case(prev_hash) {
+                if current.size_bytes == prev.size_bytes
+                    && current_hash.eq_ignore_ascii_case(prev_hash)
+                {
                     continue;
                 }
 
@@ -274,12 +277,19 @@ mod tests {
         let current_json = r#"[{"file_identity_id":1,"file_version_id":2,"is_deletion_marker":false,"size_bytes":10,"version_created_unix_seconds":100,"relative_path":"a.txt","name":"a.txt"}]"#;
         let previous_json = r#"[{"file_identity_id":1,"file_version_id":1,"is_deletion_marker":false,"size_bytes":9,"version_created_unix_seconds":90,"relative_path":"a.txt","name":"a.txt"}]"#;
 
-        let payload = compare_snapshot_links_json(current_json, previous_json).expect("comparison payload");
+        let payload =
+            compare_snapshot_links_json(current_json, previous_json).expect("comparison payload");
         let parsed: Value = serde_json::from_slice(&payload).expect("valid json");
 
         assert_eq!(parsed["changed_files_count"].as_u64(), Some(1));
-        assert_eq!(parsed["changes"][0]["change_kind"].as_str(), Some("modified"));
-        assert_eq!(parsed["changes"][0]["previous_size_bytes"].as_i64(), Some(9));
+        assert_eq!(
+            parsed["changes"][0]["change_kind"].as_str(),
+            Some("modified")
+        );
+        assert_eq!(
+            parsed["changes"][0]["previous_size_bytes"].as_i64(),
+            Some(9)
+        );
     }
 
     #[test]
@@ -293,7 +303,8 @@ mod tests {
             {"relative_path":"gone.txt","name":"gone.txt","size_bytes":4,"last_write_unix_seconds":90,"content_hash_sha256":"ggg"}
         ]"#;
 
-        let payload = compare_repository_paths_json(current_json, baseline_json, 50).expect("comparison payload");
+        let payload = compare_repository_paths_json(current_json, baseline_json, 50)
+            .expect("comparison payload");
         let parsed: Value = serde_json::from_slice(&payload).expect("valid json");
 
         assert_eq!(parsed["added_count"].as_u64(), Some(1));

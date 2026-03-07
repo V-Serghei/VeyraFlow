@@ -1,4 +1,4 @@
-﻿use std::collections::HashSet;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -116,7 +116,8 @@ fn collect_entries(
     iops_state: &mut IopsState,
     entries: &mut Vec<ScanEntry>,
 ) -> Result<(), String> {
-    let read_dir = fs::read_dir(current).map_err(|e| format!("read_dir {}: {e}", current.display()))?;
+    let read_dir =
+        fs::read_dir(current).map_err(|e| format!("read_dir {}: {e}", current.display()))?;
 
     for item in read_dir {
         let Ok(entry) = item else {

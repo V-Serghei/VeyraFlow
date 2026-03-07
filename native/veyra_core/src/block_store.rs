@@ -1,4 +1,4 @@
-﻿use std::fs::{self, File};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -62,7 +62,8 @@ fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bo
         return Ok((sz, false));
     }
 
-    let compressed = zstd::encode_all(bytes, 3).map_err(|e| format!("compress block {hash}: {e}"))?;
+    let compressed =
+        zstd::encode_all(bytes, 3).map_err(|e| format!("compress block {hash}: {e}"))?;
 
     let temp_path = block_path.with_extension(format!("{}.tmp", std::process::id()));
     if temp_path.exists() {
@@ -103,7 +104,11 @@ fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bo
     Ok((stored_size, true))
 }
 
-pub fn store_file_blocks(file_path: &Path, store_root: &Path, chunk_size: usize) -> Result<Vec<u8>, String> {
+pub fn store_file_blocks(
+    file_path: &Path,
+    store_root: &Path,
+    chunk_size: usize,
+) -> Result<Vec<u8>, String> {
     if !file_path.exists() {
         return Err(format!("file not found: {}", file_path.display()));
     }
@@ -116,7 +121,8 @@ pub fn store_file_blocks(file_path: &Path, store_root: &Path, chunk_size: usize)
         return Err("chunk size must be positive".to_string());
     }
 
-    let mut file = File::open(file_path).map_err(|e| format!("open {}: {e}", file_path.display()))?;
+    let mut file =
+        File::open(file_path).map_err(|e| format!("open {}: {e}", file_path.display()))?;
 
     let mut buffer = vec![0_u8; chunk_size];
     let mut blocks = Vec::new();
@@ -191,8 +197,8 @@ pub fn restore_file_from_blocks(
     target_path: &Path,
     overwrite_existing: bool,
 ) -> Result<i64, String> {
-    let blocks: Vec<RestoreBlockRef> = serde_json::from_str(blocks_json)
-        .map_err(|e| format!("parse blocks json: {e}"))?;
+    let blocks: Vec<RestoreBlockRef> =
+        serde_json::from_str(blocks_json).map_err(|e| format!("parse blocks json: {e}"))?;
 
     if blocks.is_empty() {
         return Err("blocks list is empty".to_string());
@@ -203,7 +209,8 @@ pub fn restore_file_from_blocks(
     }
 
     if let Some(parent) = target_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("create_dir_all {}: {e}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("create_dir_all {}: {e}", parent.display()))?;
     }
 
     let mut total_written = 0_i64;
@@ -214,8 +221,8 @@ pub fn restore_file_from_blocks(
     }
 
     {
-        let mut out = File::create(&temp_path)
-            .map_err(|e| format!("create {}: {e}", temp_path.display()))?;
+        let mut out =
+            File::create(&temp_path).map_err(|e| format!("create {}: {e}", temp_path.display()))?;
 
         for block in blocks {
             let decoded = read_block(store_root, &block.block_hash_blake3)?;
@@ -245,8 +252,13 @@ pub fn restore_file_from_blocks(
             .map_err(|e| format!("remove existing {}: {e}", target_path.display()))?;
     }
 
-    fs::rename(&temp_path, target_path)
-        .map_err(|e| format!("rename {} -> {}: {e}", temp_path.display(), target_path.display()))?;
+    fs::rename(&temp_path, target_path).map_err(|e| {
+        format!(
+            "rename {} -> {}: {e}",
+            temp_path.display(),
+            target_path.display()
+        )
+    })?;
 
     Ok(total_written)
 }

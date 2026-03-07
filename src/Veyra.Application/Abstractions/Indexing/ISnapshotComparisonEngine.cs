@@ -1,4 +1,4 @@
-﻿using Veyra.Application.DTOs;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Abstractions.Indexing;
 

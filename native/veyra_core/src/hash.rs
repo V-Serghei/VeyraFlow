@@ -1,4 +1,4 @@
-﻿use std::collections::hash_map::DefaultHasher;
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Read;
@@ -33,7 +33,10 @@ pub fn sha256_file_hex(path: &Path) -> Result<String, String> {
     sha256_file_hex_with_limit(path, 0)
 }
 
-pub fn sha256_file_hex_with_limit(path: &Path, max_read_bytes_per_sec: u64) -> Result<String, String> {
+pub fn sha256_file_hex_with_limit(
+    path: &Path,
+    max_read_bytes_per_sec: u64,
+) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
@@ -56,7 +59,8 @@ pub fn sha256_file_hex_with_limit(path: &Path, max_read_bytes_per_sec: u64) -> R
         if throttled {
             total_read += read as u64;
 
-            let expected = Duration::from_secs_f64(total_read as f64 / max_read_bytes_per_sec as f64);
+            let expected =
+                Duration::from_secs_f64(total_read as f64 / max_read_bytes_per_sec as f64);
             let elapsed = start.elapsed();
             if expected > elapsed {
                 std::thread::sleep(expected - elapsed);

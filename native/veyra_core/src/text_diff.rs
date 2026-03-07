@@ -1,4 +1,4 @@
-﻿use std::fs;
+use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
@@ -176,7 +176,11 @@ fn myers_diff_ops(left: &[String], right: &[String]) -> Vec<DiffOp> {
     fallback
 }
 
-pub fn build_text_diff_json(left_path: &Path, right_path: &Path, max_lines: usize) -> Result<Vec<u8>, String> {
+pub fn build_text_diff_json(
+    left_path: &Path,
+    right_path: &Path,
+    max_lines: usize,
+) -> Result<Vec<u8>, String> {
     if !left_path.exists() {
         return Err(format!("left file not found: {}", left_path.display()));
     }
@@ -264,7 +268,12 @@ mod tests {
     #[test]
     fn myers_diff_detects_add_and_remove() {
         let left = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let right = vec!["a".to_string(), "x".to_string(), "c".to_string(), "d".to_string()];
+        let right = vec![
+            "a".to_string(),
+            "x".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
 
         let ops = myers_diff_ops(&left, &right);
 
