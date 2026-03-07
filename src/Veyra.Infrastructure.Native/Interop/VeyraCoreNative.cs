@@ -60,6 +60,30 @@ internal static class VeyraCoreNative
         int overwriteExisting);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_build_text_diff_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string leftFilePath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string rightFilePath,
+        uint maxLines,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_compare_snapshot_links_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string currentStatesJson,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string previousStatesJson,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_compare_repository_paths_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string currentStatesJson,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string baselineStatesJson,
+        uint take,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_last_error_utf8(
         byte[]? output,
         ulong outputLen,
@@ -114,6 +138,32 @@ internal static class VeyraCoreNative
             "Native block store failed");
     }
 
+    public static string BuildTextDiffJson(string leftFilePath, string rightFilePath, int maxLines)
+    {
+        var normalizedMaxLines = (uint)Math.Clamp(maxLines, 200, 20_000);
+
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_build_text_diff_utf8(leftFilePath, rightFilePath, normalizedMaxLines, buffer, len, out written),
+            "Native text diff failed");
+    }
+
+
+    public static string CompareSnapshotLinksJson(string currentStatesJson, string previousStatesJson)
+    {
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_compare_snapshot_links_utf8(currentStatesJson, previousStatesJson, buffer, len, out written),
+            "Native snapshot comparison failed");
+    }
+    public static string CompareRepositoryPathsJson(string currentStatesJson, string baselineStatesJson, int take)
+    {
+        var safeTake = (uint)Math.Clamp(take, 1, 5000);
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_compare_repository_paths_utf8(currentStatesJson, baselineStatesJson, safeTake, buffer, len, out written),
+            "Native repository path comparison failed");
+    }
     public static long RestoreFileBlocks(string storeRoot, string blocksJson, string targetPath, bool overwriteExisting)
     {
         var status = veyra_restore_file_blocks_utf8(storeRoot, blocksJson, targetPath, overwriteExisting ? 1 : 0);
@@ -122,6 +172,7 @@ internal static class VeyraCoreNative
 
         return status;
     }
+
     private static string ReadJsonResult(NativeUtf8Writer invoker, string errorPrefix)
     {
         const int initialBufferSize = 8 * 1024 * 1024;
@@ -159,6 +210,7 @@ internal static class VeyraCoreNative
             ArrayPool<byte>.Shared.Return(buffer);
         }
     }
+
     private static string BuildExtensionsCsv(IReadOnlyCollection<string> extensions)
     {
         if (extensions.Count == 0)
@@ -241,10 +293,12 @@ internal static class VeyraCoreNative
             list.Add(Directory.Exists(p) ? Path.Combine(p, fileName) : p);
         }
 
-        var repoDevPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "native", "veyra_core", "target", "release", fileName));
-        list.Add(repoDevPath);
+        var srcRootDevPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "native", "veyra_core", "target", "release", fileName));
+        var repoRootDevPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "native", "veyra_core", "target", "release", fileName));
+
+        list.Add(srcRootDevPath);
+        list.Add(repoRootDevPath);
 
         return list.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
-

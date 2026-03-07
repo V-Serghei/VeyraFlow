@@ -13,6 +13,9 @@ public class VeyraDbContext : DbContext
     public DbSet<FileIdentity> FileIdentities { get; set; } = null!;
     public DbSet<FileVersion> FileVersions { get; set; } = null!;
     public DbSet<FileVersionBlock> FileVersionBlocks { get; set; } = null!;
+    public DbSet<FileVersionTextDiff> FileVersionTextDiffs { get; set; } = null!;
+    public DbSet<FileVersionTextDiffLine> FileVersionTextDiffLines { get; set; } = null!;
+    public DbSet<TextLineAtom> TextLineAtoms { get; set; } = null!;
     public DbSet<SnapshotFileLink> SnapshotFileLinks { get; set; } = null!;
 
     public DbSet<WatchedDirectory> WatchedDirectories { get; set; } = null!;
@@ -87,6 +90,58 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => e.BlockHashBlake3);
         });
 
+        modelBuilder.Entity<FileVersionTextDiff>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DiffKeySha256).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.RelativePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.LinesJson).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+
+            entity.HasOne<FileVersion>()
+                .WithMany()
+                .HasForeignKey(e => e.LeftFileVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne<FileVersion>()
+                .WithMany()
+                .HasForeignKey(e => e.RightFileVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.LeftFileVersionId, e.RightFileVersionId, e.MaxLines }).IsUnique();
+            entity.HasIndex(e => e.DiffKeySha256);
+        });
+        modelBuilder.Entity<TextLineAtom>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.HashSha256).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Text).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasIndex(e => new { e.HashSha256, e.Text }).IsUnique();
+            entity.HasIndex(e => e.HashSha256);
+        });
+
+        modelBuilder.Entity<FileVersionTextDiffLine>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasOne(e => e.Diff)
+                .WithMany(d => d.Lines)
+                .HasForeignKey(e => e.DiffId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.TextLineAtom)
+                .WithMany(a => a.DiffLines)
+                .HasForeignKey(e => e.TextLineAtomId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => e.TextLineAtomId);
+        });
         modelBuilder.Entity<SnapshotFileLink>(entity =>
         {
             entity.HasKey(e => e.Id);

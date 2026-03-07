@@ -39,7 +39,18 @@ public interface IRepositorySnapshotRepository
         int take = 1000,
         CancellationToken ct = default);
 
+    Task<TextDiffResultDto?> GetStoredTextDiffAsync(
+        long leftFileVersionId,
+        long rightFileVersionId,
+        int maxLines,
+        CancellationToken ct = default);
+
+    Task SaveStoredTextDiffAsync(
+        TextDiffResultDto diff,
+        int maxLines,
+        CancellationToken ct = default);
     Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
         long fileVersionId,
         CancellationToken ct = default);
 }
+

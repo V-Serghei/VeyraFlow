@@ -9,6 +9,7 @@ namespace Veyra.Application.Queries.Repository;
 public sealed class GetTextDiffHandler(
     IRepositorySnapshotRepository snapshots,
     IFileContentStore contentStore,
+    ITextDiffEngine diffEngine,
     ILogger<GetTextDiffHandler> log)
     : IRequestHandler<GetTextDiffQuery, OperationResult<TextDiffResultDto>>
 {
@@ -29,56 +30,64 @@ public sealed class GetTextDiffHandler(
 
         try
         {
+            var maxLines = Math.Clamp(request.MaxLines, 200, 20_000);
+
             var left = await snapshots.GetFileVersionRestoreDataAsync(request.LeftFileVersionId, ct);
             var right = await snapshots.GetFileVersionRestoreDataAsync(request.RightFileVersionId, ct);
 
             if (left is null || right is null)
-                return OperationResult<TextDiffResultDto>.Fail("Одна из версий не найдена.");
+                return OperationResult<TextDiffResultDto>.Fail("One of the selected versions was not found.");
 
             if (!left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase))
-                return OperationResult<TextDiffResultDto>.Fail("Версии относятся к разным файлам.");
+                return OperationResult<TextDiffResultDto>.Fail("Selected versions belong to different files.");
 
             if (left.IsDeletionMarker || right.IsDeletionMarker)
-                return OperationResult<TextDiffResultDto>.Fail("Diff для версии удаления не поддерживается.");
+                return OperationResult<TextDiffResultDto>.Fail("Diff preview is not available for deletion versions.");
 
             var extension = left.Extension ?? right.Extension;
             if (string.IsNullOrWhiteSpace(extension) || !TextExtensions.Contains(extension))
-                return OperationResult<TextDiffResultDto>.Fail("Формат файла не поддерживает текстовый diff.");
+                return OperationResult<TextDiffResultDto>.Fail("File format is not supported for text diff.");
+
+            var cached = await snapshots.GetStoredTextDiffAsync(request.LeftFileVersionId, request.RightFileVersionId, maxLines, ct);
+            if (cached is not null)
+                return OperationResult<TextDiffResultDto>.Ok(cached);
 
             if ((left.Blocks.Count == 0 && left.SizeBytes > 0) || (right.Blocks.Count == 0 && right.SizeBytes > 0))
-                return OperationResult<TextDiffResultDto>.Fail("Для одной из версий отсутствуют блоки данных.");
+                return OperationResult<TextDiffResultDto>.Fail("Blocks are missing for one of the selected versions.");
 
             await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);
             await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct);
 
-            var leftLines = await File.ReadAllLinesAsync(leftTemp, ct);
-            var rightLines = await File.ReadAllLinesAsync(rightTemp, ct);
-
-            var maxLines = Math.Clamp(request.MaxLines, 200, 20_000);
-            var isTruncated = leftLines.Length > maxLines || rightLines.Length > maxLines;
-
-            if (isTruncated)
-            {
-                leftLines = leftLines.Take(maxLines).ToArray();
-                rightLines = rightLines.Take(maxLines).ToArray();
-            }
-
-            var lines = BuildLineDiff(leftLines, rightLines, out var added, out var removed);
+            var computed = await diffEngine.BuildDiffAsync(leftTemp, rightTemp, maxLines, ct);
 
             var result = new TextDiffResultDto(
                 left.RelativePath,
                 left.FileVersionId,
                 right.FileVersionId,
-                added,
-                removed,
-                isTruncated,
-                lines);
+                computed.AddedLines,
+                computed.RemovedLines,
+                computed.IsTruncated,
+                computed.Lines);
+
+            try
+            {
+                await snapshots.SaveStoredTextDiffAsync(result, maxLines, ct);
+            }
+            catch (Exception cacheEx)
+            {
+                log.LogWarning(
+                    cacheEx,
+                    "Failed to persist text diff cache. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                    request.LeftFileVersionId,
+                    request.RightFileVersionId);
+            }
 
             return OperationResult<TextDiffResultDto>.Ok(result);
         }
         catch (Exception ex)
         {
-            log.LogError(ex,
+            log.LogError(
+                ex,
                 "Failed to build text diff. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 request.LeftFileVersionId,
                 request.RightFileVersionId);
@@ -90,84 +99,6 @@ public sealed class GetTextDiffHandler(
             TryDelete(leftTemp);
             TryDelete(rightTemp);
         }
-    }
-
-    private static IReadOnlyList<TextDiffLineDto> BuildLineDiff(
-        IReadOnlyList<string> left,
-        IReadOnlyList<string> right,
-        out int added,
-        out int removed)
-    {
-        var n = left.Count;
-        var m = right.Count;
-
-        var lcs = new int[n + 1, m + 1];
-        for (var i = n - 1; i >= 0; i--)
-        {
-            for (var j = m - 1; j >= 0; j--)
-            {
-                if (left[i] == right[j])
-                    lcs[i, j] = lcs[i + 1, j + 1] + 1;
-                else
-                    lcs[i, j] = Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
-            }
-        }
-
-        var lines = new List<TextDiffLineDto>(Math.Max(n, m));
-
-        var li = 0;
-        var ri = 0;
-        var leftLineNumber = 1;
-        var rightLineNumber = 1;
-
-        added = 0;
-        removed = 0;
-
-        while (li < n && ri < m)
-        {
-            if (left[li] == right[ri])
-            {
-                lines.Add(new TextDiffLineDto("equal", leftLineNumber, rightLineNumber, left[li]));
-                li++;
-                ri++;
-                leftLineNumber++;
-                rightLineNumber++;
-                continue;
-            }
-
-            if (lcs[li + 1, ri] >= lcs[li, ri + 1])
-            {
-                lines.Add(new TextDiffLineDto("remove", leftLineNumber, null, left[li]));
-                li++;
-                leftLineNumber++;
-                removed++;
-            }
-            else
-            {
-                lines.Add(new TextDiffLineDto("add", null, rightLineNumber, right[ri]));
-                ri++;
-                rightLineNumber++;
-                added++;
-            }
-        }
-
-        while (li < n)
-        {
-            lines.Add(new TextDiffLineDto("remove", leftLineNumber, null, left[li]));
-            li++;
-            leftLineNumber++;
-            removed++;
-        }
-
-        while (ri < m)
-        {
-            lines.Add(new TextDiffLineDto("add", null, rightLineNumber, right[ri]));
-            ri++;
-            rightLineNumber++;
-            added++;
-        }
-
-        return lines;
     }
 
     private static void TryDelete(string path)
