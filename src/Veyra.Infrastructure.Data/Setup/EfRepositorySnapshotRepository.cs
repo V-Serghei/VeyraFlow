@@ -1043,31 +1043,31 @@ public sealed class EfRepositorySnapshotRepository(
     }
 
     private static readonly IReadOnlyList<SnapshotLinkStateDto> EmptySnapshotLinkStates = Array.Empty<SnapshotLinkStateDto>();
-
     private static string? NormalizeSnapshotTitle(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
             return null;
-
         var title = value.Trim();
         if (title.Length <= 256)
             return title;
-
         return title[..256];
     }
-
-    
+    private static SnapshotLinkStateDto ToSnapshotLinkStateDto(SnapshotLinkState state)
+        => new(
+            state.FileIdentityId,
+            state.FileVersionId,
+            state.IsDeletionMarker,
+            state.SizeBytes,
+            state.VersionCreatedAtUtc,
+            state.RelativePath,
+            state.Name);
     private static RepositoryPathStateDto ToRepositoryPathStateDto(SnapshotEntryLight state)
         => new(
             state.RelativePath,
             state.Name,
             state.SizeBytes,
             state.LastWriteUtc,
-            state.ContentHashSha256);
-        return false;
-    }
-
-    private static string NormalizeRelativePath(string value)
+            state.ContentHashSha256);private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/');
 
     private static string ToAbsolutePath(string rootPath, string relativePath)
