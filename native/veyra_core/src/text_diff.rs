@@ -14,11 +14,24 @@ struct TextDiffLine {
 }
 
 #[derive(Serialize)]
+struct TextDiffHunk {
+    sequence: u32,
+    start_line_sequence: u32,
+    end_line_sequence: u32,
+    old_start_line: u32,
+    old_line_count: u32,
+    new_start_line: u32,
+    new_line_count: u32,
+    change_kind: String,
+}
+
+#[derive(Serialize)]
 struct TextDiffResult {
     added_lines: u32,
     removed_lines: u32,
     is_truncated: bool,
     lines: Vec<TextDiffLine>,
+    hunks: Vec<TextDiffHunk>,
 }
 
 #[derive(Clone, Copy)]
@@ -176,6 +189,122 @@ fn myers_diff_ops(left: &[String], right: &[String]) -> Vec<DiffOp> {
     fallback
 }
 
+fn build_hunks(lines: &[TextDiffLine], context_lines: usize) -> Vec<TextDiffHunk> {
+    if lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut changed_indexes = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if line.kind == "add" || line.kind == "remove" {
+            changed_indexes.push(idx);
+        }
+    }
+
+    if changed_indexes.is_empty() {
+        return Vec::new();
+    }
+
+    let context = context_lines.min(20);
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut seg_start = changed_indexes[0];
+    let mut seg_end = seg_start;
+
+    for idx in changed_indexes.into_iter().skip(1) {
+        if idx == seg_end + 1 {
+            seg_end = idx;
+            continue;
+        }
+
+        let start = seg_start.saturating_sub(context);
+        let end = (seg_end + context).min(lines.len() - 1);
+        ranges.push((start, end));
+
+        seg_start = idx;
+        seg_end = idx;
+    }
+
+    let start = seg_start.saturating_sub(context);
+    let end = (seg_end + context).min(lines.len() - 1);
+    ranges.push((start, end));
+
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges.into_iter() {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 + 1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+
+        merged.push((start, end));
+    }
+
+    let mut hunks = Vec::with_capacity(merged.len());
+
+    for (sequence, (start, end)) in merged.into_iter().enumerate() {
+        let slice = &lines[start..=end];
+
+        let old_start = slice
+            .iter()
+            .find_map(|line| line.left_line_number)
+            .unwrap_or(0);
+
+        let new_start = slice
+            .iter()
+            .find_map(|line| line.right_line_number)
+            .unwrap_or(0);
+
+        let mut old_count = 0u32;
+        let mut new_count = 0u32;
+        let mut has_add = false;
+        let mut has_remove = false;
+
+        for line in slice {
+            if line.kind != "add" && line.left_line_number.is_some() {
+                old_count += 1;
+            }
+
+            if line.kind != "remove" && line.right_line_number.is_some() {
+                new_count += 1;
+            }
+
+            if line.kind == "add" {
+                has_add = true;
+            }
+
+            if line.kind == "remove" {
+                has_remove = true;
+            }
+        }
+
+        let change_kind = if has_add && has_remove {
+            "modified"
+        } else if has_add {
+            "added"
+        } else if has_remove {
+            "removed"
+        } else {
+            "modified"
+        }
+        .to_string();
+
+        hunks.push(TextDiffHunk {
+            sequence: sequence as u32,
+            start_line_sequence: start as u32,
+            end_line_sequence: end as u32,
+            old_start_line: old_start,
+            old_line_count: old_count,
+            new_start_line: new_start,
+            new_line_count: new_count,
+            change_kind,
+        });
+    }
+
+    hunks
+}
+
 pub fn build_text_diff_json(
     left_path: &Path,
     right_path: &Path,
@@ -251,11 +380,14 @@ pub fn build_text_diff_json(
         }
     }
 
+    let hunks = build_hunks(&lines, 3);
+
     let payload = TextDiffResult {
         added_lines,
         removed_lines,
         is_truncated,
         lines,
+        hunks,
     };
 
     serde_json::to_vec(&payload).map_err(|e| format!("serialize text diff result: {e}"))
@@ -300,5 +432,41 @@ mod tests {
         let ops = myers_diff_ops(&left, &right);
 
         assert!(ops.iter().all(|op| matches!(op, DiffOp::Equal(_, _))));
+    }
+
+    #[test]
+    fn build_hunks_returns_ranges_for_changes() {
+        let lines = vec![
+            TextDiffLine {
+                kind: "equal".to_string(),
+                left_line_number: Some(1),
+                right_line_number: Some(1),
+                text: "a".to_string(),
+            },
+            TextDiffLine {
+                kind: "remove".to_string(),
+                left_line_number: Some(2),
+                right_line_number: None,
+                text: "b".to_string(),
+            },
+            TextDiffLine {
+                kind: "add".to_string(),
+                left_line_number: None,
+                right_line_number: Some(2),
+                text: "c".to_string(),
+            },
+            TextDiffLine {
+                kind: "equal".to_string(),
+                left_line_number: Some(3),
+                right_line_number: Some(3),
+                text: "d".to_string(),
+            },
+        ];
+
+        let hunks = build_hunks(&lines, 1);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(hunks[0].change_kind, "modified");
+        assert_eq!(hunks[0].start_line_sequence, 0);
+        assert_eq!(hunks[0].end_line_sequence, 3);
     }
 }

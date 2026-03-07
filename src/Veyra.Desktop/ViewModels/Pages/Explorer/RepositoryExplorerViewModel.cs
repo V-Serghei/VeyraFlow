@@ -43,6 +43,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private bool _liveSyncPending;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
     private bool _isSyncingSelectionFromSnapshot;
+    private long? _preferredSnapshotFileVersionId;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -279,6 +280,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             && SelectedSnapshotFile is not null
             && !value.RelativePath.Equals(SelectedSnapshotFile.RelativePath, StringComparison.OrdinalIgnoreCase))
         {
+            _preferredSnapshotFileVersionId = null;
             SelectedSnapshotFile = null;
         }
 
@@ -293,8 +295,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnSelectedSnapshotFileChanged(RepositorySnapshotFileChangeViewModel? value)
     {
         if (value is null)
+        {
+            _preferredSnapshotFileVersionId = null;
             return;
+        }
 
+        _preferredSnapshotFileVersionId = value.FileVersionId;
         SelectItemFromSnapshotFile(value);
     }
 
@@ -394,7 +400,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 BaselineSizeBytes = change.BaselineSizeBytes
             }).ToList();
 
-            vm.Initialize(defaultName, changedFiles);
+            vm.Initialize(defaultName, changedFiles, LoadSnapshotDialogPreviewAsync);
         }
 
         await _windows.ShowDialogAsync(dialog, owner);
@@ -413,6 +419,25 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             snapshotTitle: snapshotTitle);
     }
 
+    private async Task<PendingFileDiffPreviewDto> LoadSnapshotDialogPreviewAsync(
+        SnapshotPendingFileItemViewModel file,
+        CancellationToken ct)
+    {
+        if (RepositoryId <= 0)
+            return PendingFileDiffPreviewDto.Unavailable(file.RelativePath, "Repository is not selected.");
+
+        var result = await _mediator.Send(new GetPendingFileDiffPreviewQuery(
+            RepositoryId,
+            file.RelativePath,
+            3000), ct);
+
+        if (!result.Success || result.Value is null)
+            return PendingFileDiffPreviewDto.Unavailable(
+                file.RelativePath,
+                result.Error ?? "Unable to build preview for selected file.");
+
+        return result.Value;
+    }
     [RelayCommand]
     private async Task ShowSnapshotHistoryAsync()
     {
@@ -623,30 +648,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         DiffPreviewSummary = $"{value.RelativePath}   +{value.AddedLines} / -{value.RemovedLines}" +
                              (value.IsTruncated ? "  (truncated)" : string.Empty);
 
-        var leftBuilder = new StringBuilder();
-        var rightBuilder = new StringBuilder();
+        BuildSideBySideDiffColumns(value.Lines, value.Hunks, out var leftColumn, out var rightColumn);
 
-        foreach (var line in value.Lines)
-        {
-            switch (line.Kind)
-            {
-                case "remove":
-                    AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
-                    AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
-                    break;
-                case "add":
-                    AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
-                    AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
-                    break;
-                default:
-                    AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
-                    AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
-                    break;
-            }
-        }
-
-        DiffPreviewLeftColumn = leftBuilder.ToString().TrimEnd();
-        DiffPreviewRightColumn = rightBuilder.ToString().TrimEnd();
+        DiffPreviewLeftColumn = leftColumn;
+        DiffPreviewRightColumn = rightColumn;
         VersionActionMessage = $"Diff ready: +{value.AddedLines} / -{value.RemovedLines}";
     }
 
@@ -771,8 +776,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 });
             }
 
-            SelectedVersion = FileVersions.FirstOrDefault(v => v.HasContentBlocks && !v.IsDeletionMarker)
-                              ?? FileVersions.FirstOrDefault();
+            if (_preferredSnapshotFileVersionId is > 0)
+            {
+                SelectedVersion = FileVersions.FirstOrDefault(v => v.FileVersionId == _preferredSnapshotFileVersionId.Value)
+                                  ?? FileVersions.FirstOrDefault(v => v.HasContentBlocks && !v.IsDeletionMarker)
+                                  ?? FileVersions.FirstOrDefault();
+            }
+            else
+            {
+                SelectedVersion = FileVersions.FirstOrDefault(v => v.HasContentBlocks && !v.IsDeletionMarker)
+                                  ?? FileVersions.FirstOrDefault();
+            }
         }
         catch (Exception ex)
         {
@@ -1330,6 +1344,84 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static string? NormalizeParent(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;
 
+    private static void BuildSideBySideDiffColumns(
+        IReadOnlyList<TextDiffLineDto> lines,
+        IReadOnlyList<TextDiffHunkDto> hunks,
+        out string left,
+        out string right)
+    {
+        var leftBuilder = new StringBuilder();
+        var rightBuilder = new StringBuilder();
+
+        if (lines.Count == 0)
+        {
+            left = string.Empty;
+            right = string.Empty;
+            return;
+        }
+
+        if (hunks.Count > 0)
+        {
+            var firstHunk = true;
+            foreach (var hunk in hunks.OrderBy(h => h.Sequence))
+            {
+                var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
+                var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
+
+                if (!firstHunk)
+                {
+                    AppendDiffColumnLine(leftBuilder, null, '~', "...");
+                    AppendDiffColumnLine(rightBuilder, null, '~', "...");
+                }
+
+                for (var i = start; i <= end; i++)
+                {
+                    var line = lines[i];
+                    switch (line.Kind)
+                    {
+                        case "remove":
+                            AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
+                            AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
+                            break;
+                        case "add":
+                            AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
+                            AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
+                            break;
+                        default:
+                            AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
+                            AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
+                            break;
+                    }
+                }
+
+                firstHunk = false;
+            }
+        }
+        else
+        {
+            foreach (var line in lines)
+            {
+                switch (line.Kind)
+                {
+                    case "remove":
+                        AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
+                        AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
+                        break;
+                    case "add":
+                        AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
+                        AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
+                        break;
+                    default:
+                        AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
+                        AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
+                        break;
+                }
+            }
+        }
+
+        left = leftBuilder.ToString().TrimEnd();
+        right = rightBuilder.ToString().TrimEnd();
+    }
     private static void AppendDiffColumnLine(StringBuilder builder, int? lineNumber, char marker, string text)
     {
         if (lineNumber is null)
@@ -1360,6 +1452,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
     }
 }
+
+
+
+
+
+
+
+
 
 
 

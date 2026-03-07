@@ -39,11 +39,24 @@ public sealed class RustTextDiffEngine(
                     l.Text ?? string.Empty))
                 .ToList();
 
+            var hunks = payload.Hunks
+                .Select(h => new TextDiffHunkDto(
+                    h.Sequence,
+                    h.StartLineSequence,
+                    h.EndLineSequence,
+                    h.OldStartLine,
+                    h.OldLineCount,
+                    h.NewStartLine,
+                    h.NewLineCount,
+                    h.ChangeKind ?? "modified"))
+                .ToList();
+
             return new TextDiffComputationDto(
                 payload.AddedLines,
                 payload.RemovedLines,
                 payload.IsTruncated,
-                lines);
+                lines,
+                hunks);
         }
         catch (Exception ex) when (IsNativeUnavailable(ex))
         {
@@ -85,6 +98,36 @@ public sealed class RustTextDiffEngine(
 
         [JsonPropertyName("lines")]
         public List<NativeTextDiffLine> Lines { get; init; } = [];
+
+        [JsonPropertyName("hunks")]
+        public List<NativeTextDiffHunk> Hunks { get; init; } = [];
+    }
+
+    private sealed record NativeTextDiffHunk
+    {
+        [JsonPropertyName("sequence")]
+        public int Sequence { get; init; }
+
+        [JsonPropertyName("start_line_sequence")]
+        public int StartLineSequence { get; init; }
+
+        [JsonPropertyName("end_line_sequence")]
+        public int EndLineSequence { get; init; }
+
+        [JsonPropertyName("old_start_line")]
+        public int OldStartLine { get; init; }
+
+        [JsonPropertyName("old_line_count")]
+        public int OldLineCount { get; init; }
+
+        [JsonPropertyName("new_start_line")]
+        public int NewStartLine { get; init; }
+
+        [JsonPropertyName("new_line_count")]
+        public int NewLineCount { get; init; }
+
+        [JsonPropertyName("change_kind")]
+        public string? ChangeKind { get; init; }
     }
 
     private sealed record NativeTextDiffLine
@@ -102,3 +145,4 @@ public sealed class RustTextDiffEngine(
         public string? Text { get; init; }
     }
 }
+

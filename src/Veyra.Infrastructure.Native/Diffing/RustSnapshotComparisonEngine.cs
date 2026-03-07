@@ -124,6 +124,67 @@ public sealed class RustSnapshotComparisonEngine(
         return await managed.CompareRepositoryPathsAsync(current, baseline, safeTake, ct);
     }
 
+
+    public async Task<RepositoryVersionPlanningResultDto> PlanRepositoryVersionsAsync(
+        IReadOnlyCollection<RepositoryVersionPlanningFileStateDto> states,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        try
+        {
+            var payload = states.Select(s => new NativeVersionPlanningStatePayload
+            {
+                RelativePath = s.RelativePath,
+                HasCurrent = s.HasCurrent,
+                CurrentSizeBytes = s.CurrentSizeBytes,
+                CurrentContentHashSha256 = s.CurrentContentHashSha256,
+                HasPrevious = s.HasPrevious,
+                PreviousSizeBytes = s.PreviousSizeBytes,
+                PreviousContentHashSha256 = s.PreviousContentHashSha256,
+                HasLatestVersion = s.HasLatestVersion,
+                LatestIsDeletionMarker = s.LatestIsDeletionMarker,
+                LatestSizeBytes = s.LatestSizeBytes,
+                LatestHasBlocks = s.LatestHasBlocks
+            }).ToList();
+
+            var statesJson = JsonSerializer.Serialize(payload, JsonOptions);
+            var json = VeyraCoreNative.PlanRepositoryVersionsJson(statesJson);
+            var planned = JsonSerializer.Deserialize<NativeVersionPlanningPayload>(json, JsonOptions)
+                          ?? throw new InvalidOperationException("Native repository version planner payload is empty.");
+
+            var entries = planned.Entries
+                .Select(e => new RepositoryVersionPlanEntryDto(
+                    e.RelativePath ?? string.Empty,
+                    e.ChangeKind ?? "unchanged",
+                    e.ShouldCreateNewVersion,
+                    e.ShouldMarkIdentityDeleted))
+                .ToList();
+
+            var changedFilesCount = planned.ChangedFilesCount > 0
+                ? planned.ChangedFilesCount
+                : entries.Count(e => !string.Equals(e.ChangeKind, "unchanged", StringComparison.OrdinalIgnoreCase));
+
+            var newVersionsCount = planned.NewVersionsCount > 0
+                ? planned.NewVersionsCount
+                : entries.Count(e => e.ShouldCreateNewVersion);
+
+            return new RepositoryVersionPlanningResultDto(
+                changedFilesCount,
+                newVersionsCount,
+                entries);
+        }
+        catch (Exception ex) when (IsNativeUnavailable(ex))
+        {
+            log.LogDebug(ex, "Native repository version planner entrypoint is unavailable. Falling back to managed engine.");
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Native repository version planner failed. Falling back to managed engine.");
+        }
+
+        return await managed.PlanRepositoryVersionsAsync(states, ct);
+    }
     private static NativeLinkStatePayload ToLinkPayload(SnapshotLinkStateDto state)
     {
         var utc = state.VersionCreatedAtUtc.Kind == DateTimeKind.Utc
@@ -168,7 +229,8 @@ public sealed class RustSnapshotComparisonEngine(
             return ioe.Message.Contains("entry point", StringComparison.OrdinalIgnoreCase)
                    || ioe.Message.Contains("Unable to load DLL", StringComparison.OrdinalIgnoreCase)
                    || ioe.Message.Contains("Native snapshot comparison", StringComparison.OrdinalIgnoreCase)
-                   || ioe.Message.Contains("Native repository path comparison", StringComparison.OrdinalIgnoreCase);
+                   || ioe.Message.Contains("Native repository path comparison", StringComparison.OrdinalIgnoreCase)
+                   || ioe.Message.Contains("Native repository version planner", StringComparison.OrdinalIgnoreCase);
         }
 
         return false;
@@ -234,6 +296,69 @@ public sealed class RustSnapshotComparisonEngine(
         public long VersionCreatedUnixSeconds { get; init; }
     }
 
+
+    private sealed record NativeVersionPlanningStatePayload
+    {
+        [JsonPropertyName("relative_path")]
+        public string RelativePath { get; init; } = string.Empty;
+
+        [JsonPropertyName("has_current")]
+        public bool HasCurrent { get; init; }
+
+        [JsonPropertyName("current_size_bytes")]
+        public long CurrentSizeBytes { get; init; }
+
+        [JsonPropertyName("current_content_hash_sha256")]
+        public string? CurrentContentHashSha256 { get; init; }
+
+        [JsonPropertyName("has_previous")]
+        public bool HasPrevious { get; init; }
+
+        [JsonPropertyName("previous_size_bytes")]
+        public long PreviousSizeBytes { get; init; }
+
+        [JsonPropertyName("previous_content_hash_sha256")]
+        public string? PreviousContentHashSha256 { get; init; }
+
+        [JsonPropertyName("has_latest_version")]
+        public bool HasLatestVersion { get; init; }
+
+        [JsonPropertyName("latest_is_deletion_marker")]
+        public bool LatestIsDeletionMarker { get; init; }
+
+        [JsonPropertyName("latest_size_bytes")]
+        public long LatestSizeBytes { get; init; }
+
+        [JsonPropertyName("latest_has_blocks")]
+        public bool LatestHasBlocks { get; init; }
+    }
+
+    private sealed record NativeVersionPlanningPayload
+    {
+        [JsonPropertyName("changed_files_count")]
+        public int ChangedFilesCount { get; init; }
+
+        [JsonPropertyName("new_versions_count")]
+        public int NewVersionsCount { get; init; }
+
+        [JsonPropertyName("entries")]
+        public List<NativeVersionPlanEntryPayload> Entries { get; init; } = [];
+    }
+
+    private sealed record NativeVersionPlanEntryPayload
+    {
+        [JsonPropertyName("relative_path")]
+        public string? RelativePath { get; init; }
+
+        [JsonPropertyName("change_kind")]
+        public string? ChangeKind { get; init; }
+
+        [JsonPropertyName("should_create_new_version")]
+        public bool ShouldCreateNewVersion { get; init; }
+
+        [JsonPropertyName("should_mark_identity_deleted")]
+        public bool ShouldMarkIdentityDeleted { get; init; }
+    }
     private sealed record NativePathStatePayload
     {
         [JsonPropertyName("relative_path")]

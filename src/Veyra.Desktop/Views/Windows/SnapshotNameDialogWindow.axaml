@@ -6,10 +6,10 @@
         mc:Ignorable="d"
         x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
         x:DataType="windows:SnapshotNameDialogWindowViewModel"
-        Width="980"
-        Height="640"
-        MinWidth="860"
-        MinHeight="540"
+        Width="1080"
+        Height="700"
+        MinWidth="900"
+        MinHeight="560"
         WindowStartupLocation="CenterOwner"
         Background="#0F1724"
         Foreground="#EEEEEE"
@@ -18,7 +18,7 @@
     <DockPanel Margin="16" LastChildFill="True">
         <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
             <TextBlock Text="Create snapshot" FontSize="19" FontWeight="SemiBold"/>
-            <TextBlock Text="Review changed files before commit. Diff preview is currently a placeholder with comparison metadata."
+            <TextBlock Text="Review changed files, choose commit name and inspect side-by-side preview before saving."
                        Opacity="0.75"
                        TextWrapping="Wrap"/>
 
@@ -35,7 +35,7 @@
                        TextWrapping="Wrap"/>
         </StackPanel>
 
-        <Grid ColumnDefinitions="380,*" ColumnSpacing="12">
+        <Grid ColumnDefinitions="360,*" ColumnSpacing="12">
             <Border Grid.Column="0"
                     Background="#132033"
                     BorderBrush="#22354A"
@@ -78,23 +78,51 @@
                     BorderThickness="1"
                     CornerRadius="10"
                     Padding="12">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Selected file" FontWeight="SemiBold" FontSize="14"/>
-                    <TextBlock Text="{Binding SelectedChangedFileTitle}" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding SelectedChangedFilePath}" Opacity="0.72" TextWrapping="Wrap"/>
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Text="Selected file" FontWeight="SemiBold" FontSize="14"/>
+                    <TextBlock Grid.Row="1" Text="{Binding SelectedChangedFileTitle}" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Row="2" Text="{Binding SelectedChangedFilePath}" Opacity="0.72" TextWrapping="Wrap"/>
 
-                    <Border Height="1" Background="#22354A" Margin="0,4"/>
+                    <StackPanel Grid.Row="3" Spacing="4" Margin="0,4,0,0">
+                        <TextBlock Text="Comparison summary" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding SelectedChangedFileHint}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding PreviewSummary}" TextWrapping="Wrap" Opacity="0.9"/>
+                    </StackPanel>
 
-                    <TextBlock Text="Comparison summary" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding SelectedChangedFileHint}" TextWrapping="Wrap"/>
+                    <Grid Grid.Row="4" RowDefinitions="Auto,*,Auto" RowSpacing="6">
+                        <TextBlock Grid.Row="0" Text="Diff preview" FontWeight="SemiBold"/>
 
-                    <TextBlock Text="Diff preview" FontWeight="SemiBold" Margin="0,6,0,0"/>
-                    <TextBox Text="{Binding SelectedChangedFilePreview}"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             Height="220"
-                             TextWrapping="Wrap"/>
-                </StackPanel>
+                        <TextBlock Grid.Row="0"
+                                   HorizontalAlignment="Right"
+                                   Text="Building preview..."
+                                   Opacity="0.7"
+                                   IsVisible="{Binding IsPreviewLoading}"/>
+
+                        <Grid Grid.Row="1"
+                              ColumnDefinitions="*,*"
+                              ColumnSpacing="8"
+                              IsVisible="{Binding HasPreviewColumns}">
+                            <Border Grid.Column="0" Background="#0D121C" BorderBrush="#203145" BorderThickness="1" CornerRadius="8" Padding="6">
+                                <TextBox Text="{Binding PreviewLeftColumn}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="NoWrap"/>
+                            </Border>
+
+                            <Border Grid.Column="1" Background="#0D121C" BorderBrush="#203145" BorderThickness="1" CornerRadius="8" Padding="6">
+                                <TextBox Text="{Binding PreviewRightColumn}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="NoWrap"/>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Grid.Row="2"
+                                   Text="Select a modified text file to see side-by-side preview."
+                                   Opacity="0.7"
+                                   IsVisible="{Binding HasNoPreviewColumns}"/>
+                    </Grid>
+                </Grid>
             </Border>
         </Grid>
 

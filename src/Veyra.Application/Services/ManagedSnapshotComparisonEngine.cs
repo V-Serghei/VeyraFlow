@@ -156,6 +156,70 @@ public sealed class ManagedSnapshotComparisonEngine : ISnapshotComparisonEngine
             ordered));
     }
 
+
+    public Task<RepositoryVersionPlanningResultDto> PlanRepositoryVersionsAsync(
+        IReadOnlyCollection<RepositoryVersionPlanningFileStateDto> states,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var entries = new List<RepositoryVersionPlanEntryDto>(states.Count);
+
+        foreach (var state in states.OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (state.HasCurrent)
+            {
+                var currentHash = state.CurrentContentHashSha256 ?? string.Empty;
+                var previousHash = state.PreviousContentHashSha256 ?? string.Empty;
+
+                var changed = !state.HasPrevious
+                              || state.CurrentSizeBytes != state.PreviousSizeBytes
+                              || !string.Equals(currentHash, previousHash, StringComparison.OrdinalIgnoreCase);
+
+                var changeKind = !state.HasPrevious
+                    ? "added"
+                    : changed
+                        ? "modified"
+                        : "unchanged";
+
+                var shouldCreate = changed
+                                   || !state.HasLatestVersion
+                                   || state.LatestIsDeletionMarker
+                                   || !state.LatestHasBlocks;
+
+                entries.Add(new RepositoryVersionPlanEntryDto(
+                    state.RelativePath,
+                    changeKind,
+                    shouldCreate,
+                    ShouldMarkIdentityDeleted: false));
+
+                continue;
+            }
+
+            var deletedKind = state.HasPrevious || state.HasLatestVersion
+                ? "deleted"
+                : "unchanged";
+
+            var shouldCreateDeletionMarker = !state.HasLatestVersion || !state.LatestIsDeletionMarker;
+
+            entries.Add(new RepositoryVersionPlanEntryDto(
+                state.RelativePath,
+                deletedKind,
+                shouldCreateDeletionMarker,
+                ShouldMarkIdentityDeleted: true));
+        }
+
+        var changedFiles = entries.Count(e => !string.Equals(e.ChangeKind, "unchanged", StringComparison.OrdinalIgnoreCase));
+        var newVersions = entries.Count(e => e.ShouldCreateNewVersion);
+
+        return Task.FromResult(new RepositoryVersionPlanningResultDto(
+            changedFiles,
+            newVersions,
+            entries));
+    }
+
     private static string ResolveLinkChangeKind(SnapshotLinkStateDto current, SnapshotLinkStateDto? previous)
     {
         if (current.IsDeletionMarker)

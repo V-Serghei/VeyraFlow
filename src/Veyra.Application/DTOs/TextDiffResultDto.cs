@@ -1,4 +1,4 @@
-﻿namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs;
 
 public sealed record TextDiffResultDto(
     string RelativePath,
@@ -7,4 +7,5 @@ public sealed record TextDiffResultDto(
     int AddedLines,
     int RemovedLines,
     bool IsTruncated,
-    IReadOnlyList<TextDiffLineDto> Lines);
+    IReadOnlyList<TextDiffLineDto> Lines,
+    IReadOnlyList<TextDiffHunkDto> Hunks);

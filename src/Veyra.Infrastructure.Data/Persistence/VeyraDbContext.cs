@@ -14,6 +14,7 @@ public class VeyraDbContext : DbContext
     public DbSet<FileVersion> FileVersions { get; set; } = null!;
     public DbSet<FileVersionBlock> FileVersionBlocks { get; set; } = null!;
     public DbSet<FileVersionTextDiff> FileVersionTextDiffs { get; set; } = null!;
+    public DbSet<FileVersionTextDiffHunk> FileVersionTextDiffHunks { get; set; } = null!;
     public DbSet<FileVersionTextDiffLine> FileVersionTextDiffLines { get; set; } = null!;
     public DbSet<TextLineAtom> TextLineAtoms { get; set; } = null!;
     public DbSet<SnapshotFileLink> SnapshotFileLinks { get; set; } = null!;
@@ -123,6 +124,20 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => e.HashSha256);
         });
 
+        modelBuilder.Entity<FileVersionTextDiffHunk>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ChangeKind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasOne(e => e.Diff)
+                .WithMany(d => d.Hunks)
+                .HasForeignKey(e => e.DiffId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
+        });
+
         modelBuilder.Entity<FileVersionTextDiffLine>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -134,6 +149,11 @@ public class VeyraDbContext : DbContext
                 .HasForeignKey(e => e.DiffId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(e => e.Hunk)
+                .WithMany(h => h.Lines)
+                .HasForeignKey(e => e.HunkId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             entity.HasOne(e => e.TextLineAtom)
                 .WithMany(a => a.DiffLines)
                 .HasForeignKey(e => e.TextLineAtomId)
@@ -141,6 +161,8 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
             entity.HasIndex(e => e.TextLineAtomId);
+            entity.HasIndex(e => e.HunkId);
+            entity.HasIndex(e => new { e.HunkId, e.InHunkSequence }).IsUnique();
         });
         modelBuilder.Entity<SnapshotFileLink>(entity =>
         {
@@ -252,4 +274,5 @@ public class VeyraDbContext : DbContext
         });
     }
 }
+
 

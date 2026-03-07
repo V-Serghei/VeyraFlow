@@ -52,8 +52,7 @@ public sealed class SnapshotPendingFileItemViewModel
     {
         "added" => "Diff preview placeholder: file has no previous version in repository history.",
         "deleted" => "Diff preview placeholder: file content is absent in current snapshot.",
-        "modified" => "Diff preview placeholder: text diff storage is not enabled yet for this file. "
-                      + "Planned source: previous file version content vs current on-disk content.",
+        "modified" => "Select this file to build side-by-side preview against the latest saved version.",
         _ => "Diff preview placeholder is unavailable for this change type."
     };
 
@@ -65,3 +64,5 @@ public sealed class SnapshotPendingFileItemViewModel
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
+
+

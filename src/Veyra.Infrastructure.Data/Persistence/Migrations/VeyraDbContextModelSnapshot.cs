@@ -220,6 +220,46 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.ToTable("FileVersionTextDiffs");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangeKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DiffId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NewLineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NewStartLine")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OldLineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OldStartLine")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiffId", "Sequence")
+                        .IsUnique();
+
+                    b.ToTable("FileVersionTextDiffHunks");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffLine", b =>
                 {
                     b.Property<long>("Id")
@@ -230,6 +270,12 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("DiffId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("HunkId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("InHunkSequence")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Kind")
@@ -251,9 +297,14 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("HunkId");
+
                     b.HasIndex("TextLineAtomId");
 
                     b.HasIndex("DiffId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("HunkId", "InHunkSequence")
                         .IsUnique();
 
                     b.ToTable("FileVersionTextDiffLines");
@@ -658,6 +709,17 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersionTextDiff", "Diff")
+                        .WithMany("Hunks")
+                        .HasForeignKey("DiffId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diff");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffLine", b =>
                 {
                     b.HasOne("Veyra.Domain.Entities.FileVersionTextDiff", "Diff")
@@ -666,6 +728,11 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Veyra.Domain.Entities.FileVersionTextDiffHunk", "Hunk")
+                        .WithMany("Lines")
+                        .HasForeignKey("HunkId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Veyra.Domain.Entities.TextLineAtom", "TextLineAtom")
                         .WithMany("DiffLines")
                         .HasForeignKey("TextLineAtomId")
@@ -673,6 +740,8 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Diff");
+
+                    b.Navigation("Hunk");
 
                     b.Navigation("TextLineAtom");
                 });
@@ -771,6 +840,13 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiff", b =>
+                {
+                    b.Navigation("Hunks");
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
                 {
                     b.Navigation("Lines");
                 });

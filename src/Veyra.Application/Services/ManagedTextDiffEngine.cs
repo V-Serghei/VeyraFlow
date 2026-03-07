@@ -27,7 +27,8 @@ public sealed class ManagedTextDiffEngine : ITextDiffEngine
         }
 
         var lines = BuildLineDiff(leftLines, rightLines, out var added, out var removed);
-        return new TextDiffComputationDto(added, removed, isTruncated, lines);
+        var hunks = TextDiffHunkBuilder.Build(lines, 3);
+        return new TextDiffComputationDto(added, removed, isTruncated, lines, hunks);
     }
 
     private static IReadOnlyList<TextDiffLineDto> BuildLineDiff(
@@ -108,3 +109,4 @@ public sealed class ManagedTextDiffEngine : ITextDiffEngine
         return lines;
     }
 }
+

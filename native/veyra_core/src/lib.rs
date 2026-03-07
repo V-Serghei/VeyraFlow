@@ -463,6 +463,31 @@ pub extern "C" fn veyra_compare_repository_paths_utf8(
 }
 
 #[no_mangle]
+pub extern "C" fn veyra_plan_repository_versions_utf8(
+    states_json_ptr: *const c_char,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(states_json) = ptr_to_str(states_json_ptr) else {
+        set_last_error("states json is null or invalid utf-8");
+        return -1;
+    };
+
+    let payload = match snapshot_compare::plan_repository_versions_json(states_json) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &payload, written)
+}
+
+#[no_mangle]
 pub extern "C" fn veyra_zstd_compress_file(
     src_path_ptr: *const c_char,
     dst_path_ptr: *const c_char,

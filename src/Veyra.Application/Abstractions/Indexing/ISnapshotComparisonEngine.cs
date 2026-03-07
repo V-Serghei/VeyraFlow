@@ -14,4 +14,7 @@ public interface ISnapshotComparisonEngine
         IReadOnlyCollection<RepositoryPathStateDto> baseline,
         int take = 2000,
         CancellationToken ct = default);
+    Task<RepositoryVersionPlanningResultDto> PlanRepositoryVersionsAsync(
+        IReadOnlyCollection<RepositoryVersionPlanningFileStateDto> states,
+        CancellationToken ct = default);
 }

@@ -12,8 +12,13 @@ public class FileVersionTextDiffLine
     public int? LeftLineNumber { get; set; }
     public int? RightLineNumber { get; set; }
 
+    public long? HunkId { get; set; }
+    public FileVersionTextDiffHunk? Hunk { get; set; }
+    public int? InHunkSequence { get; set; }
+
     public long TextLineAtomId { get; set; }
     public TextLineAtom TextLineAtom { get; set; } = null!;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
+

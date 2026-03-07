@@ -13,15 +13,11 @@ public partial class EnsureRepositorySnapshotTitleColumn : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        // SQLite path is intentionally no-op: the Title column is created by
+        // AddRepositorySnapshotTitle migration, and desktop startup contains
+        // an additional self-heal for legacy databases.
         if (ActiveProvider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
-        {
-            migrationBuilder.Sql("""
-ALTER TABLE "RepositorySnapshots"
-ADD COLUMN IF NOT EXISTS "Title" TEXT NULL;
-""");
-
             return;
-        }
 
         migrationBuilder.Sql("""
 IF COL_LENGTH('RepositorySnapshots', 'Title') IS NULL

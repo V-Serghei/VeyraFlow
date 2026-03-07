@@ -39,6 +39,12 @@ public interface IRepositorySnapshotRepository
         int take = 1000,
         CancellationToken ct = default);
 
+    Task<PendingFileDiffPreviewDto> GetPendingFileDiffPreviewAsync(
+        int repositoryId,
+        string relativePath,
+        int maxLines = 3000,
+        CancellationToken ct = default);
+
     Task<TextDiffResultDto?> GetStoredTextDiffAsync(
         long leftFileVersionId,
         long rightFileVersionId,
@@ -53,4 +59,5 @@ public interface IRepositorySnapshotRepository
         long fileVersionId,
         CancellationToken ct = default);
 }
+
 

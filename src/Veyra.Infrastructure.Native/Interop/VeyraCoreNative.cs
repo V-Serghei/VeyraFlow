@@ -82,7 +82,12 @@ internal static class VeyraCoreNative
         byte[]? output,
         ulong outputLen,
         out ulong written);
-
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_plan_repository_versions_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string statesJson,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_last_error_utf8(
         byte[]? output,
@@ -163,6 +168,13 @@ internal static class VeyraCoreNative
             (buffer, len, out written) =>
                 veyra_compare_repository_paths_utf8(currentStatesJson, baselineStatesJson, safeTake, buffer, len, out written),
             "Native repository path comparison failed");
+    }
+    public static string PlanRepositoryVersionsJson(string statesJson)
+    {
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_plan_repository_versions_utf8(statesJson, buffer, len, out written),
+            "Native repository version planner failed");
     }
     public static long RestoreFileBlocks(string storeRoot, string blocksJson, string targetPath, bool overwriteExisting)
     {

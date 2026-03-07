@@ -266,6 +266,121 @@ pub fn compare_repository_paths_json(
     serde_json::to_vec(&payload).map_err(|e| format!("serialize repository path comparison: {e}"))
 }
 
+#[derive(Deserialize, Clone)]
+struct RepositoryVersionPlanningInput {
+    relative_path: String,
+    has_current: bool,
+    current_size_bytes: i64,
+    current_content_hash_sha256: Option<String>,
+    has_previous: bool,
+    previous_size_bytes: i64,
+    previous_content_hash_sha256: Option<String>,
+    has_latest_version: bool,
+    latest_is_deletion_marker: bool,
+    latest_size_bytes: i64,
+    latest_has_blocks: bool,
+}
+
+#[derive(Serialize)]
+struct RepositoryVersionPlanOutput {
+    relative_path: String,
+    change_kind: String,
+    should_create_new_version: bool,
+    should_mark_identity_deleted: bool,
+}
+
+#[derive(Serialize)]
+struct RepositoryVersionPlanningOutput {
+    changed_files_count: u32,
+    new_versions_count: u32,
+    entries: Vec<RepositoryVersionPlanOutput>,
+}
+
+pub fn plan_repository_versions_json(states_json: &str) -> Result<Vec<u8>, String> {
+    let states: Vec<RepositoryVersionPlanningInput> = serde_json::from_str(states_json)
+        .map_err(|e| format!("parse repository version planning json: {e}"))?;
+
+    let mut entries = Vec::with_capacity(states.len());
+
+    for state in states {
+        if state.has_current {
+            let current_hash = normalize_hash(state.current_content_hash_sha256.as_deref());
+            let previous_hash = normalize_hash(state.previous_content_hash_sha256.as_deref());
+
+            let changed = !state.has_previous
+                || state.current_size_bytes != state.previous_size_bytes
+                || !current_hash.eq_ignore_ascii_case(previous_hash);
+
+            let change_kind = if !state.has_previous {
+                "added"
+            } else if changed {
+                "modified"
+            } else {
+                "unchanged"
+            }
+            .to_string();
+
+            let should_create_new_version = changed
+                || !state.has_latest_version
+                || state.latest_is_deletion_marker
+                || !state.latest_has_blocks
+                || (state.has_latest_version
+                    && state.latest_size_bytes == 0
+                    && state.current_size_bytes > 0
+                    && !state.latest_has_blocks);
+
+            entries.push(RepositoryVersionPlanOutput {
+                relative_path: state.relative_path,
+                change_kind,
+                should_create_new_version,
+                should_mark_identity_deleted: false,
+            });
+
+            continue;
+        }
+
+        let change_kind = if state.has_previous || state.has_latest_version {
+            "deleted"
+        } else {
+            "unchanged"
+        }
+        .to_string();
+
+        let should_create_new_version =
+            !state.has_latest_version || !state.latest_is_deletion_marker;
+
+        entries.push(RepositoryVersionPlanOutput {
+            relative_path: state.relative_path,
+            change_kind,
+            should_create_new_version,
+            should_mark_identity_deleted: true,
+        });
+    }
+
+    entries.sort_by(|left, right| {
+        left.relative_path
+            .to_ascii_lowercase()
+            .cmp(&right.relative_path.to_ascii_lowercase())
+    });
+
+    let changed_files_count = entries
+        .iter()
+        .filter(|x| !x.change_kind.eq_ignore_ascii_case("unchanged"))
+        .count() as u32;
+
+    let new_versions_count = entries
+        .iter()
+        .filter(|x| x.should_create_new_version)
+        .count() as u32;
+
+    let payload = RepositoryVersionPlanningOutput {
+        changed_files_count,
+        new_versions_count,
+        entries,
+    };
+
+    serde_json::to_vec(&payload).map_err(|e| format!("serialize repository version planning: {e}"))
+}
 #[cfg(test)]
 mod tests {
     use serde_json::Value;

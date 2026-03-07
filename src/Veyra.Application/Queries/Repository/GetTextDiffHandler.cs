@@ -67,7 +67,8 @@ public sealed class GetTextDiffHandler(
                 computed.AddedLines,
                 computed.RemovedLines,
                 computed.IsTruncated,
-                computed.Lines);
+                computed.Lines,
+                computed.Hunks);
 
             try
             {
@@ -113,3 +114,4 @@ public sealed class GetTextDiffHandler(
         }
     }
 }
+

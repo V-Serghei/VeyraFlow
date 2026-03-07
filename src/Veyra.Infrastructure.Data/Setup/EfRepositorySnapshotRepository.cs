@@ -241,6 +241,37 @@ public sealed class EfRepositorySnapshotRepository(
                     .ToListAsync(ct))
                 .ToHashSet();
 
+        var planningStates = new List<RepositoryVersionPlanningFileStateDto>(allPaths.Count);
+        foreach (var path in allPaths)
+        {
+            currentFilesByPath.TryGetValue(path, out var current);
+            var hasPrevious = previousFilesByPath.TryGetValue(path, out var previous);
+            var identity = identitiesByPath[path];
+            var hasLatestVersion = latestVersionsByIdentityId.TryGetValue(identity.Id, out var latestVersion);
+            var latestHasBlocks = hasLatestVersion
+                                  && latestVersion is not null
+                                  && latestVersion.Id > 0
+                                  && (latestVersion.SizeBytes == 0 || latestVersionIdsWithBlocks.Contains(latestVersion.Id));
+
+            planningStates.Add(new RepositoryVersionPlanningFileStateDto(
+                RelativePath: path,
+                HasCurrent: current is not null,
+                CurrentSizeBytes: current?.SizeBytes ?? 0,
+                CurrentContentHashSha256: current?.ContentHashSha256,
+                HasPrevious: hasPrevious,
+                PreviousSizeBytes: previous.SizeBytes,
+                PreviousContentHashSha256: previous.Hash,
+                HasLatestVersion: hasLatestVersion,
+                LatestIsDeletionMarker: latestVersion?.IsDeletionMarker ?? false,
+                LatestSizeBytes: latestVersion?.SizeBytes ?? 0,
+                LatestHasBlocks: latestHasBlocks));
+        }
+
+        var versionPlan = await snapshotComparison.PlanRepositoryVersionsAsync(planningStates, ct);
+        var planByPath = versionPlan.Entries
+            .GroupBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
         var newVersions = new List<FileVersion>();
         var links = new List<SnapshotFileLink>();
         var pendingBlocks = new Dictionary<FileVersion, IReadOnlyList<StoredFileBlockDto>>();
@@ -251,6 +282,7 @@ public sealed class EfRepositorySnapshotRepository(
             var identity = identitiesByPath[path];
             currentFilesByPath.TryGetValue(path, out var current);
             var hadPrevious = previousFilesByPath.TryGetValue(path, out var previous);
+            planByPath.TryGetValue(path, out var planEntry);
 
             FileVersion selectedVersion;
 
@@ -275,10 +307,14 @@ public sealed class EfRepositorySnapshotRepository(
                                       && selectedVersion.Id > 0
                                       && (selectedVersion.SizeBytes == 0 || latestVersionIdsWithBlocks.Contains(selectedVersion.Id));
 
-                var shouldCreateNewVersion = changed
-                                             || !hasLatest
-                                             || selectedVersion.IsDeletionMarker
-                                             || !latestHasBlocks;
+                var shouldCreateNewVersion = planEntry?.ShouldCreateNewVersion
+                                             ?? (changed
+                                                 || !hasLatest
+                                                 || (hasLatest && selectedVersion.IsDeletionMarker)
+                                                 || !latestHasBlocks);
+
+                if (!hasLatest && !shouldCreateNewVersion)
+                    shouldCreateNewVersion = true;
 
                 if (shouldCreateNewVersion)
                 {
@@ -315,11 +351,18 @@ public sealed class EfRepositorySnapshotRepository(
             }
             else
             {
-                identity.IsDeleted = true;
+                identity.IsDeleted = planEntry?.ShouldMarkIdentityDeleted ?? true;
                 identity.UpdatedAt = scannedAtUtc;
 
-                if (!latestVersionsByIdentityId.TryGetValue(identity.Id, out selectedVersion!)
-                    || !selectedVersion.IsDeletionMarker)
+                var hasLatest = latestVersionsByIdentityId.TryGetValue(identity.Id, out selectedVersion!);
+                var shouldCreateDeletionMarker = planEntry?.ShouldCreateNewVersion
+                                                ?? (!hasLatest
+                                                    || !selectedVersion.IsDeletionMarker);
+
+                if (!hasLatest && !shouldCreateDeletionMarker)
+                    shouldCreateDeletionMarker = true;
+
+                if (shouldCreateDeletionMarker)
                 {
                     selectedVersion = new FileVersion
                     {
@@ -374,7 +417,7 @@ public sealed class EfRepositorySnapshotRepository(
             db.AddRange(links);
 
         repo.FileCount = fileEntries;
-        repo.VersionCount += 1;
+        repo.VersionCount += newVersions.Count;
         repo.TotalSizeBytes = totalFileBytes;
         repo.LastScannedAt = scannedAtUtc;
         repo.UpdatedAt = scannedAtUtc;
@@ -676,6 +719,123 @@ public sealed class EfRepositorySnapshotRepository(
             .ToList();
     }
 
+    public async Task<PendingFileDiffPreviewDto> GetPendingFileDiffPreviewAsync(
+        int repositoryId,
+        string relativePath,
+        int maxLines = 3000,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0 || string.IsNullOrWhiteSpace(relativePath))
+            return PendingFileDiffPreviewDto.Unavailable(relativePath ?? string.Empty, "Invalid preview request.");
+
+        var normalizedPath = NormalizeRelativePath(relativePath);
+        var normalizedMaxLines = NormalizeMaxLines(maxLines);
+
+        var repo = await db.Set<Repository>()
+            .AsNoTracking()
+            .Include(r => r.Directory)
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted && !r.Directory.IsDeleted, ct);
+
+        if (repo is null)
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Repository was not found.");
+
+        var absolutePath = ToAbsolutePath(repo.Directory.Path, normalizedPath);
+
+        if (!File.Exists(absolutePath))
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Current file is missing on disk.");
+
+        if (Directory.Exists(absolutePath))
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Selected path is a directory.");
+
+        if (!IsTextExtension(Path.GetExtension(absolutePath)))
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Diff preview is available only for text files.");
+
+        var identity = await db.Set<FileIdentity>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                i => i.RepositoryId == repositoryId
+                     && i.RelativePath == normalizedPath,
+                ct);
+
+        if (identity is null)
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "No baseline version found for this file.");
+
+        var baselineVersion = await db.Set<FileVersion>()
+            .AsNoTracking()
+            .Where(v => v.FileIdentityId == identity.Id && !v.IsDeletionMarker)
+            .OrderByDescending(v => v.CreatedAt)
+            .ThenByDescending(v => v.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (baselineVersion is null)
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "No previous content version found.");
+
+        var blocks = baselineVersion.SizeBytes == 0
+            ? []
+            : await db.Set<FileVersionBlock>()
+                .AsNoTracking()
+                .Where(b => b.FileVersionId == baselineVersion.Id)
+                .OrderBy(b => b.Sequence)
+                .Select(b => new StoredFileBlockDto(
+                    b.Sequence,
+                    b.BlockHashBlake3,
+                    b.LengthBytes,
+                    b.StoredSizeBytes))
+                .ToListAsync(ct);
+
+        if (baselineVersion.SizeBytes > 0 && blocks.Count == 0)
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Baseline version blocks are missing.");
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-diff-preview");
+        Directory.CreateDirectory(tempDir);
+
+        var baselineTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline.tmp");
+
+        try
+        {
+            if (baselineVersion.SizeBytes == 0)
+            {
+                await File.WriteAllTextAsync(baselineTemp, string.Empty, ct);
+            }
+            else
+            {
+                await contentStore.RestoreFileAsync(blocks, baselineTemp, true, ct);
+            }
+
+            var computed = await diffEngine.BuildDiffAsync(
+                baselineTemp,
+                absolutePath,
+                normalizedMaxLines,
+                ct);
+
+            var summary = $"{normalizedPath}   +{computed.AddedLines} / -{computed.RemovedLines}" +
+                          (computed.IsTruncated ? "  (truncated)" : string.Empty);
+
+            return new PendingFileDiffPreviewDto(
+                RelativePath: normalizedPath,
+                IsAvailable: true,
+                Message: summary,
+                AddedLines: computed.AddedLines,
+                RemovedLines: computed.RemovedLines,
+                IsTruncated: computed.IsTruncated,
+                Lines: computed.Lines,
+                Hunks: computed.Hunks);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(
+                ex,
+                "Failed to build pending file diff preview. RepositoryId {RepositoryId}. Path {Path}",
+                repositoryId,
+                normalizedPath);
+
+            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Unable to build diff preview for selected file.");
+        }
+        finally
+        {
+            TryDelete(baselineTemp);
+        }
+    }
     public async Task<TextDiffResultDto?> GetStoredTextDiffAsync(
         long leftFileVersionId,
         long rightFileVersionId,
@@ -708,8 +868,27 @@ public sealed class EfRepositorySnapshotRepository(
                 l.TextLineAtom.Text))
             .ToListAsync(ct);
 
+        var hunkRows = await db.Set<FileVersionTextDiffHunk>()
+            .AsNoTracking()
+            .Where(h => h.DiffId == row.Id)
+            .OrderBy(h => h.Sequence)
+            .Select(h => new TextDiffHunkDto(
+                h.Sequence,
+                h.Sequence,
+                h.Sequence,
+                h.OldStartLine,
+                h.OldLineCount,
+                h.NewStartLine,
+                h.NewLineCount,
+                h.ChangeKind))
+            .ToListAsync(ct);
+
         if (lineRows.Count > 0)
         {
+            var hunks = hunkRows.Count > 0
+                ? await RebuildStoredHunksWithRangesAsync(row.Id, hunkRows, ct)
+                : TextDiffHunkBuilder.Build(lineRows, 3);
+
             return new TextDiffResultDto(
                 row.RelativePath,
                 row.LeftFileVersionId,
@@ -717,7 +896,8 @@ public sealed class EfRepositorySnapshotRepository(
                 row.AddedLines,
                 row.RemovedLines,
                 row.IsTruncated,
-                lineRows);
+                lineRows,
+                hunks);
         }
 
         try
@@ -725,6 +905,8 @@ public sealed class EfRepositorySnapshotRepository(
             var lines = JsonSerializer.Deserialize<List<TextDiffLineDto>>(row.LinesJson, DiffJsonOptions)
                         ?? [];
 
+            var hunks = TextDiffHunkBuilder.Build(lines, 3);
+
             return new TextDiffResultDto(
                 row.RelativePath,
                 row.LeftFileVersionId,
@@ -732,7 +914,8 @@ public sealed class EfRepositorySnapshotRepository(
                 row.AddedLines,
                 row.RemovedLines,
                 row.IsTruncated,
-                lines);
+                lines,
+                hunks);
         }
         catch (Exception ex)
         {
@@ -772,10 +955,16 @@ public sealed class EfRepositorySnapshotRepository(
                 line.Text ?? string.Empty))
             .ToList();
 
+        var normalizedHunks = NormalizeHunks(
+            diff.Hunks ?? Array.Empty<TextDiffHunkDto>(),
+            normalizedLines,
+            3);
+
         var linesJson = JsonSerializer.Serialize(normalizedLines, DiffJsonOptions);
         var diffKey = ComputeDiffKeySha256(diff.LeftFileVersionId, diff.RightFileVersionId, normalizedMaxLines);
 
         var existing = await db.Set<FileVersionTextDiff>()
+            .Include(d => d.Hunks)
             .Include(d => d.Lines)
             .FirstOrDefaultAsync(d => d.LeftFileVersionId == diff.LeftFileVersionId
                                       && d.RightFileVersionId == diff.RightFileVersionId
@@ -805,6 +994,35 @@ public sealed class EfRepositorySnapshotRepository(
 
         if (existing.Lines.Count > 0)
             db.RemoveRange(existing.Lines);
+
+        if (existing.Hunks.Count > 0)
+            db.RemoveRange(existing.Hunks);
+
+        var createdHunks = new List<FileVersionTextDiffHunk>(normalizedHunks.Count);
+        var hunkBySequence = new Dictionary<int, FileVersionTextDiffHunk>();
+
+        if (normalizedHunks.Count > 0)
+        {
+            foreach (var h in normalizedHunks)
+            {
+                var entity = new FileVersionTextDiffHunk
+                {
+                    Diff = existing,
+                    Sequence = h.Sequence,
+                    OldStartLine = h.OldStartLine,
+                    OldLineCount = h.OldLineCount,
+                    NewStartLine = h.NewStartLine,
+                    NewLineCount = h.NewLineCount,
+                    ChangeKind = NormalizeHunkChangeKind(h.ChangeKind),
+                    CreatedAt = nowUtc
+                };
+
+                createdHunks.Add(entity);
+                hunkBySequence[h.Sequence] = entity;
+            }
+
+            db.AddRange(createdHunks);
+        }
 
         if (normalizedLines.Count > 0)
         {
@@ -849,11 +1067,26 @@ public sealed class EfRepositorySnapshotRepository(
                 atomsByText[item.Text] = atom;
             }
 
+            var lineToHunk = new Dictionary<int, (FileVersionTextDiffHunk Hunk, int InHunkSequence)>();
+            foreach (var h in normalizedHunks)
+            {
+                if (!hunkBySequence.TryGetValue(h.Sequence, out var hunkEntity))
+                    continue;
+
+                var inSeq = 0;
+                for (var seq = h.StartLineSequence; seq <= h.EndLineSequence; seq++)
+                {
+                    lineToHunk[seq] = (hunkEntity, inSeq);
+                    inSeq++;
+                }
+            }
+
             var diffLines = new List<FileVersionTextDiffLine>(normalizedLines.Count);
 
             for (var i = 0; i < normalizedLines.Count; i++)
             {
                 var line = normalizedLines[i];
+                var hasHunk = lineToHunk.TryGetValue(i, out var hunkRef);
 
                 diffLines.Add(new FileVersionTextDiffLine
                 {
@@ -862,6 +1095,8 @@ public sealed class EfRepositorySnapshotRepository(
                     Kind = line.Kind,
                     LeftLineNumber = line.LeftLineNumber,
                     RightLineNumber = line.RightLineNumber,
+                    Hunk = hasHunk ? hunkRef.Hunk : null,
+                    InHunkSequence = hasHunk ? hunkRef.InHunkSequence : null,
                     TextLineAtom = atomsByText[line.Text],
                     CreatedAt = nowUtc
                 });
@@ -951,7 +1186,8 @@ public sealed class EfRepositorySnapshotRepository(
                         computed.AddedLines,
                         computed.RemovedLines,
                         computed.IsTruncated,
-                        computed.Lines);
+                        computed.Lines,
+                        computed.Hunks);
 
                     await SaveStoredTextDiffCoreAsync(diff, PrecomputedDiffMaxLines, DateTime.UtcNow, ct);
                 }
@@ -988,6 +1224,104 @@ public sealed class EfRepositorySnapshotRepository(
         return TextExtensions.Contains(normalized);
     }
 
+    private async Task<IReadOnlyList<TextDiffHunkDto>> RebuildStoredHunksWithRangesAsync(
+        long diffId,
+        IReadOnlyList<TextDiffHunkDto> hunks,
+        CancellationToken ct)
+    {
+        if (hunks.Count == 0)
+            return Array.Empty<TextDiffHunkDto>();
+
+        var mappings = await db.Set<FileVersionTextDiffLine>()
+            .AsNoTracking()
+            .Where(l => l.DiffId == diffId && l.HunkId.HasValue)
+            .Select(l => new
+            {
+                HunkId = l.HunkId!.Value,
+                l.Sequence
+            })
+            .GroupBy(x => x.HunkId)
+            .Select(g => new
+            {
+                HunkId = g.Key,
+                StartLineSequence = g.Min(x => x.Sequence),
+                EndLineSequence = g.Max(x => x.Sequence)
+            })
+            .ToListAsync(ct);
+
+        var byHunkId = mappings.ToDictionary(m => m.HunkId, m => (m.StartLineSequence, m.EndLineSequence));
+
+        var hunkIdBySequence = await db.Set<FileVersionTextDiffHunk>()
+            .AsNoTracking()
+            .Where(h => h.DiffId == diffId)
+            .Select(h => new { h.Id, h.Sequence })
+            .ToListAsync(ct);
+
+        var idBySequence = hunkIdBySequence.ToDictionary(x => x.Sequence, x => x.Id);
+
+        var rebuilt = new List<TextDiffHunkDto>(hunks.Count);
+        foreach (var h in hunks.OrderBy(x => x.Sequence))
+        {
+            var start = h.StartLineSequence;
+            var end = h.EndLineSequence;
+
+            if (idBySequence.TryGetValue(h.Sequence, out var hunkId)
+                && byHunkId.TryGetValue(hunkId, out var range))
+            {
+                start = range.StartLineSequence;
+                end = range.EndLineSequence;
+            }
+
+            rebuilt.Add(h with { StartLineSequence = start, EndLineSequence = end });
+        }
+
+        return rebuilt;
+    }
+
+    private static IReadOnlyList<TextDiffHunkDto> NormalizeHunks(
+        IReadOnlyList<TextDiffHunkDto> hunks,
+        IReadOnlyList<TextDiffLineDto> normalizedLines,
+        int contextLines)
+    {
+        if (normalizedLines.Count == 0)
+            return Array.Empty<TextDiffHunkDto>();
+
+        var source = hunks.Count > 0
+            ? hunks
+            : TextDiffHunkBuilder.Build(normalizedLines, contextLines);
+
+        var normalized = new List<TextDiffHunkDto>(source.Count);
+
+        foreach (var h in source.OrderBy(x => x.Sequence))
+        {
+            var start = Math.Clamp(h.StartLineSequence, 0, normalizedLines.Count - 1);
+            var end = Math.Clamp(h.EndLineSequence, start, normalizedLines.Count - 1);
+
+            normalized.Add(new TextDiffHunkDto(
+                Sequence: normalized.Count,
+                StartLineSequence: start,
+                EndLineSequence: end,
+                OldStartLine: Math.Max(0, h.OldStartLine),
+                OldLineCount: Math.Max(0, h.OldLineCount),
+                NewStartLine: Math.Max(0, h.NewStartLine),
+                NewLineCount: Math.Max(0, h.NewLineCount),
+                ChangeKind: NormalizeHunkChangeKind(h.ChangeKind)));
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeHunkChangeKind(string? kind)
+    {
+        if (string.Equals(kind, "added", StringComparison.OrdinalIgnoreCase))
+            return "added";
+
+        if (string.Equals(kind, "removed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(kind, "deleted", StringComparison.OrdinalIgnoreCase))
+            return "removed";
+
+        return "modified";
+    }
     private static string NormalizeDiffKind(string? kind)
     {
         if (string.Equals(kind, "add", StringComparison.OrdinalIgnoreCase))
@@ -1132,3 +1466,13 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+
+
+
+
+
+
+
+
+
