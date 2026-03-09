@@ -4,7 +4,7 @@ namespace Veyra.Application.Abstractions.Indexing;
 
 public interface IRepositorySnapshotRepository
 {
-    Task SaveSnapshotAsync(
+    Task<SnapshotSaveResultDto> SaveSnapshotAsync(
         int repositoryId,
         string trigger,
         DateTime scannedAtUtc,
@@ -59,5 +59,3 @@ public interface IRepositorySnapshotRepository
         long fileVersionId,
         CancellationToken ct = default);
 }
-
-

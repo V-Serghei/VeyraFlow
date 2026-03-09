@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;
@@ -40,6 +40,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             return;
 
         var existing = await dbContext.Set<WatchedDirectoryFormat>()
+            .IgnoreQueryFilters()
             .Where(x => dirIds.Contains(x.DirectoryId) && fmtIds.Contains(x.FormatId))
             .ToListAsync(ct);
 
@@ -79,7 +80,9 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var normalized = NormalizePathsForStore(paths);
         var now = DateTime.UtcNow;
 
-        var existing = await dbContext.Set<WatchedDirectory>().ToListAsync(ct);
+        var existing = await dbContext.Set<WatchedDirectory>()
+            .IgnoreQueryFilters()
+            .ToListAsync(ct);
         var map = existing.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
 
         foreach (var p in normalized)
@@ -170,7 +173,9 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var normalized = NormalizeExtensionsForStore(extensions);
         var now = DateTime.UtcNow;
 
-        var existing = await dbContext.Set<D_WatchedFormat>().ToListAsync(ct);
+        var existing = await dbContext.Set<D_WatchedFormat>()
+            .IgnoreQueryFilters()
+            .ToListAsync(ct);
         var map = existing.ToDictionary(x => x.Pattern, StringComparer.OrdinalIgnoreCase);
 
         foreach (var p in normalized)
@@ -262,6 +267,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var now = DateTime.UtcNow;
 
         var existing = await dbContext.Set<WatchedDirectory>()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.Path == p, ct);
 
         if (existing is not null)
@@ -326,6 +332,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var now = DateTime.UtcNow;
 
         var existing = await dbContext.Set<D_WatchedFormat>()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.Pattern == p, ct);
 
         if (existing is not null)
@@ -401,6 +408,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         if (fmtIds.Count == 0) return;
 
         var existingLinks = await dbContext.Set<WatchedDirectoryFormat>()
+            .IgnoreQueryFilters()
             .Where(x => x.DirectoryId == dir.Id && fmtIds.Contains(x.FormatId))
             .ToListAsync(ct);
 

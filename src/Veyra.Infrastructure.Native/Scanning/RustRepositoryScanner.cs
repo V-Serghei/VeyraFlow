@@ -120,7 +120,7 @@ public sealed class RustRepositoryScanner(
             fileCount,
             "Saving scan results"));
 
-        await snapshots.SaveSnapshotAsync(
+        var saveResult = await snapshots.SaveSnapshotAsync(
             repositoryId,
             trigger,
             DateTime.UtcNow,
@@ -128,6 +128,14 @@ public sealed class RustRepositoryScanner(
             scanOptions.SaveFileVersions,
             scanOptions.SnapshotTitle,
             ct);
+
+        if (scanOptions.SaveFileVersions
+            && IsManualSnapshotTrigger(trigger)
+            && !saveResult.SnapshotCreated
+            && saveResult.NoChangesDetected)
+        {
+            throw new InvalidOperationException("Cannot create snapshot: no file changes detected.");
+        }
 
         progress?.Report(new RepositoryScanProgressDto(
             "done",
@@ -165,6 +173,10 @@ public sealed class RustRepositoryScanner(
 
         return options.SaveFileVersions ? $"manual_snapshot_{engine}" : $"sync_index_{engine}";
     }
+
+    private static bool IsManualSnapshotTrigger(string trigger)
+        => trigger.StartsWith("manual_snapshot", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(trigger, "manual", StringComparison.OrdinalIgnoreCase);
 
     private static RepositoryScanEntryDto ToEntry(NativeScanEntry src)
     {
@@ -432,4 +444,3 @@ public sealed class RustRepositoryScanner(
         public string? ContentHashSha256 { get; init; }
     }
 }
-

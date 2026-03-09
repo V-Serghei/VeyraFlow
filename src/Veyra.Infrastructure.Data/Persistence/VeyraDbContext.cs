@@ -38,8 +38,10 @@ public class VeyraDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
             entity.Property(e => e.ContentHash).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasIndex(e => e.ContentHash);
             entity.HasIndex(e => e.FilePath);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<FileIdentity>(entity =>
@@ -60,6 +62,7 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.RepositoryId, e.RelativePath }).IsUnique();
             entity.HasIndex(e => new { e.RepositoryId, e.IsDeleted });
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<FileVersion>(entity =>
@@ -79,6 +82,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.FileIdentityId, e.CreatedAt });
             entity.HasIndex(e => new { e.FileIdentityId, e.IsDeleted, e.CreatedAt });
             entity.HasIndex(e => e.ContentHashSha256);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<FileVersionBlock>(entity =>
@@ -97,6 +101,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.FileVersionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.FileVersionId, e.IsDeleted, e.Sequence });
             entity.HasIndex(e => e.BlockHashBlake3);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<FileVersionTextDiff>(entity =>
@@ -123,6 +128,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.LeftFileVersionId, e.RightFileVersionId, e.MaxLines }).IsUnique();
             entity.HasIndex(e => new { e.LeftFileVersionId, e.RightFileVersionId, e.IsDeleted, e.MaxLines });
             entity.HasIndex(e => e.DiffKeySha256);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
         modelBuilder.Entity<TextLineAtom>(entity =>
         {
@@ -150,6 +156,7 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.DiffId, e.IsDeleted, e.Sequence });
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<FileVersionTextDiffLine>(entity =>
@@ -180,6 +187,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => e.TextLineAtomId);
             entity.HasIndex(e => e.HunkId);
             entity.HasIndex(e => new { e.HunkId, e.InHunkSequence }).IsUnique();
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
         modelBuilder.Entity<SnapshotFileLink>(entity =>
         {
@@ -207,6 +215,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.FileIdentityId });
             entity.HasIndex(e => new { e.FileIdentityId, e.SnapshotId });
             entity.HasIndex(e => e.FileVersionId);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<WatchedDirectory>(entity =>
@@ -216,6 +225,8 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => e.Path).IsUnique();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<D_WatchedFormat>(entity =>
@@ -223,6 +234,8 @@ public class VeyraDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Pattern).IsRequired().HasMaxLength(64);
             entity.HasIndex(e => e.Pattern).IsUnique();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<WatchedDirectoryFormat>(entity =>
@@ -236,6 +249,8 @@ public class VeyraDbContext : DbContext
                 .WithMany(f => f.DirectoryFormats)
                 .HasForeignKey(e => e.FormatId);
             entity.HasIndex(e => new { e.DirectoryId, e.FormatId }).IsUnique();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<Repository>(entity =>
@@ -252,6 +267,8 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.FileCount).HasDefaultValue(0);
             entity.Property(e => e.VersionCount).HasDefaultValue(0);
             entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<RepositorySnapshot>(entity =>
@@ -268,6 +285,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.RepositoryId, e.CreatedAt });
             entity.HasIndex(e => new { e.RepositoryId, e.IsDeleted, e.CreatedAt });
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<RepositorySnapshotEntry>(entity =>
@@ -290,6 +308,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.SnapshotId, e.ParentRelativePath });
             entity.HasIndex(e => new { e.RepositoryId, e.RelativePath });
             entity.HasIndex(e => e.ContentHashSha256);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
         modelBuilder.Entity<UserProfile>(entity =>
@@ -300,6 +319,3 @@ public class VeyraDbContext : DbContext
         });
     }
 }
-
-
-

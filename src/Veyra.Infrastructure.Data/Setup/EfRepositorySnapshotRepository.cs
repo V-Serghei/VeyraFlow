@@ -28,7 +28,7 @@ public sealed class EfRepositorySnapshotRepository(
         ".html", ".css", ".sql", ".xaml", ".axaml"
     };
 
-    public async Task SaveSnapshotAsync(
+    public async Task<SnapshotSaveResultDto> SaveSnapshotAsync(
         int repositoryId,
         string trigger,
         DateTime scannedAtUtc,
@@ -44,7 +44,7 @@ public sealed class EfRepositorySnapshotRepository(
             .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
 
         if (repo is null)
-            return;
+            return SnapshotSaveResultDto.Skipped();
 
         var safeTrigger = string.IsNullOrWhiteSpace(trigger)
             ? "manual"
@@ -118,7 +118,7 @@ public sealed class EfRepositorySnapshotRepository(
                     repositoryId,
                     fileEntries,
                     safeTrigger);
-                return;
+                return SnapshotSaveResultDto.NoChanges();
             }
         }
         var snapshot = new RepositorySnapshot
@@ -177,7 +177,7 @@ public sealed class EfRepositorySnapshotRepository(
                 fileEntries,
                 safeTrigger);
 
-            return;
+            return SnapshotSaveResultDto.Created();
         }
         var allPaths = currentFilesByPath.Keys
             .Concat(previousFilesByPath.Keys)
@@ -187,6 +187,7 @@ public sealed class EfRepositorySnapshotRepository(
         var identitiesByPath = allPaths.Count == 0
             ? new Dictionary<string, FileIdentity>(StringComparer.OrdinalIgnoreCase)
             : await db.Set<FileIdentity>()
+                .IgnoreQueryFilters()
                 .Where(i => i.RepositoryId == repositoryId && allPaths.Contains(i.RelativePath))
                 .ToDictionaryAsync(i => i.RelativePath, StringComparer.OrdinalIgnoreCase, ct);
 
@@ -455,6 +456,8 @@ public sealed class EfRepositorySnapshotRepository(
             links.Count,
             totalBlockRefs,
             safeTrigger);
+
+        return SnapshotSaveResultDto.Created();
     }
 
     public async Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
