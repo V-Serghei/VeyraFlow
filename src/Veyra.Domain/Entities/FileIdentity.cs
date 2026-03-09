@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class FileIdentity
 {
@@ -11,9 +11,11 @@ public class FileIdentity
     public string? Extension { get; set; }
 
     public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<FileVersion> Versions { get; set; } = new List<FileVersion>();
     public ICollection<SnapshotFileLink> SnapshotLinks { get; set; } = new List<SnapshotFileLink>();
 }
+

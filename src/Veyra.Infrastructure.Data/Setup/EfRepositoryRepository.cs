@@ -63,7 +63,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task DeleteRepositoryAsync(int id, CancellationToken ct = default)
+        public async Task DeleteRepositoryAsync(int id, CancellationToken ct = default)
     {
         db.ChangeTracker.Clear();
 
@@ -104,7 +104,59 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .Where(i => i.RepositoryId == repo.Id && !i.IsDeleted)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(i => i.IsDeleted, true)
+                .SetProperty(i => i.DeletedAt, now)
                 .SetProperty(i => i.UpdatedAt, now), ct);
+
+        await db.Set<FileVersion>()
+            .Where(v => !v.IsDeleted && v.FileIdentity.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(v => v.IsDeleted, true)
+                .SetProperty(v => v.DeletedAt, now), ct);
+
+        await db.Set<FileVersionBlock>()
+            .Where(b => !b.IsDeleted && b.FileVersion.FileIdentity.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(b => b.IsDeleted, true)
+                .SetProperty(b => b.DeletedAt, now), ct);
+
+        await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repo.Id && !s.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now), ct);
+
+        await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repo.Id && !e.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now), ct);
+
+        await db.Set<SnapshotFileLink>()
+            .Where(l => !l.IsDeleted && l.Snapshot.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now), ct);
+
+        await db.Set<FileVersionTextDiff>()
+            .Where(d => !d.IsDeleted
+                        && (db.Set<FileVersion>().Any(v => v.Id == d.LeftFileVersionId && v.FileIdentity.RepositoryId == repo.Id)
+                            || db.Set<FileVersion>().Any(v => v.Id == d.RightFileVersionId && v.FileIdentity.RepositoryId == repo.Id)))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+
+        await db.Set<FileVersionTextDiffHunk>()
+            .Where(h => !h.IsDeleted && h.Diff.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now), ct);
+
+        await db.Set<FileVersionTextDiffLine>()
+            .Where(l => !l.IsDeleted && l.Diff.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, true)
+                .SetProperty(x => x.DeletedAt, now), ct);
 
         await tx.CommitAsync(ct);
     }
@@ -114,36 +166,97 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         db.ChangeTracker.Clear();
 
         var now = DateTime.UtcNow;
-        var entity = await db.Set<Repository>().FindAsync(new object[] { id }, ct);
-        if (entity is null || !entity.IsDeleted) return;
+        var repo = await db.Set<Repository>()
+            .Where(r => r.Id == id && r.IsDeleted)
+            .Select(r => new { r.Id, r.DirectoryId })
+            .FirstOrDefaultAsync(ct);
 
-        entity.IsDeleted = false;
-        entity.DeletedAt = null;
-        entity.UpdatedAt = now;
+        if (repo is null)
+            return;
 
-        var dir = await db.Set<WatchedDirectory>().FindAsync(new object[] { entity.DirectoryId }, ct);
-        if (dir is not null)
-        {
-            dir.IsDeleted = false;
-            dir.DeletedAt = null;
-            dir.IsEnabled = true;
-            dir.UpdatedAt = now;
-        }
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        await db.Set<Repository>()
+            .Where(r => r.Id == repo.Id && r.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.IsDeleted, false)
+                .SetProperty(r => r.DeletedAt, (DateTime?)null)
+                .SetProperty(r => r.UpdatedAt, now), ct);
+
+        await db.Set<WatchedDirectory>()
+            .Where(d => d.Id == repo.DirectoryId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(d => d.IsDeleted, false)
+                .SetProperty(d => d.DeletedAt, (DateTime?)null)
+                .SetProperty(d => d.IsEnabled, true)
+                .SetProperty(d => d.UpdatedAt, now), ct);
 
         await db.Set<WatchedDirectoryFormat>()
-            .Where(l => l.DirectoryId == entity.DirectoryId && l.IsDeleted)
+            .Where(l => l.DirectoryId == repo.DirectoryId && l.IsDeleted)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(l => l.IsDeleted, false)
                 .SetProperty(l => l.DeletedAt, (DateTime?)null)
                 .SetProperty(l => l.UpdatedAt, now), ct);
 
         await db.Set<FileIdentity>()
-            .Where(i => i.RepositoryId == entity.Id && i.IsDeleted)
+            .Where(i => i.RepositoryId == repo.Id && i.IsDeleted)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(i => i.IsDeleted, false)
+                .SetProperty(i => i.DeletedAt, (DateTime?)null)
                 .SetProperty(i => i.UpdatedAt, now), ct);
 
-        await db.SaveChangesAsync(ct);
+        await db.Set<FileVersion>()
+            .Where(v => v.IsDeleted && v.FileIdentity.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(v => v.IsDeleted, false)
+                .SetProperty(v => v.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<FileVersionBlock>()
+            .Where(b => b.IsDeleted && b.FileVersion.FileIdentity.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(b => b.IsDeleted, false)
+                .SetProperty(b => b.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repo.Id && s.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repo.Id && e.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<SnapshotFileLink>()
+            .Where(l => l.IsDeleted && l.Snapshot.RepositoryId == repo.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<FileVersionTextDiff>()
+            .Where(d => d.IsDeleted
+                        && (db.Set<FileVersion>().Any(v => v.Id == d.LeftFileVersionId && v.FileIdentity.RepositoryId == repo.Id)
+                            || db.Set<FileVersion>().Any(v => v.Id == d.RightFileVersionId && v.FileIdentity.RepositoryId == repo.Id)))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null)
+                .SetProperty(x => x.UpdatedAt, now), ct);
+
+        await db.Set<FileVersionTextDiffHunk>()
+            .Where(h => h.IsDeleted && !h.Diff.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null), ct);
+
+        await db.Set<FileVersionTextDiffLine>()
+            .Where(l => l.IsDeleted && !l.Diff.IsDeleted)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsDeleted, false)
+                .SetProperty(x => x.DeletedAt, (DateTime?)null), ct);
+
+        await tx.CommitAsync(ct);
     }
 
     public async Task<RepositoryDto?> GetRepositoryByIdAsync(int id, CancellationToken ct = default)
@@ -268,3 +381,5 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         await db.SaveChangesAsync(ct);
     }
 }
+
+

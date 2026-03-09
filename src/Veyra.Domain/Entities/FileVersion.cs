@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class FileVersion
 {
@@ -12,6 +12,10 @@ public class FileVersion
     public bool IsDeletionMarker { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
     public ICollection<FileVersionBlock> Blocks { get; set; } = new List<FileVersionBlock>();
     public ICollection<SnapshotFileLink> SnapshotLinks { get; set; } = new List<SnapshotFileLink>();
 }
+

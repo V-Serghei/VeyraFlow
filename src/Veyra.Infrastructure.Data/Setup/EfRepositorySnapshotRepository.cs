@@ -60,12 +60,12 @@ public sealed class EfRepositorySnapshotRepository(
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
         var previousSnapshotsQuery = db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId);
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted);
 
         if (saveFileVersions)
         {
             previousSnapshotsQuery = previousSnapshotsQuery
-                .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id));
+                .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted));
         }
 
         var previousSnapshotId = await previousSnapshotsQuery
@@ -77,7 +77,7 @@ public sealed class EfRepositorySnapshotRepository(
         var previousFilesByPath = previousSnapshotId == 0
             ? new Dictionary<string, (string? Hash, long SizeBytes, string Name, DateTime LastWriteUtc)>(StringComparer.OrdinalIgnoreCase)
             : await db.Set<RepositorySnapshotEntry>()
-                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == previousSnapshotId && !e.IsDirectory)
+                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == previousSnapshotId && !e.IsDirectory && !e.IsDeleted)
                 .ToDictionaryAsync(
                     e => e.RelativePath,
                     e => (Hash: e.ContentHashSha256, SizeBytes: e.SizeBytes, Name: e.Name, LastWriteUtc: e.LastWriteUtc),
@@ -130,7 +130,9 @@ public sealed class EfRepositorySnapshotRepository(
             TotalEntries = totalEntries,
             FileEntries = fileEntries,
             DirectoryEntries = dirEntries,
-            TotalFileBytes = totalFileBytes
+            TotalFileBytes = totalFileBytes,
+            IsDeleted = false,
+            DeletedAt = null
         };
 
         db.Add(snapshot);
@@ -150,7 +152,9 @@ public sealed class EfRepositorySnapshotRepository(
                 SizeBytes = e.SizeBytes,
                 LastWriteUtc = e.LastWriteUtc,
                 ContentHashSha256 = e.ContentHashSha256,
-                CreatedAt = scannedAtUtc
+                CreatedAt = scannedAtUtc,
+                IsDeleted = false,
+                DeletedAt = null
             }).ToList();
 
             db.AddRange(rows);
@@ -199,8 +203,9 @@ public sealed class EfRepositorySnapshotRepository(
                 RelativePath = path,
                 Name = current?.Name ?? Path.GetFileName(path),
                 Extension = current?.Extension,
-                IsDeleted = false,
                 CreatedAt = scannedAtUtc,
+                IsDeleted = false,
+                DeletedAt = null,
                 UpdatedAt = scannedAtUtc
             };
 
@@ -216,7 +221,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (identityIds.Count > 0)
         {
             var existingVersions = await db.Set<FileVersion>()
-                .Where(v => identityIds.Contains(v.FileIdentityId))
+                .Where(v => identityIds.Contains(v.FileIdentityId) && !v.IsDeleted)
                 .OrderByDescending(v => v.CreatedAt)
                 .ThenByDescending(v => v.Id)
                 .ToListAsync(ct);
@@ -235,7 +240,7 @@ public sealed class EfRepositorySnapshotRepository(
         var latestVersionIdsWithBlocks = latestVersionIds.Count == 0
             ? new HashSet<long>()
             : (await db.Set<FileVersionBlock>()
-                    .Where(b => latestVersionIds.Contains(b.FileVersionId))
+                    .Where(b => latestVersionIds.Contains(b.FileVersionId) && !b.IsDeleted)
                     .Select(b => b.FileVersionId)
                     .Distinct()
                     .ToListAsync(ct))
@@ -291,6 +296,7 @@ public sealed class EfRepositorySnapshotRepository(
                 identity.Name = current.Name;
                 identity.Extension = current.Extension;
                 identity.IsDeleted = false;
+                identity.DeletedAt = null;
                 identity.UpdatedAt = scannedAtUtc;
 
                 var previousHash = previous.Hash ?? string.Empty;
@@ -325,7 +331,9 @@ public sealed class EfRepositorySnapshotRepository(
                         SizeBytes = current.SizeBytes,
                         LastWriteUtc = current.LastWriteUtc,
                         IsDeletionMarker = false,
-                        CreatedAt = scannedAtUtc
+                        CreatedAt = scannedAtUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
                     };
 
                     var absolutePath = ToAbsolutePath(repo.Directory.Path, path);
@@ -352,6 +360,7 @@ public sealed class EfRepositorySnapshotRepository(
             else
             {
                 identity.IsDeleted = planEntry?.ShouldMarkIdentityDeleted ?? true;
+                identity.DeletedAt = identity.IsDeleted ? scannedAtUtc : null;
                 identity.UpdatedAt = scannedAtUtc;
 
                 var hasLatest = latestVersionsByIdentityId.TryGetValue(identity.Id, out selectedVersion!);
@@ -371,19 +380,22 @@ public sealed class EfRepositorySnapshotRepository(
                         SizeBytes = previous.SizeBytes,
                         LastWriteUtc = scannedAtUtc,
                         IsDeletionMarker = true,
-                        CreatedAt = scannedAtUtc
+                        CreatedAt = scannedAtUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
                     };
 
                     newVersions.Add(selectedVersion);
                     latestVersionsByIdentityId[identity.Id] = selectedVersion;
                 }
             }
-
             var link = new SnapshotFileLink
             {
                 SnapshotId = snapshot.Id,
                 FileIdentityId = identity.Id,
-                CreatedAt = scannedAtUtc
+                CreatedAt = scannedAtUtc,
+                IsDeleted = false,
+                DeletedAt = null
             };
 
             if (selectedVersion.Id > 0)
@@ -405,7 +417,9 @@ public sealed class EfRepositorySnapshotRepository(
                     BlockHashBlake3 = block.BlockHashBlake3,
                     LengthBytes = block.LengthBytes,
                     StoredSizeBytes = block.StoredSizeBytes,
-                    CreatedAt = scannedAtUtc
+                    CreatedAt = scannedAtUtc,
+                    IsDeleted = false,
+                    DeletedAt = null
                 });
             }
         }
@@ -448,7 +462,7 @@ public sealed class EfRepositorySnapshotRepository(
         CancellationToken ct = default)
     {
         var snapshotId = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => s.Id)
@@ -458,7 +472,7 @@ public sealed class EfRepositorySnapshotRepository(
             return Array.Empty<RepositoryScanEntryDto>();
 
         return await db.Set<RepositorySnapshotEntry>()
-            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshotId)
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshotId && !e.IsDeleted)
             .OrderBy(e => e.RelativePath)
             .Select(e => new RepositoryScanEntryDto(
                 e.RelativePath,
@@ -484,7 +498,7 @@ public sealed class EfRepositorySnapshotRepository(
         var normalizedPath = NormalizeRelativePath(relativePath);
 
         var identity = await db.Set<FileIdentity>()
-            .FirstOrDefaultAsync(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath, ct);
+            .FirstOrDefaultAsync(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath && !i.IsDeleted, ct);
 
         if (identity is null)
             return Array.Empty<FileVersionInfoDto>();
@@ -492,7 +506,7 @@ public sealed class EfRepositorySnapshotRepository(
         var limit = Math.Clamp(take, 1, 500);
 
         return await db.Set<FileVersion>()
-            .Where(v => v.FileIdentityId == identity.Id)
+            .Where(v => v.FileIdentityId == identity.Id && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ThenByDescending(v => v.Id)
             .Take(limit)
@@ -517,7 +531,7 @@ public sealed class EfRepositorySnapshotRepository(
             return RepositoryPendingChangesDto.Empty;
 
         var latestSnapshot = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => new { s.Id, s.CreatedAt })
@@ -527,7 +541,7 @@ public sealed class EfRepositorySnapshotRepository(
             return RepositoryPendingChangesDto.Empty;
 
         var currentFiles = await db.Set<RepositorySnapshotEntry>()
-            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == latestSnapshot.Id && !e.IsDirectory)
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == latestSnapshot.Id && !e.IsDirectory && !e.IsDeleted)
             .Select(e => new SnapshotEntryLight(
                 e.RelativePath,
                 e.Name,
@@ -537,8 +551,8 @@ public sealed class EfRepositorySnapshotRepository(
             .ToListAsync(ct);
 
         var baselineSnapshot = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
-            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => new { s.Id, s.CreatedAt })
@@ -547,7 +561,7 @@ public sealed class EfRepositorySnapshotRepository(
         var baselineFiles = baselineSnapshot is null
             ? []
             : await db.Set<RepositorySnapshotEntry>()
-                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == baselineSnapshot.Id && !e.IsDirectory)
+                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == baselineSnapshot.Id && !e.IsDirectory && !e.IsDeleted)
                 .Select(e => new SnapshotEntryLight(
                     e.RelativePath,
                     e.Name,
@@ -583,8 +597,8 @@ public sealed class EfRepositorySnapshotRepository(
         var limit = Math.Clamp(take, 1, 500);
 
         var snapshots = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
-            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Take(limit + 1)
@@ -601,7 +615,7 @@ public sealed class EfRepositorySnapshotRepository(
         var snapshotIds = snapshots.Select(s => s.SnapshotId).ToList();
 
         var linkRows = await db.Set<SnapshotFileLink>()
-            .Where(l => snapshotIds.Contains(l.SnapshotId))
+            .Where(l => snapshotIds.Contains(l.SnapshotId) && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
             .Select(l => new SnapshotLinkState(
                 l.SnapshotId,
                 l.FileIdentityId,
@@ -656,8 +670,8 @@ public sealed class EfRepositorySnapshotRepository(
         var limit = Math.Clamp(take, 1, 5000);
 
         var versionedSnapshotIds = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId)
-            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id))
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => s.Id)
@@ -672,7 +686,7 @@ public sealed class EfRepositorySnapshotRepository(
             : 0;
 
         var currentRows = await db.Set<SnapshotFileLink>()
-            .Where(l => l.SnapshotId == snapshotId)
+            .Where(l => l.SnapshotId == snapshotId && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
             .Select(l => new SnapshotLinkState(
                 l.SnapshotId,
                 l.FileIdentityId,
@@ -687,7 +701,7 @@ public sealed class EfRepositorySnapshotRepository(
         var previousRows = previousSnapshotId == 0
             ? []
             : await db.Set<SnapshotFileLink>()
-                .Where(l => l.SnapshotId == previousSnapshotId)
+                .Where(l => l.SnapshotId == previousSnapshotId && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
                 .Select(l => new SnapshotLinkState(
                     l.SnapshotId,
                     l.FileIdentityId,
@@ -754,7 +768,8 @@ public sealed class EfRepositorySnapshotRepository(
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 i => i.RepositoryId == repositoryId
-                     && i.RelativePath == normalizedPath,
+                     && i.RelativePath == normalizedPath
+                     && !i.IsDeleted,
                 ct);
 
         if (identity is null)
@@ -762,7 +777,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var baselineVersion = await db.Set<FileVersion>()
             .AsNoTracking()
-            .Where(v => v.FileIdentityId == identity.Id && !v.IsDeletionMarker)
+            .Where(v => v.FileIdentityId == identity.Id && !v.IsDeletionMarker && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ThenByDescending(v => v.Id)
             .FirstOrDefaultAsync(ct);
@@ -774,7 +789,7 @@ public sealed class EfRepositorySnapshotRepository(
             ? []
             : await db.Set<FileVersionBlock>()
                 .AsNoTracking()
-                .Where(b => b.FileVersionId == baselineVersion.Id)
+                .Where(b => b.FileVersionId == baselineVersion.Id && !b.IsDeleted)
                 .OrderBy(b => b.Sequence)
                 .Select(b => new StoredFileBlockDto(
                     b.Sequence,
@@ -849,7 +864,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var row = await db.Set<FileVersionTextDiff>()
             .AsNoTracking()
-            .FirstOrDefaultAsync(d => d.LeftFileVersionId == leftFileVersionId
+            .FirstOrDefaultAsync(d => !d.IsDeleted && d.LeftFileVersionId == leftFileVersionId
                                       && d.RightFileVersionId == rightFileVersionId
                                       && d.MaxLines == normalizedMaxLines,
                 ct);
@@ -859,7 +874,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var lineRows = await db.Set<FileVersionTextDiffLine>()
             .AsNoTracking()
-            .Where(l => l.DiffId == row.Id)
+            .Where(l => l.DiffId == row.Id && !l.IsDeleted)
             .OrderBy(l => l.Sequence)
             .Select(l => new TextDiffLineDto(
                 l.Kind,
@@ -870,7 +885,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var hunkRows = await db.Set<FileVersionTextDiffHunk>()
             .AsNoTracking()
-            .Where(h => h.DiffId == row.Id)
+            .Where(h => h.DiffId == row.Id && !h.IsDeleted)
             .OrderBy(h => h.Sequence)
             .Select(h => new TextDiffHunkDto(
                 h.Sequence,
@@ -966,7 +981,7 @@ public sealed class EfRepositorySnapshotRepository(
         var existing = await db.Set<FileVersionTextDiff>()
             .Include(d => d.Hunks)
             .Include(d => d.Lines)
-            .FirstOrDefaultAsync(d => d.LeftFileVersionId == diff.LeftFileVersionId
+            .FirstOrDefaultAsync(d => !d.IsDeleted && d.LeftFileVersionId == diff.LeftFileVersionId
                                       && d.RightFileVersionId == diff.RightFileVersionId
                                       && d.MaxLines == normalizedMaxLines,
                 ct);
@@ -978,7 +993,9 @@ public sealed class EfRepositorySnapshotRepository(
                 LeftFileVersionId = diff.LeftFileVersionId,
                 RightFileVersionId = diff.RightFileVersionId,
                 MaxLines = normalizedMaxLines,
-                CreatedAt = nowUtc
+                CreatedAt = nowUtc,
+                IsDeleted = false,
+                DeletedAt = null
             };
 
             db.Add(existing);
@@ -990,6 +1007,8 @@ public sealed class EfRepositorySnapshotRepository(
         existing.RemovedLines = diff.RemovedLines;
         existing.IsTruncated = diff.IsTruncated;
         existing.LinesJson = linesJson;
+        existing.IsDeleted = false;
+        existing.DeletedAt = null;
         existing.UpdatedAt = nowUtc;
 
         if (existing.Lines.Count > 0)
@@ -1014,7 +1033,9 @@ public sealed class EfRepositorySnapshotRepository(
                     NewStartLine = h.NewStartLine,
                     NewLineCount = h.NewLineCount,
                     ChangeKind = NormalizeHunkChangeKind(h.ChangeKind),
-                    CreatedAt = nowUtc
+                    CreatedAt = nowUtc,
+                    IsDeleted = false,
+                    DeletedAt = null
                 };
 
                 createdHunks.Add(entity);
@@ -1098,7 +1119,9 @@ public sealed class EfRepositorySnapshotRepository(
                     Hunk = hasHunk ? hunkRef.Hunk : null,
                     InHunkSequence = hasHunk ? hunkRef.InHunkSequence : null,
                     TextLineAtom = atomsByText[line.Text],
-                    CreatedAt = nowUtc
+                    CreatedAt = nowUtc,
+                    IsDeleted = false,
+                    DeletedAt = null
                 });
             }
 
@@ -1114,13 +1137,13 @@ public sealed class EfRepositorySnapshotRepository(
     {
         var version = await db.Set<FileVersion>()
             .Include(v => v.FileIdentity)
-            .FirstOrDefaultAsync(v => v.Id == fileVersionId, ct);
+            .FirstOrDefaultAsync(v => v.Id == fileVersionId && !v.IsDeleted && !v.FileIdentity.IsDeleted && !v.FileIdentity.Repository.IsDeleted, ct);
 
         if (version is null)
             return null;
 
         var blocks = await db.Set<FileVersionBlock>()
-            .Where(b => b.FileVersionId == fileVersionId)
+            .Where(b => b.FileVersionId == fileVersionId && !b.IsDeleted)
             .OrderBy(b => b.Sequence)
             .Select(b => new StoredFileBlockDto(
                 b.Sequence,
@@ -1234,7 +1257,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var mappings = await db.Set<FileVersionTextDiffLine>()
             .AsNoTracking()
-            .Where(l => l.DiffId == diffId && l.HunkId.HasValue)
+            .Where(l => l.DiffId == diffId && !l.IsDeleted && l.HunkId.HasValue)
             .Select(l => new
             {
                 HunkId = l.HunkId!.Value,
@@ -1253,7 +1276,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var hunkIdBySequence = await db.Set<FileVersionTextDiffHunk>()
             .AsNoTracking()
-            .Where(h => h.DiffId == diffId)
+            .Where(h => h.DiffId == diffId && !h.IsDeleted)
             .Select(h => new { h.Id, h.Sequence })
             .ToListAsync(ct);
 
@@ -1466,13 +1489,3 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
-
-
-
-
-
-
-
-
-
-

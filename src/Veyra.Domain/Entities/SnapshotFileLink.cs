@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class SnapshotFileLink
 {
@@ -13,4 +13,8 @@ public class SnapshotFileLink
     public FileVersion FileVersion { get; set; } = null!;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
 }
+

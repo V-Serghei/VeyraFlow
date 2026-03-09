@@ -20,5 +20,9 @@ public class FileVersionTextDiffLine
     public TextLineAtom TextLineAtom { get; set; } = null!;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
 }
+
 

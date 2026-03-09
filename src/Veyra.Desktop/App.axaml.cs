@@ -25,6 +25,7 @@ public partial class App : AvaloniaApplication
     private const string SnapshotTitleMigrationId = "20260306201000_AddRepositorySnapshotTitle";
     private const string SnapshotTitleEnsureMigrationId = "20260307130000_EnsureRepositorySnapshotTitleColumn";
     private const string TextDiffHunksMigrationId = "20260307193000_AddTextDiffHunks";
+    private const string SoftDeleteCascadeMigrationId = "20260309133000_AddSoftDeleteCascadeModel";
     private const string EfProductVersion = "10.0.2";
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -47,13 +48,16 @@ public partial class App : AvaloniaApplication
 
             BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
+            BackfillSoftDeleteMigrationHistoryIfNeeded(db);
             db.Database.Migrate();
             EnsureRepositorySnapshotTitleColumn(db);
             BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
 
             EnsureTextDiffStorageV2(db);
+            EnsureSoftDeleteCascadeColumns(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
+            BackfillSoftDeleteMigrationHistoryIfNeeded(db);
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
             db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
 
@@ -292,6 +296,151 @@ public partial class App : AvaloniaApplication
                 connection.Close();
         }
     }
+    private static void BackfillSoftDeleteMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("FileIdentities", "DeletedAt"),
+                ("FileVersions", "IsDeleted"),
+                ("FileVersions", "DeletedAt"),
+                ("FileVersionBlocks", "IsDeleted"),
+                ("FileVersionBlocks", "DeletedAt"),
+                ("RepositorySnapshots", "IsDeleted"),
+                ("RepositorySnapshots", "DeletedAt"),
+                ("RepositorySnapshotEntries", "IsDeleted"),
+                ("RepositorySnapshotEntries", "DeletedAt"),
+                ("SnapshotFileLinks", "IsDeleted"),
+                ("SnapshotFileLinks", "DeletedAt"),
+                ("FileVersionTextDiffs", "IsDeleted"),
+                ("FileVersionTextDiffs", "DeletedAt"),
+                ("FileVersionTextDiffHunks", "IsDeleted"),
+                ("FileVersionTextDiffHunks", "DeletedAt"),
+                ("FileVersionTextDiffLines", "IsDeleted"),
+                ("FileVersionTextDiffLines", "DeletedAt")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, SoftDeleteCascadeMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureSoftDeleteCascadeColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "FileIdentities", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "FileVersions", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersions", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "FileVersionBlocks", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionBlocks", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "RepositorySnapshotEntries", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshotEntries", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "SnapshotFileLinks", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "SnapshotFileLinks", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffs", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffs", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffHunks", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffHunks", "DeletedAt", "TEXT NULL");
+
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffLines", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffLines", "DeletedAt", "TEXT NULL");
+
+            using (var createIdx1 = connection.CreateCommand())
+            {
+                createIdx1.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersions_FileIdentityId_IsDeleted_CreatedAt\" ON \"FileVersions\" (\"FileIdentityId\", \"IsDeleted\", \"CreatedAt\");";
+                createIdx1.ExecuteNonQuery();
+            }
+
+            using (var createIdx2 = connection.CreateCommand())
+            {
+                createIdx2.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersionBlocks_FileVersionId_IsDeleted_Sequence\" ON \"FileVersionBlocks\" (\"FileVersionId\", \"IsDeleted\", \"Sequence\");";
+                createIdx2.ExecuteNonQuery();
+            }
+
+            using (var createIdx3 = connection.CreateCommand())
+            {
+                createIdx3.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySnapshots_RepositoryId_IsDeleted_CreatedAt\" ON \"RepositorySnapshots\" (\"RepositoryId\", \"IsDeleted\", \"CreatedAt\");";
+                createIdx3.ExecuteNonQuery();
+            }
+
+            using (var createIdx4 = connection.CreateCommand())
+            {
+                createIdx4.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySnapshotEntries_SnapshotId_IsDeleted_RelativePath\" ON \"RepositorySnapshotEntries\" (\"SnapshotId\", \"IsDeleted\", \"RelativePath\");";
+                createIdx4.ExecuteNonQuery();
+            }
+
+            using (var createIdx5 = connection.CreateCommand())
+            {
+                createIdx5.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_SnapshotFileLinks_SnapshotId_IsDeleted_FileIdentityId\" ON \"SnapshotFileLinks\" (\"SnapshotId\", \"IsDeleted\", \"FileIdentityId\");";
+                createIdx5.ExecuteNonQuery();
+            }
+
+            using (var createIdx6 = connection.CreateCommand())
+            {
+                createIdx6.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersionTextDiffs_LeftFileVersionId_RightFileVersionId_IsDeleted_MaxLines\" ON \"FileVersionTextDiffs\" (\"LeftFileVersionId\", \"RightFileVersionId\", \"IsDeleted\", \"MaxLines\");";
+                createIdx6.ExecuteNonQuery();
+            }
+
+            using (var createIdx7 = connection.CreateCommand())
+            {
+                createIdx7.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersionTextDiffHunks_DiffId_IsDeleted_Sequence\" ON \"FileVersionTextDiffHunks\" (\"DiffId\", \"IsDeleted\", \"Sequence\");";
+                createIdx7.ExecuteNonQuery();
+            }
+
+            using (var createIdx8 = connection.CreateCommand())
+            {
+                createIdx8.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersionTextDiffLines_DiffId_IsDeleted_Sequence\" ON \"FileVersionTextDiffLines\" (\"DiffId\", \"IsDeleted\", \"Sequence\");";
+                createIdx8.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
     private static void EnsureTextDiffStorageV2(VeyraDbContext db)
     {
         if (!db.Database.IsSqlite())
@@ -382,6 +531,9 @@ public partial class App : AvaloniaApplication
 
     private static void EnsureSqliteColumnExists(IDbConnection connection, string tableName, string columnName, string definition)
     {
+        if (!SqliteTableExists(connection, tableName))
+            return;
+
         using var check = connection.CreateCommand();
         check.CommandText = $"PRAGMA table_info(\"{tableName}\");";
 
@@ -407,6 +559,38 @@ public partial class App : AvaloniaApplication
         alter.ExecuteNonQuery();
 
         Log.Warning("Database schema repair applied: added missing column {Table}.{Column}.", tableName, columnName);
+    }
+
+    private static bool SqliteTableExists(IDbConnection connection, string tableName)
+    {
+        using var tableCheck = connection.CreateCommand();
+        tableCheck.CommandText = "SELECT COUNT(*) FROM \"sqlite_master\" WHERE \"type\"='table' AND \"name\"=@name;";
+
+        var nameParam = tableCheck.CreateParameter();
+        nameParam.ParameterName = "@name";
+        nameParam.Value = tableName;
+        tableCheck.Parameters.Add(nameParam);
+
+        return Convert.ToInt64(tableCheck.ExecuteScalar() ?? 0) > 0;
+    }
+
+    private static bool SqliteHasColumn(IDbConnection connection, string tableName, string columnName)
+    {
+        if (!SqliteTableExists(connection, tableName))
+            return false;
+
+        using var check = connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+
+        using var reader = check.ExecuteReader();
+        while (reader.Read())
+        {
+            var name = reader["name"]?.ToString();
+            if (string.Equals(name, columnName, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
     private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
     {

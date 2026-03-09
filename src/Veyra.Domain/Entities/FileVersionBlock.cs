@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class FileVersionBlock
 {
@@ -11,4 +11,8 @@ public class FileVersionBlock
     public int LengthBytes { get; set; }
     public long StoredSizeBytes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
 }
+

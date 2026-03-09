@@ -10,6 +10,9 @@ public class RepositorySnapshot
     public required string Trigger { get; set; }
     public string? Title { get; set; }
 
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
     public int TotalEntries { get; set; }
     public int FileEntries { get; set; }
     public int DirectoryEntries { get; set; }
@@ -18,3 +21,4 @@ public class RepositorySnapshot
     public ICollection<RepositorySnapshotEntry> Entries { get; set; } = new List<RepositorySnapshotEntry>();
     public ICollection<SnapshotFileLink> FileLinks { get; set; } = new List<SnapshotFileLink>();
 }
+

@@ -50,6 +50,8 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.Extension).HasMaxLength(32);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.Repository)
                 .WithMany(r => r.FileIdentities)
@@ -66,6 +68,8 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.ContentHashSha256).IsRequired().HasMaxLength(64);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.LastWriteUtc).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.FileIdentity)
                 .WithMany(i => i.Versions)
@@ -73,6 +77,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.FileIdentityId, e.CreatedAt });
+            entity.HasIndex(e => new { e.FileIdentityId, e.IsDeleted, e.CreatedAt });
             entity.HasIndex(e => e.ContentHashSha256);
         });
 
@@ -81,6 +86,8 @@ public class VeyraDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.BlockHashBlake3).IsRequired().HasMaxLength(64);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.FileVersion)
                 .WithMany(v => v.Blocks)
@@ -88,6 +95,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.FileVersionId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.FileVersionId, e.IsDeleted, e.Sequence });
             entity.HasIndex(e => e.BlockHashBlake3);
         });
 
@@ -99,6 +107,8 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.LinesJson).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne<FileVersion>()
                 .WithMany()
@@ -111,6 +121,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.LeftFileVersionId, e.RightFileVersionId, e.MaxLines }).IsUnique();
+            entity.HasIndex(e => new { e.LeftFileVersionId, e.RightFileVersionId, e.IsDeleted, e.MaxLines });
             entity.HasIndex(e => e.DiffKeySha256);
         });
         modelBuilder.Entity<TextLineAtom>(entity =>
@@ -129,6 +140,8 @@ public class VeyraDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ChangeKind).IsRequired().HasMaxLength(16);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.Diff)
                 .WithMany(d => d.Hunks)
@@ -136,6 +149,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.DiffId, e.IsDeleted, e.Sequence });
         });
 
         modelBuilder.Entity<FileVersionTextDiffLine>(entity =>
@@ -143,6 +157,8 @@ public class VeyraDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Kind).IsRequired().HasMaxLength(16);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.Diff)
                 .WithMany(d => d.Lines)
@@ -160,6 +176,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.DiffId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => new { e.DiffId, e.IsDeleted, e.Sequence });
             entity.HasIndex(e => e.TextLineAtomId);
             entity.HasIndex(e => e.HunkId);
             entity.HasIndex(e => new { e.HunkId, e.InHunkSequence }).IsUnique();
@@ -168,6 +185,8 @@ public class VeyraDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
 
             entity.HasOne(e => e.Snapshot)
                 .WithMany(s => s.FileLinks)
@@ -185,6 +204,7 @@ public class VeyraDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(e => new { e.SnapshotId, e.FileIdentityId }).IsUnique();
+            entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.FileIdentityId });
             entity.HasIndex(e => new { e.FileIdentityId, e.SnapshotId });
             entity.HasIndex(e => e.FileVersionId);
         });
@@ -240,11 +260,14 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.Trigger).IsRequired().HasMaxLength(64);
             entity.Property(e => e.Title).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
             entity.HasOne(e => e.Repository)
                 .WithMany(r => r.Snapshots)
                 .HasForeignKey(e => e.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.RepositoryId, e.CreatedAt });
+            entity.HasIndex(e => new { e.RepositoryId, e.IsDeleted, e.CreatedAt });
         });
 
         modelBuilder.Entity<RepositorySnapshotEntry>(entity =>
@@ -256,11 +279,14 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.Extension).HasMaxLength(32);
             entity.Property(e => e.ContentHashSha256).HasMaxLength(64);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsDeleted).HasDefaultValue(false);
+            entity.Property(e => e.DeletedAt).IsRequired(false);
             entity.HasOne(e => e.Snapshot)
                 .WithMany(s => s.Entries)
                 .HasForeignKey(e => e.SnapshotId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.SnapshotId, e.RelativePath }).IsUnique();
+            entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.RelativePath });
             entity.HasIndex(e => new { e.SnapshotId, e.ParentRelativePath });
             entity.HasIndex(e => new { e.RepositoryId, e.RelativePath });
             entity.HasIndex(e => e.ContentHashSha256);
@@ -274,5 +300,6 @@ public class VeyraDbContext : DbContext
         });
     }
 }
+
 
 
