@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -35,19 +35,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     [ObservableProperty] private bool _isPreviewLoading;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasPreviewColumns))]
-    [NotifyPropertyChangedFor(nameof(HasNoPreviewColumns))]
-    private string _previewLeftColumn = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasPreviewColumns))]
-    [NotifyPropertyChangedFor(nameof(HasNoPreviewColumns))]
-    private string _previewRightColumn = string.Empty;
-
     [ObservableProperty] private string _previewSummary = "Select a changed file to inspect the preview.";
 
     public ObservableCollection<SnapshotPendingFileItemViewModel> ChangedFiles { get; } = [];
+    public ObservableCollection<SnapshotDiffRowItemViewModel> PreviewRows { get; } = [];
 
     public SnapshotNameDialogWindowViewModel()
         : this($"snimok_{DateTime.Now:yyyyMMdd_HHmmss}")
@@ -59,6 +50,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         _snapshotName = string.IsNullOrWhiteSpace(defaultName)
             ? $"snimok_{DateTime.Now:yyyyMMdd_HHmmss}"
             : defaultName;
+
+        ChangedFiles.CollectionChanged += OnChangedFilesCollectionChanged;
+        PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
     }
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
@@ -66,8 +60,11 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasNoChangedFiles => !HasChangedFiles;
     public bool HasSelectedChangedFile => SelectedChangedFile is not null;
     public bool CanSave => !string.IsNullOrWhiteSpace(SnapshotName) && HasChangedFiles;
-    public bool HasPreviewColumns => !string.IsNullOrWhiteSpace(PreviewLeftColumn) || !string.IsNullOrWhiteSpace(PreviewRightColumn);
-    public bool HasNoPreviewColumns => !HasPreviewColumns;
+    public bool HasPreviewRows => PreviewRows.Count > 0;
+    public bool HasNoPreviewRows => !HasPreviewRows;
+    public string ChangedFilesCountLabel => HasChangedFiles
+        ? $"{ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s") }"
+        : "No changed files detected";
 
     public string SelectedChangedFileTitle => SelectedChangedFile?.Name ?? "Select a changed file";
 
@@ -100,6 +97,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasChangedFiles));
         OnPropertyChanged(nameof(HasNoChangedFiles));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(ChangedFilesCountLabel));
     }
 
     partial void OnSelectedChangedFileChanged(SnapshotPendingFileItemViewModel? value)
@@ -168,8 +166,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         IsPreviewLoading = true;
         PreviewSummary = "Building preview...";
-        PreviewLeftColumn = string.Empty;
-        PreviewRightColumn = string.Empty;
+        PreviewRows.Clear();
 
         try
         {
@@ -183,11 +180,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 return;
             }
 
-            BuildSideBySideColumns(preview.Lines, preview.Hunks, out var left, out var right);
-            PreviewLeftColumn = left;
-            PreviewRightColumn = right;
+            var rows = BuildPreviewRows(preview.Lines, preview.Hunks);
+            PreviewRows.Clear();
+            foreach (var row in rows)
+                PreviewRows.Add(row);
+
             PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                ? $"+{preview.AddedLines} / -{preview.RemovedLines}" + (preview.IsTruncated ? " (truncated)" : string.Empty)
+                ? $"{preview.AddedLines} added / {preview.RemovedLines} removed"
+                    + (preview.IsTruncated ? " (preview truncated)" : string.Empty)
                 : preview.Message;
         }
         catch (OperationCanceledException)
@@ -208,25 +208,17 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     {
         IsPreviewLoading = false;
         PreviewSummary = message;
-        PreviewLeftColumn = string.Empty;
-        PreviewRightColumn = string.Empty;
+        PreviewRows.Clear();
     }
 
-    private static void BuildSideBySideColumns(
+    private static IReadOnlyList<SnapshotDiffRowItemViewModel> BuildPreviewRows(
         IReadOnlyList<TextDiffLineDto> lines,
-        IReadOnlyList<TextDiffHunkDto> hunks,
-        out string left,
-        out string right)
+        IReadOnlyList<TextDiffHunkDto> hunks)
     {
-        var leftBuilder = new StringBuilder();
-        var rightBuilder = new StringBuilder();
-
         if (lines.Count == 0)
-        {
-            left = string.Empty;
-            right = string.Empty;
-            return;
-        }
+            return [];
+
+        var rows = new List<SnapshotDiffRowItemViewModel>(lines.Count + 8);
 
         if (hunks.Count > 0)
         {
@@ -237,13 +229,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
 
                 if (!firstHunk)
-                {
-                    AppendDiffColumnLine(leftBuilder, null, '~', "...");
-                    AppendDiffColumnLine(rightBuilder, null, '~', "...");
-                }
+                    rows.Add(SnapshotDiffRowItemViewModel.CreateSeparator());
 
                 for (var i = start; i <= end; i++)
-                    AppendPreviewLine(lines[i], leftBuilder, rightBuilder);
+                    rows.Add(CreateDiffRow(lines[i]));
 
                 firstHunk = false;
             }
@@ -251,45 +240,74 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         else
         {
             foreach (var line in lines)
-                AppendPreviewLine(line, leftBuilder, rightBuilder);
+                rows.Add(CreateDiffRow(line));
         }
 
-        left = leftBuilder.ToString().TrimEnd();
-        right = rightBuilder.ToString().TrimEnd();
+        return rows;
     }
 
-    private static void AppendPreviewLine(
-        TextDiffLineDto line,
-        StringBuilder leftBuilder,
-        StringBuilder rightBuilder)
+    private static SnapshotDiffRowItemViewModel CreateDiffRow(TextDiffLineDto line)
     {
-        switch (line.Kind)
+        var normalizedKind = (line.Kind ?? string.Empty).Trim().ToLowerInvariant();
+
+        return normalizedKind switch
         {
-            case "remove":
-                AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
-                AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
-                break;
-            case "add":
-                AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
-                AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
-                break;
-            default:
-                AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
-                AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
-                break;
-        }
+            "remove" => new SnapshotDiffRowItemViewModel
+            {
+                LeftLineNumber = FormatLineNumber(line.LeftLineNumber),
+                LeftMarker = "-",
+                LeftText = line.Text ?? string.Empty,
+                LeftBackground = "#332028",
+                LeftMarkerForeground = "#FF9AA5",
+                RightLineNumber = string.Empty,
+                RightMarker = " ",
+                RightText = string.Empty,
+                RightBackground = "#17263A",
+                RightMarkerForeground = "#8FA5BF"
+            },
+            "add" => new SnapshotDiffRowItemViewModel
+            {
+                LeftLineNumber = string.Empty,
+                LeftMarker = " ",
+                LeftText = string.Empty,
+                LeftBackground = "#17263A",
+                LeftMarkerForeground = "#8FA5BF",
+                RightLineNumber = FormatLineNumber(line.RightLineNumber),
+                RightMarker = "+",
+                RightText = line.Text ?? string.Empty,
+                RightBackground = "#1E3A31",
+                RightMarkerForeground = "#8AF5C5"
+            },
+            _ => new SnapshotDiffRowItemViewModel
+            {
+                LeftLineNumber = FormatLineNumber(line.LeftLineNumber),
+                LeftMarker = " ",
+                LeftText = line.Text ?? string.Empty,
+                LeftBackground = "#1B2C42",
+                LeftMarkerForeground = "#8FA5BF",
+                RightLineNumber = FormatLineNumber(line.RightLineNumber),
+                RightMarker = " ",
+                RightText = line.Text ?? string.Empty,
+                RightBackground = "#1B2C42",
+                RightMarkerForeground = "#8FA5BF"
+            }
+        };
     }
 
-    private static void AppendDiffColumnLine(StringBuilder builder, int? lineNumber, char marker, string text)
-    {
-        if (lineNumber is null)
-            builder.Append("    ");
-        else
-            builder.Append(lineNumber.Value.ToString("D4"));
+    private static string FormatLineNumber(int? lineNumber)
+        => lineNumber is int value ? value.ToString("D4") : string.Empty;
 
-        builder.Append(' ');
-        builder.Append(marker);
-        builder.Append(' ');
-        builder.AppendLine(text ?? string.Empty);
+    private void OnChangedFilesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasChangedFiles));
+        OnPropertyChanged(nameof(HasNoChangedFiles));
+        OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(ChangedFilesCountLabel));
+    }
+
+    private void OnPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasPreviewRows));
+        OnPropertyChanged(nameof(HasNoPreviewRows));
     }
 }

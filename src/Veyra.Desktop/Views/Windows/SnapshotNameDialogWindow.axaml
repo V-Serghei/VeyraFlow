@@ -6,136 +6,285 @@
         mc:Ignorable="d"
         x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
         x:DataType="windows:SnapshotNameDialogWindowViewModel"
-        Width="1080"
-        Height="700"
-        MinWidth="900"
-        MinHeight="560"
+        Width="1180"
+        Height="760"
+        MinWidth="980"
+        MinHeight="620"
         WindowStartupLocation="CenterOwner"
-        Background="#0F1724"
-        Foreground="#EEEEEE"
+        Background="#0A1220"
+        Foreground="#EDF4FF"
         Title="Create Snapshot">
 
-    <DockPanel Margin="16" LastChildFill="True">
-        <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
-            <TextBlock Text="Create snapshot" FontSize="19" FontWeight="SemiBold"/>
-            <TextBlock Text="Review changed files, choose commit name and inspect side-by-side preview before saving."
-                       Opacity="0.75"
-                       TextWrapping="Wrap"/>
+    <Window.Styles>
+        <Style Selector="Border.dialog-shell">
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="BorderBrush" Value="#2E4A69"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="14"/>
+            <Setter Property="Background" Value="#13233A"/>
+        </Style>
 
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" VerticalAlignment="Center">
-                <TextBlock Grid.Column="0" Text="Snapshot name" VerticalAlignment="Center"/>
-                <TextBox Grid.Column="1"
-                         Text="{Binding SnapshotName, Mode=TwoWay}"
-                         Watermark="snimok_yyyyMMdd_HHmmss"/>
+        <Style Selector="Border.dialog-shell.hero">
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#173157" Offset="0"/>
+                        <GradientStop Color="#10213A" Offset="0.55"/>
+                        <GradientStop Color="#18355E" Offset="1"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="BorderBrush" Value="#3E6492"/>
+        </Style>
+
+        <Style Selector="TextBlock.muted">
+            <Setter Property="Foreground" Value="#AFBED2"/>
+            <Setter Property="Opacity" Value="0.95"/>
+        </Style>
+
+        <Style Selector="Border.change-item">
+            <Setter Property="Background" Value="#0F1B2E"/>
+            <Setter Property="BorderBrush" Value="#294364"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+
+        <Style Selector="ListBox.changed-files">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+        </Style>
+
+        <Style Selector="ListBox.changed-files > ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="ListBox.changed-files > ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1B2D45"/>
+        </Style>
+
+        <Style Selector="ListBox.changed-files > ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="#244363"/>
+        </Style>
+
+        <Style Selector="Border.preview-surface">
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Background" Value="#0F1B2E"/>
+            <Setter Property="BorderBrush" Value="#2A445F"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="18" RowDefinitions="Auto,*,Auto" RowSpacing="12">
+        <Border Grid.Row="0" Classes="dialog-shell hero">
+            <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                <StackPanel Grid.Row="0" Spacing="4">
+                    <TextBlock Text="Create snapshot" FontSize="28" FontWeight="SemiBold"/>
+                    <TextBlock Classes="muted"
+                               Text="Review changed files, set commit name and inspect side-by-side diff before saving."
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnDefinitions="130,*" ColumnSpacing="10" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="Snapshot name" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    <TextBox Grid.Column="1"
+                             Text="{Binding SnapshotName, Mode=TwoWay}"
+                             Watermark="snimok_yyyyMMdd_HHmmss"/>
+                </Grid>
+
+                <TextBlock Grid.Row="2"
+                           Text="{Binding ErrorMessage}"
+                           Foreground="#FF9CA9"
+                           FontWeight="SemiBold"
+                           IsVisible="{Binding HasErrorMessage}"
+                           TextWrapping="Wrap"/>
             </Grid>
+        </Border>
 
-            <TextBlock Text="{Binding ErrorMessage}"
-                       Foreground="#F87171"
-                       IsVisible="{Binding HasErrorMessage}"
-                       TextWrapping="Wrap"/>
-        </StackPanel>
+        <Grid Grid.Row="1" ColumnDefinitions="350,*" ColumnSpacing="12">
+            <Border Grid.Column="0" Classes="dialog-shell">
+                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                    <TextBlock Grid.Row="0" Text="Changed files" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Row="1" Classes="muted" Text="{Binding ChangedFilesCountLabel}"/>
 
-        <Grid ColumnDefinitions="360,*" ColumnSpacing="12">
-            <Border Grid.Column="0"
-                    Background="#132033"
-                    BorderBrush="#22354A"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="10">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Changed files" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="No changed files detected."
-                               Opacity="0.7"
-                               IsVisible="{Binding HasNoChangedFiles}"/>
+                    <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
+                        <TextBlock Grid.Row="0"
+                                   Text="No changed files detected."
+                                   Classes="muted"
+                                   IsVisible="{Binding HasNoChangedFiles}"/>
 
-                    <ListBox ItemsSource="{Binding ChangedFiles}"
-                             SelectedItem="{Binding SelectedChangedFile, Mode=TwoWay}"
-                             IsVisible="{Binding HasChangedFiles}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="windows:SnapshotPendingFileItemViewModel">
-                                <Border Background="#0F1722" CornerRadius="8" Padding="8" Margin="0,0,0,6">
-                                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold"/>
-                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.75"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                                                   Text="{Binding RelativePath}"
-                                                   Opacity="0.65"
-                                                   FontSize="11"
-                                                   TextTrimming="CharacterEllipsis"/>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
+                        <ListBox Grid.Row="1"
+                                 Classes="changed-files"
+                                 ItemsSource="{Binding ChangedFiles}"
+                                 SelectedItem="{Binding SelectedChangedFile, Mode=TwoWay}"
+                                 IsVisible="{Binding HasChangedFiles}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="windows:SnapshotPendingFileItemViewModel">
+                                    <Border Classes="change-item">
+                                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="4">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold" Foreground="#9ED7FF"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.85"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                       Text="{Binding RelativePath}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Grid>
             </Border>
 
-            <Border Grid.Column="1"
-                    Background="#132033"
-                    BorderBrush="#22354A"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="12">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="8">
-                    <TextBlock Grid.Row="0" Text="Selected file" FontWeight="SemiBold" FontSize="14"/>
-                    <TextBlock Grid.Row="1" Text="{Binding SelectedChangedFileTitle}" FontWeight="SemiBold"/>
-                    <TextBlock Grid.Row="2" Text="{Binding SelectedChangedFilePath}" Opacity="0.72" TextWrapping="Wrap"/>
+            <Border Grid.Column="1" Classes="dialog-shell">
+                <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Selected file" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedChangedFileTitle}" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedChangedFilePath}" Classes="muted" TextWrapping="Wrap"/>
+                        </StackPanel>
 
-                    <StackPanel Grid.Row="3" Spacing="4" Margin="0,4,0,0">
-                        <TextBlock Text="Comparison summary" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding SelectedChangedFileHint}" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding PreviewSummary}" TextWrapping="Wrap" Opacity="0.9"/>
-                    </StackPanel>
+                        <Border Grid.Column="1" Background="#123657" BorderBrush="#2C5B84" BorderThickness="1" CornerRadius="9" Padding="10,6" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding SelectedChangedFileHint}" FontSize="11" TextWrapping="Wrap" MaxWidth="250"/>
+                        </Border>
+                    </Grid>
 
-                    <Grid Grid.Row="4" RowDefinitions="Auto,*,Auto" RowSpacing="6">
-                        <TextBlock Grid.Row="0" Text="Diff preview" FontWeight="SemiBold"/>
+                    <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+                        <TextBlock Grid.Column="0" Text="Diff summary" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Column="1" Text="{Binding PreviewSummary}" Classes="muted" TextWrapping="Wrap"/>
+                    </Grid>
 
-                        <TextBlock Grid.Row="0"
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+                        <Border Grid.Column="0" Background="#1E3A31" CornerRadius="8" Padding="8,4">
+                            <TextBlock Text="+ Added" Foreground="#8AF5C5" FontWeight="SemiBold" FontSize="11"/>
+                        </Border>
+                        <Border Grid.Column="1" Background="#332028" CornerRadius="8" Padding="8,4">
+                            <TextBlock Text="- Removed" Foreground="#FF9AA5" FontWeight="SemiBold" FontSize="11"/>
+                        </Border>
+                        <Border Grid.Column="2" Background="#1B2C42" CornerRadius="8" Padding="8,4">
+                            <TextBlock Text="= Context" Foreground="#B5CBE5" FontWeight="SemiBold" FontSize="11"/>
+                        </Border>
+
+                        <TextBlock Grid.Column="3"
                                    HorizontalAlignment="Right"
                                    Text="Building preview..."
-                                   Opacity="0.7"
+                                   Classes="muted"
                                    IsVisible="{Binding IsPreviewLoading}"/>
+                    </Grid>
 
-                        <Grid Grid.Row="1"
-                              ColumnDefinitions="*,*"
-                              ColumnSpacing="8"
-                              IsVisible="{Binding HasPreviewColumns}">
-                            <Border Grid.Column="0" Background="#0D121C" BorderBrush="#203145" BorderThickness="1" CornerRadius="8" Padding="6">
-                                <TextBox Text="{Binding PreviewLeftColumn}"
-                                         IsReadOnly="True"
-                                         AcceptsReturn="True"
-                                         TextWrapping="NoWrap"/>
-                            </Border>
+                    <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Text="Diff preview" FontWeight="SemiBold" FontSize="16"/>
 
-                            <Border Grid.Column="1" Background="#0D121C" BorderBrush="#203145" BorderThickness="1" CornerRadius="8" Padding="6">
-                                <TextBox Text="{Binding PreviewRightColumn}"
-                                         IsReadOnly="True"
-                                         AcceptsReturn="True"
-                                         TextWrapping="NoWrap"/>
-                            </Border>
-                        </Grid>
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding HasPreviewRows}">
+                            <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Border Grid.Column="0" Background="#1A2D45" CornerRadius="8" Padding="8,4">
+                                        <TextBlock Text="Before" FontWeight="SemiBold"/>
+                                    </Border>
+                                    <Border Grid.Column="1" Background="#1A2D45" CornerRadius="8" Padding="8,4">
+                                        <TextBlock Text="After" FontWeight="SemiBold"/>
+                                    </Border>
+                                </Grid>
 
-                        <TextBlock Grid.Row="2"
-                                   Text="Select a modified text file to see side-by-side preview."
-                                   Opacity="0.7"
-                                   IsVisible="{Binding HasNoPreviewColumns}"/>
+                                <ScrollViewer Grid.Row="1"
+                                              HorizontalScrollBarVisibility="Auto"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding PreviewRows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="windows:SnapshotDiffRowItemViewModel">
+                                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8" Margin="0,0,0,4">
+                                                    <Border Grid.Column="0" Background="{Binding LeftBackground}" CornerRadius="6" Padding="8,4">
+                                                        <Grid ColumnDefinitions="52,20,*" ColumnSpacing="6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding LeftLineNumber}"
+                                                                       Foreground="#8FA5BF"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding LeftMarker}"
+                                                                       Foreground="{Binding LeftMarkerForeground}"
+                                                                       FontWeight="Bold"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"/>
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding LeftText}"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"
+                                                                       TextWrapping="NoWrap"/>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <Border Grid.Column="1" Background="{Binding RightBackground}" CornerRadius="6" Padding="8,4">
+                                                        <Grid ColumnDefinitions="52,20,*" ColumnSpacing="6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding RightLineNumber}"
+                                                                       Foreground="#8FA5BF"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding RightMarker}"
+                                                                       Foreground="{Binding RightMarkerForeground}"
+                                                                       FontWeight="Bold"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"/>
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding RightText}"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"
+                                                                       TextWrapping="NoWrap"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding HasNoPreviewRows}">
+                            <TextBlock Text="Select a modified text file to view a side-by-side diff preview."
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </Border>
                     </Grid>
                 </Grid>
             </Border>
         </Grid>
 
-        <StackPanel DockPanel.Dock="Bottom"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Spacing="8"
-                    Margin="0,12,0,0">
-            <Button Content="Cancel" Width="120" Command="{Binding CancelCommand}"/>
-            <Button Content="Save Snapshot"
-                    Width="140"
-                    Command="{Binding SaveCommand}"
-                    IsEnabled="{Binding CanSave}"/>
-        </StackPanel>
-    </DockPanel>
+        <Border Grid.Row="2"
+                Classes="dialog-shell"
+                Background="#0F1A2B"
+                BorderBrush="#2A4664"
+                Padding="10">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding ChangedFilesCountLabel}"
+                           VerticalAlignment="Center"
+                           Classes="muted"/>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Spacing="8">
+                    <Button Content="Cancel" Width="132" Classes="subtle" Command="{Binding CancelCommand}"/>
+                    <Button Content="Save snapshot"
+                            Width="160"
+                            Classes="primary"
+                            Command="{Binding SaveCommand}"
+                            IsEnabled="{Binding CanSave}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
 </Window>
