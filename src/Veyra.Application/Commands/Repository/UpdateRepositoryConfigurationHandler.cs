@@ -38,6 +38,9 @@ public sealed class UpdateRepositoryConfigurationHandler(
                 : request.Name.Trim();
 
             var safeRetentionPolicy = NormalizeRetentionPolicy(request.RetentionPolicy);
+            var safeSyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(request.SyncConflictStrategy);
+            var safeSyncRetryMaxAttempts = Math.Clamp(request.SyncRetryMaxAttempts, 1, 20);
+            var safeSyncRetryBaseDelaySeconds = Math.Clamp(request.SyncRetryBaseDelaySeconds, 5, 600);
 
             if (!PathEquals(repo.DirectoryPath, normalizedPath))
                 await setup.UpdateWatchedDirectoryAsync(repo.DirectoryPath, normalizedPath, ct);
@@ -47,6 +50,9 @@ public sealed class UpdateRepositoryConfigurationHandler(
                 safeName,
                 request.Description,
                 safeRetentionPolicy,
+                safeSyncConflictStrategy,
+                safeSyncRetryMaxAttempts,
+                safeSyncRetryBaseDelaySeconds,
                 ct);
 
             var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
@@ -84,11 +90,12 @@ public sealed class UpdateRepositoryConfigurationHandler(
             await native.ApplySetupAsync(ct);
 
             log.LogInformation(
-                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}. RetentionEnabled {RetentionEnabled}",
+                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}. RetentionEnabled {RetentionEnabled}. SyncStrategy {SyncStrategy}",
                 repo.Id,
                 normalizedPath,
                 normalizedFormats.Count,
-                safeRetentionPolicy.Enabled);
+                safeRetentionPolicy.Enabled,
+                safeSyncConflictStrategy);
 
             return OperationResult.Ok();
         }
@@ -153,4 +160,3 @@ public sealed class UpdateRepositoryConfigurationHandler(
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
 }
-

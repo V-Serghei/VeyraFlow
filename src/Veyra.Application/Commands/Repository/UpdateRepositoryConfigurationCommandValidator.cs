@@ -1,4 +1,5 @@
 using FluentValidation;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Commands.Repository;
 
@@ -42,5 +43,19 @@ public sealed class UpdateRepositoryConfigurationCommandValidator
             .GreaterThan(0)
             .When(x => x.RetentionPolicy.MaxTotalSizeBytes.HasValue)
             .WithMessage("Retention max size must be positive.");
+
+        RuleFor(x => x.SyncConflictStrategy)
+            .Must(v => RepositorySyncConflictStrategies.All.Contains(
+                RepositorySyncConflictStrategies.Normalize(v),
+                StringComparer.OrdinalIgnoreCase))
+            .WithMessage("Sync conflict strategy is invalid.");
+
+        RuleFor(x => x.SyncRetryMaxAttempts)
+            .InclusiveBetween(1, 20)
+            .WithMessage("Sync retry max attempts must be between 1 and 20.");
+
+        RuleFor(x => x.SyncRetryBaseDelaySeconds)
+            .InclusiveBetween(5, 600)
+            .WithMessage("Sync retry base delay must be between 5 and 600 seconds.");
     }
 }

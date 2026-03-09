@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 
 namespace Veyra.Desktop.Services.Scheduling;
@@ -113,10 +114,14 @@ public sealed class SnapshotSchedulerService(
         var repositories = scope.ServiceProvider.GetRequiredService<IRepositoryRepository>();
         var scanner = scope.ServiceProvider.GetRequiredService<IRepositoryScanner>();
         var retention = scope.ServiceProvider.GetRequiredService<IRepositoryRetentionService>();
+        var cloudSync = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
 
         var all = await repositories.GetAllRepositoriesAsync(ct);
         if (all.Count == 0)
+        {
+            await cloudSync.ProcessPendingQueueAsync(ct);
             return;
+        }
 
         var interval = TimeSpan.FromMinutes(Math.Clamp(options.IntervalMinutes, 1, 24 * 60));
         var nowUtc = DateTime.UtcNow;
@@ -138,6 +143,8 @@ public sealed class SnapshotSchedulerService(
                 "Scheduled retention completed for {Count} repositories",
                 retentionRuns.Count);
         }
+
+        await cloudSync.ProcessPendingQueueAsync(ct);
     }
 
     private async Task RunScheduledScanWithRetryAsync(

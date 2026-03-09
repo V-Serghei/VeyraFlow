@@ -2,6 +2,8 @@ namespace Veyra.Domain.Entities;
 
 public class Repository
 {
+    public const string DefaultSyncConflictStrategy = "last_write_wins";
+
     public int Id { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
@@ -23,6 +25,15 @@ public class Repository
     public DateTime? RetentionLastRunAt { get; set; }
     public string? RetentionLastStatus { get; set; }
 
+    public string SyncConflictStrategy { get; set; } = DefaultSyncConflictStrategy;
+    public int SyncRetryMaxAttempts { get; set; } = 5;
+    public int SyncRetryBaseDelaySeconds { get; set; } = 30;
+    public DateTime? CloudLastSyncedAt { get; set; }
+    public long? CloudLastLocalSnapshotId { get; set; }
+    public long? CloudLastRemoteSnapshotId { get; set; }
+    public string? CloudSyncLastStatus { get; set; }
+    public string? CloudSyncLastError { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public bool IsDeleted { get; set; }
@@ -30,4 +41,5 @@ public class Repository
 
     public ICollection<RepositorySnapshot> Snapshots { get; set; } = new List<RepositorySnapshot>();
     public ICollection<FileIdentity> FileIdentities { get; set; } = new List<FileIdentity>();
+    public ICollection<RepositorySyncQueueItem> SyncQueueItems { get; set; } = new List<RepositorySyncQueueItem>();
 }

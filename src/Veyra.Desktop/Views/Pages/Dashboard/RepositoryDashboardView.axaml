@@ -6,21 +6,23 @@
              x:Class="Veyra.Desktop.Views.Pages.Dashboard.RepositoryDashboardView"
              x:Name="Root"
              x:DataType="vm:RepositoryDashboardViewModel"
-             Background="#0D0D0D">
+             Background="{DynamicResource VeyraCanvasBrush}">
 
     <Grid ColumnDefinitions="240,*">
-        <Border Grid.Column="0" Background="#0D0D0D" Padding="12,16" BorderBrush="#1A1A1A" BorderThickness="0,0,1,0">
+        <Border Grid.Column="0" Classes="panel" Padding="12,16" BorderThickness="0,0,1,0">
             <DockPanel>
                 <Button DockPanel.Dock="Top"
-                        Content="+ Create Repository"
+                        Content="Create Repository"
                         HorizontalAlignment="Stretch"
                         Padding="12,10"
                         Command="{Binding AddRepositoryCommand}"
-                        Margin="0,0,0,16"/>
+                        Margin="0,0,0,16"
+                        Classes="primary"/>
 
                 <TextBlock DockPanel.Dock="Top"
                            Text="REPOSITORIES"
-                           FontSize="10" Foreground="#666666"
+                           FontSize="10"
+                           Opacity="0.6"
                            FontWeight="SemiBold"
                            Margin="8,0,0,8"
                            LetterSpacing="1"/>
@@ -29,7 +31,7 @@
                     <ItemsControl ItemsSource="{Binding Repositories}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                                <Border Background="#151515" CornerRadius="8" Padding="8" Margin="0,0,0,6">
+                                <Border Classes="card" Padding="8" Margin="0,0,0,6">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                                         <Button Grid.Column="0" Background="Transparent" BorderThickness="0"
                                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
@@ -53,13 +55,13 @@
             </DockPanel>
         </Border>
 
-        <DockPanel Grid.Column="1" Background="#0D0D0D">
-            <Border DockPanel.Dock="Top" Padding="20,14" BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
+        <DockPanel Grid.Column="1" Background="Transparent">
+            <Border DockPanel.Dock="Top" Padding="20,14" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="0,0,0,1">
                 <TextBox Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Search by name or path..."/>
             </Border>
 
             <TextBlock DockPanel.Dock="Top" Margin="20,8,20,0"
-                       Text="{Binding ErrorMessage}" Foreground="#F87171"
+                       Text="{Binding ErrorMessage}" Foreground="{DynamicResource VeyraDangerBrush}"
                        IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
 
             <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
@@ -71,8 +73,8 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                            <Border Width="340" MinHeight="220" Margin="0,0,14,14"
-                                    Background="#141414" CornerRadius="12" Padding="14">
+                            <Border Width="360" MinHeight="250" Margin="0,0,14,14"
+                                    Classes="card" Padding="14">
                                 <DockPanel>
                                     <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
                                         <StackPanel Grid.Column="0" Spacing="4">
@@ -110,6 +112,14 @@
                                         </StackPanel>
                                     </StackPanel>
 
+                                    <Border Classes="panel" Padding="8" Margin="0,0,0,10">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Cloud sync" FontWeight="SemiBold" FontSize="12"/>
+                                            <TextBlock Text="{Binding CloudSyncStatus}" FontSize="11" Opacity="0.9"/>
+                                            <TextBlock Text="{Binding CloudQueueSummary}" FontSize="11" Opacity="0.72"/>
+                                        </StackPanel>
+                                    </Border>
+
                                     <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding LinkedFormats}" Margin="0,0,0,10">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate>
@@ -129,7 +139,7 @@
                                         <Button Content="Open" Padding="10,6"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
                                                 CommandParameter="{Binding .}"/>
-                                        <Button Content="Delete" Padding="10,6" Foreground="#F87171"
+                                        <Button Content="Delete" Padding="10,6" Foreground="{DynamicResource VeyraDangerBrush}"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).DeleteRepositoryCommand}"
                                                 CommandParameter="{Binding .}"/>
                                     </StackPanel>
@@ -147,4 +157,3 @@
         </DockPanel>
     </Grid>
 </UserControl>
-

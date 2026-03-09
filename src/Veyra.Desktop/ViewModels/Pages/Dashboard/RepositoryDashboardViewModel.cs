@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -58,18 +58,21 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
             foreach (var r in repos)
             {
+                var isAvailable = Directory.Exists(r.DirectoryPath);
                 var card = new RepositoryCardViewModel
                 {
                     Id = r.Id,
                     Name = r.Name,
                     Description = r.Description,
                     DirectoryPath = r.DirectoryPath,
-                    StatusText = Directory.Exists(r.DirectoryPath) ? "Локально" : "Недоступен",
-                    StatusColor = Directory.Exists(r.DirectoryPath) ? "#4CAF50" : "#F44336",
+                    StatusText = isAvailable ? "Local" : "Unavailable",
+                    StatusColor = isAvailable ? "#4CAF50" : "#F44336",
                     LastActivity = FormatLastActivity(r.LastScannedAt),
                     FileCount = r.FileCount,
                     VersionCount = r.VersionCount,
-                    SizeDisplay = FormatSize(r.TotalSizeBytes)
+                    SizeDisplay = FormatSize(r.TotalSizeBytes),
+                    CloudSyncStatus = FormatCloudSyncStatus(r.CloudSync?.LastStatus),
+                    CloudQueueSummary = $"pending {r.CloudSync?.PendingQueueCount ?? 0} / conflicts {r.CloudSync?.ConflictQueueCount ?? 0}"
                 };
 
                 foreach (var f in r.LinkedFormats)
@@ -85,7 +88,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load repositories");
-            ErrorMessage = "Не удалось загрузить репозитории.";
+            ErrorMessage = "Failed to load repositories.";
             Repositories.Clear();
             IsEmpty = true;
         }
@@ -135,7 +138,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to open repository creation wizard");
-            ErrorMessage = "Не удалось открыть мастер создания репозитория.";
+            ErrorMessage = "Failed to open repository creation wizard.";
         }
     }
 
@@ -153,7 +156,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to delete repository");
-            ErrorMessage = "Не удалось удалить репозиторий.";
+            ErrorMessage = "Failed to delete repository.";
         }
     }
 
@@ -180,21 +183,40 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private static string FormatLastActivity(DateTime? utc)
     {
         if (utc is null)
-            return "Нет скана";
+            return "No scan";
 
         var delta = DateTime.UtcNow - utc.Value;
-        if (delta.TotalSeconds < 60) return "Только что";
-        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} мин назад";
-        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} ч назад";
-        return $"{(int)delta.TotalDays} дн назад";
+        if (delta.TotalSeconds < 60) return "Just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} min ago";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} h ago";
+        return $"{(int)delta.TotalDays} d ago";
     }
 
+    private static string FormatCloudSyncStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return "Idle";
+
+        var normalized = status.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "queued" => "Queued",
+            "syncing" => "Syncing",
+            "offline_retry" => "Offline, retry scheduled",
+            "retrying" => "Retrying",
+            "auth_required" => "Auth required",
+            "conflict" => "Conflict",
+            "failed" => "Failed",
+            "skipped" => "No upload needed",
+            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => status,
+            _ => status.Replace('_', ' ')
+        };
+    }
     private static string FormatSize(long bytes)
     {
-        if (bytes < 1024) return $"{bytes} Б";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} МБ";
-        return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
-

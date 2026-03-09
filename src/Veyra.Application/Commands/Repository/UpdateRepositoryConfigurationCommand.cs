@@ -10,5 +10,8 @@ public sealed record UpdateRepositoryConfigurationCommand(
     string? Description,
     string DirectoryPath,
     IReadOnlyCollection<string> Formats,
-    RepositoryRetentionPolicyDto RetentionPolicy)
+    RepositoryRetentionPolicyDto RetentionPolicy,
+    string SyncConflictStrategy = RepositorySyncConflictStrategies.LastWriteWins,
+    int SyncRetryMaxAttempts = 5,
+    int SyncRetryBaseDelaySeconds = 30)
     : IRequest<OperationResult>;

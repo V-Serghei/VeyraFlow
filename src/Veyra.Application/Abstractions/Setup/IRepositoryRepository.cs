@@ -11,6 +11,9 @@ public interface IRepositoryRepository
         string name,
         string? description,
         RepositoryRetentionPolicyDto retentionPolicy,
+        string syncConflictStrategy,
+        int syncRetryMaxAttempts,
+        int syncRetryBaseDelaySeconds,
         CancellationToken ct = default);
     Task DeleteRepositoryAsync(int id, CancellationToken ct = default);
     Task RestoreRepositoryAsync(int id, CancellationToken ct = default);
@@ -24,4 +27,3 @@ public interface IRepositoryRepository
     /// </summary>
     Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default);
 }
-

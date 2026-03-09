@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
@@ -22,6 +23,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 {
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
+    private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
     private readonly ILogger<RepositorySettingsViewModel> _log;
 
     private CancellationTokenSource? _retentionCts;
@@ -47,20 +49,37 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionLastRunText = "Never";
     [ObservableProperty] private string _retentionLastStatusText = "-";
 
+    [ObservableProperty] private string _syncConflictStrategy = RepositorySyncConflictStrategies.LastWriteWins;
+    [ObservableProperty] private string _syncRetryMaxAttempts = "5";
+    [ObservableProperty] private string _syncRetryBaseDelaySeconds = "30";
+    [ObservableProperty] private string _cloudSyncStatusText = "-";
+    [ObservableProperty] private string _cloudSyncLastSyncText = "Never";
+    [ObservableProperty] private string _cloudSyncQueueText = "pending: 0, conflicts: 0";
+    [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
+    [ObservableProperty] private bool _isSyncNowRunning;
+
     [ObservableProperty] private bool _isRetentionRunning;
     [ObservableProperty] private string _retentionProgressText = string.Empty;
     [ObservableProperty] private string _retentionResultText = string.Empty;
 
     public ObservableCollection<string> SelectedFormats { get; } = [];
     public ObservableCollection<string> AvailableFormats { get; } = [];
+    public ObservableCollection<string> SyncConflictStrategies { get; } =
+    [
+        RepositorySyncConflictStrategies.LastWriteWins,
+        RepositorySyncConflictStrategies.ManualMerge,
+        RepositorySyncConflictStrategies.PreserveBoth
+    ];
 
     public RepositorySettingsViewModel(
         IMediator mediator,
         IWindowService windows,
+        IRepositoryCloudSyncOrchestrator cloudSync,
         ILogger<RepositorySettingsViewModel> log)
     {
         _mediator = mediator;
         _windows = windows;
+        _cloudSync = cloudSync;
         _log = log;
     }
 
@@ -94,6 +113,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 AvailableFormats.Add(format);
 
             ApplyRetentionPolicy(repo.RetentionPolicy);
+            ApplyCloudSyncStatus(repo.CloudSync);
 
             RetentionResultText = string.Empty;
             RetentionProgressText = string.Empty;
@@ -179,6 +199,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             ErrorMessage = null;
 
             var policy = BuildRetentionPolicyFromState();
+            var syncRetryAttempts = ParseIntOrDefault(SyncRetryMaxAttempts, 5, 1, 20);
+            var syncRetryDelay = ParseIntOrDefault(SyncRetryBaseDelaySeconds, 30, 5, 600);
+            var strategy = RepositorySyncConflictStrategies.Normalize(SyncConflictStrategy);
 
             var result = await _mediator.Send(new UpdateRepositoryConfigurationCommand(
                 RepositoryId,
@@ -186,7 +209,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 Description,
                 DirectoryPath,
                 SelectedFormats.ToList(),
-                policy));
+                policy,
+                strategy,
+                syncRetryAttempts,
+                syncRetryDelay));
 
             if (!result.Success)
             {
@@ -194,8 +220,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 return;
             }
 
+            await _cloudSync.ProcessPendingQueueAsync();
+
             if (RepositoryUpdated is not null)
                 await RepositoryUpdated.Invoke(RepositoryId);
+
+            await LoadAsync(RepositoryId);
         }
         catch (Exception ex)
         {
@@ -205,6 +235,33 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SyncNowAsync()
+    {
+        if (RepositoryId <= 0)
+            return;
+
+        try
+        {
+            IsSyncNowRunning = true;
+            ErrorMessage = null;
+
+            await _cloudSync.TryPushLatestSnapshotAsync(RepositoryId);
+            await _cloudSync.ProcessPendingQueueAsync();
+
+            await LoadAsync(RepositoryId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to run cloud sync for repository {RepositoryId}", RepositoryId);
+            ErrorMessage = "Cloud sync failed.";
+        }
+        finally
+        {
+            IsSyncNowRunning = false;
         }
     }
 
@@ -351,6 +408,31 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : policy.LastStatus;
     }
 
+    private void ApplyCloudSyncStatus(RepositoryCloudSyncStatusDto? status)
+    {
+        if (status is null)
+        {
+            SyncConflictStrategy = RepositorySyncConflictStrategies.LastWriteWins;
+            SyncRetryMaxAttempts = "5";
+            SyncRetryBaseDelaySeconds = "30";
+            CloudSyncStatusText = "-";
+            CloudSyncLastSyncText = "Never";
+            CloudSyncQueueText = "pending: 0, conflicts: 0";
+            CloudSyncErrorText = string.Empty;
+            return;
+        }
+
+        SyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(status.ConflictStrategy);
+        SyncRetryMaxAttempts = status.RetryMaxAttempts.ToString(CultureInfo.InvariantCulture);
+        SyncRetryBaseDelaySeconds = status.RetryBaseDelaySeconds.ToString(CultureInfo.InvariantCulture);
+        CloudSyncStatusText = FormatCloudSyncStatus(status.LastStatus);
+        CloudSyncLastSyncText = status.LastSyncedAtUtc is null
+            ? "Never"
+            : status.LastSyncedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        CloudSyncQueueText = $"pending: {status.PendingQueueCount}, conflicts: {status.ConflictQueueCount}";
+        CloudSyncErrorText = status.LastError ?? string.Empty;
+    }
+
     private RepositoryRetentionPolicyDto BuildRetentionPolicyFromState()
     {
         var maxAgeDays = ParseNullableInt(RetentionMaxAgeDays);
@@ -378,6 +460,26 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             LastStatus: null);
     }
 
+    private static string FormatCloudSyncStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return "Idle";
+
+        var normalized = status.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "queued" => "Queued",
+            "syncing" => "Syncing",
+            "offline_retry" => "Offline, retry scheduled",
+            "retrying" => "Retrying",
+            "auth_required" => "Authorization required",
+            "conflict" => "Conflict detected",
+            "failed" => "Failed",
+            "skipped" => "No upload needed",
+            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => status,
+            _ => status.Replace('_', ' ')
+        };
+    }
     private static string NormalizeFormat(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -388,6 +490,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             v = "." + v;
 
         return v.ToLowerInvariant();
+    }
+
+    private static int ParseIntOrDefault(string value, int fallback, int min, int max)
+    {
+        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return fallback;
+
+        return Math.Clamp(parsed, min, max);
     }
 
     private static int? ParseNullableInt(string value)

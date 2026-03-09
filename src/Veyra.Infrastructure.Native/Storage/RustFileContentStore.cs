@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,7 @@ public sealed class RustFileContentStore : IFileContentStore
 
     private bool _nativeStoreAvailable;
     private bool _nativeRestoreAvailable;
+    private readonly ArtifactBlockCryptor _artifactCryptor;
 
     public RustFileContentStore(
         IConfiguration configuration,
@@ -32,10 +34,19 @@ public sealed class RustFileContentStore : IFileContentStore
     {
         _log = log;
         _storeRoot = ResolveStoreRoot(configuration);
+        _artifactCryptor = ArtifactBlockCryptor.Create(configuration, log);
 
         var native = NativeRuntimeHealth.Probe();
         _nativeStoreAvailable = native.SupportsStoreFileBlocks;
         _nativeRestoreAvailable = native.SupportsRestoreFileBlocks;
+
+        if (_artifactCryptor.Enabled && (_nativeStoreAvailable || _nativeRestoreAvailable))
+        {
+            _nativeStoreAvailable = false;
+            _nativeRestoreAvailable = false;
+            _log.LogWarning(
+                "Artifact encryption is enabled. Native block-store is temporarily disabled to guarantee encrypted payload storage.");
+        }
 
         if (_nativeStoreAvailable && _nativeRestoreAvailable)
         {
@@ -205,9 +216,11 @@ public sealed class RustFileContentStore : IFileContentStore
 
             fileSizeBytes += read;
 
-            var hash = ComputeSha256(buffer.AsSpan(0, read));
-            var blockHash = ManagedHashPrefix + hash;
-            var blockPath = GetManagedBlockPath(hash);
+            var plaintextHash = ComputeSha256(buffer.AsSpan(0, read));
+            var bytesToStore = _artifactCryptor.Protect(buffer.AsSpan(0, read), plaintextHash);
+            var storedHash = ComputeSha256(bytesToStore);
+            var blockHash = ManagedHashPrefix + storedHash;
+            var blockPath = GetManagedBlockPath(storedHash);
 
             var created = false;
             if (!File.Exists(blockPath))
@@ -224,10 +237,10 @@ public sealed class RustFileContentStore : IFileContentStore
                         bufferSize: DefaultChunkSize,
                         useAsync: true);
 
-                    await outStream.WriteAsync(buffer.AsMemory(0, read), ct);
+                    await outStream.WriteAsync(bytesToStore.AsMemory(0, bytesToStore.Length), ct);
                     created = true;
                     newBlocks++;
-                    storedSizeBytes += read;
+                    storedSizeBytes += bytesToStore.Length;
                 }
                 catch (IOException)
                 {
@@ -243,7 +256,7 @@ public sealed class RustFileContentStore : IFileContentStore
                 sequence,
                 blockHash,
                 read,
-                created ? read : 0));
+                created ? bytesToStore.Length : 0));
 
             sequence++;
         }
@@ -286,7 +299,6 @@ public sealed class RustFileContentStore : IFileContentStore
             useAsync: true);
 
         var totalWritten = 0L;
-        var buffer = new byte[DefaultChunkSize];
 
         foreach (var block in blocks.OrderBy(b => b.Sequence))
         {
@@ -300,25 +312,15 @@ public sealed class RustFileContentStore : IFileContentStore
             if (!File.Exists(blockPath))
                 throw new FileNotFoundException("Block file not found for restore.", blockPath);
 
-            await using var inStream = new FileStream(
-                blockPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: DefaultChunkSize,
-                useAsync: true);
+            var storedBytes = await File.ReadAllBytesAsync(blockPath, ct);
+            var plaintextBytes = _artifactCryptor.Unprotect(storedBytes);
 
-            var remaining = block.LengthBytes;
-            while (remaining > 0)
-            {
-                var read = await inStream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), ct);
-                if (read == 0)
-                    throw new InvalidOperationException($"Block {block.BlockHashBlake3} is shorter than expected.");
+            if (plaintextBytes.Length < block.LengthBytes)
+                throw new InvalidOperationException(
+                    $"Block {block.BlockHashBlake3} is shorter than expected after decryption.");
 
-                await outStream.WriteAsync(buffer.AsMemory(0, read), ct);
-                totalWritten += read;
-                remaining -= read;
-            }
+            await outStream.WriteAsync(plaintextBytes.AsMemory(0, block.LengthBytes), ct);
+            totalWritten += block.LengthBytes;
         }
 
         _log.LogInformation(
@@ -432,6 +434,203 @@ public sealed class RustFileContentStore : IFileContentStore
 
         Directory.CreateDirectory(root);
         return Path.GetFullPath(root);
+    }
+
+    private sealed class ArtifactBlockCryptor
+    {
+        private const string Magic = "VYRAENC";
+        private const byte Version = 1;
+        private const int NonceSize = 12;
+        private const int TagSize = 16;
+
+        private readonly byte[] _key;
+
+        private ArtifactBlockCryptor(bool enabled, byte[]? key)
+        {
+            Enabled = enabled;
+            _key = key ?? [];
+        }
+
+        public bool Enabled { get; }
+
+        public static ArtifactBlockCryptor Create(IConfiguration cfg, ILogger log)
+        {
+            var enabled = ParseBool(cfg["Security:ArtifactEncryption:Enabled"], defaultValue: true);
+            if (!enabled)
+            {
+                log.LogInformation("Artifact encryption is disabled by configuration.");
+                return new ArtifactBlockCryptor(false, null);
+            }
+
+            var keyBase64 = cfg["Security:ArtifactEncryption:KeyBase64"];
+            if (string.IsNullOrWhiteSpace(keyBase64))
+                keyBase64 = Environment.GetEnvironmentVariable("VEYRA_ARTIFACT_KEY_BASE64");
+
+            if (!string.IsNullOrWhiteSpace(keyBase64))
+            {
+                var directKey = TryDecodeKeyMaterial(keyBase64.Trim());
+                if (directKey is not null)
+                {
+                    log.LogInformation("Artifact encryption enabled via configured key material.");
+                    return new ArtifactBlockCryptor(true, directKey);
+                }
+
+                log.LogWarning("Configured artifact encryption key is invalid. Falling back to local key file.");
+            }
+
+            try
+            {
+                var keyPath = ResolveKeyPath(cfg);
+                Directory.CreateDirectory(Path.GetDirectoryName(keyPath)!);
+
+                if (File.Exists(keyPath))
+                {
+                    var fromFile = TryDecodeKeyMaterial(File.ReadAllText(keyPath).Trim());
+                    if (fromFile is not null)
+                    {
+                        log.LogInformation("Artifact encryption enabled. Key source: {KeyPath}", keyPath);
+                        return new ArtifactBlockCryptor(true, fromFile);
+                    }
+                }
+
+                var generated = new byte[32];
+                RandomNumberGenerator.Fill(generated);
+                File.WriteAllText(keyPath, Convert.ToBase64String(generated));
+
+                log.LogInformation("Artifact encryption enabled. New local key generated at {KeyPath}", keyPath);
+                return new ArtifactBlockCryptor(true, generated);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Failed to initialize artifact encryption key storage. Continuing without encryption.");
+                return new ArtifactBlockCryptor(false, null);
+            }
+        }
+
+        public byte[] Protect(ReadOnlySpan<byte> plaintext, string plaintextHashSha256)
+        {
+            if (!Enabled)
+                return plaintext.ToArray();
+
+            var nonce = DeriveNonce(plaintextHashSha256);
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[TagSize];
+
+            using (var aes = new AesGcm(_key, TagSize))
+            {
+                aes.Encrypt(nonce, plaintext, ciphertext, tag);
+            }
+
+            var envelope = new byte[Magic.Length + 1 + NonceSize + ciphertext.Length + TagSize];
+            Encoding.ASCII.GetBytes(Magic).CopyTo(envelope, 0);
+            envelope[Magic.Length] = Version;
+            nonce.CopyTo(envelope.AsSpan(Magic.Length + 1, NonceSize));
+            ciphertext.CopyTo(envelope.AsSpan(Magic.Length + 1 + NonceSize, ciphertext.Length));
+            tag.CopyTo(envelope.AsSpan(envelope.Length - TagSize, TagSize));
+
+            return envelope;
+        }
+
+        public byte[] Unprotect(ReadOnlySpan<byte> stored)
+        {
+            if (!Enabled)
+                return stored.ToArray();
+
+            if (!LooksEncrypted(stored))
+                return stored.ToArray();
+
+            var nonceStart = Magic.Length + 1;
+            var ciphertextStart = nonceStart + NonceSize;
+            var ciphertextLength = stored.Length - ciphertextStart - TagSize;
+            if (ciphertextLength < 0)
+                throw new InvalidOperationException("Encrypted block envelope is invalid.");
+
+            var nonce = stored.Slice(nonceStart, NonceSize).ToArray();
+            var ciphertext = stored.Slice(ciphertextStart, ciphertextLength).ToArray();
+            var tag = stored.Slice(stored.Length - TagSize, TagSize).ToArray();
+            var plaintext = new byte[ciphertextLength];
+
+            using (var aes = new AesGcm(_key, TagSize))
+            {
+                aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            }
+
+            return plaintext;
+        }
+
+        private static bool ParseBool(string? value, bool defaultValue)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return defaultValue;
+
+            return bool.TryParse(value.Trim(), out var parsed) ? parsed : defaultValue;
+        }
+
+        private static string ResolveKeyPath(IConfiguration cfg)
+        {
+            var configured = cfg["Security:ArtifactEncryption:KeyPath"];
+            if (!string.IsNullOrWhiteSpace(configured))
+                return Path.GetFullPath(configured.Trim());
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VeyraFlow",
+                "keys",
+                "artifact_encryption.key");
+        }
+
+        private static byte[]? TryDecodeKeyMaterial(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            try
+            {
+                var bytes = Convert.FromBase64String(value);
+                return bytes.Length == 32 ? bytes : null;
+            }
+            catch
+            {
+                // Fall through to hex parse.
+            }
+
+            try
+            {
+                var hex = value.Trim();
+                if (hex.Length == 64)
+                {
+                    var bytes = Convert.FromHexString(hex);
+                    return bytes.Length == 32 ? bytes : null;
+                }
+            }
+            catch
+            {
+                // Ignore invalid hex.
+            }
+
+            return null;
+        }
+
+        private bool LooksEncrypted(ReadOnlySpan<byte> data)
+        {
+            if (data.Length < Magic.Length + 1 + NonceSize + TagSize)
+                return false;
+
+            var magic = Encoding.ASCII.GetBytes(Magic);
+            if (!data.Slice(0, magic.Length).SequenceEqual(magic))
+                return false;
+
+            return data[magic.Length] == Version;
+        }
+
+        private byte[] DeriveNonce(string plaintextHashSha256)
+        {
+            var nonceSeed = HMACSHA256.HashData(
+                _key,
+                Encoding.UTF8.GetBytes($"veyra:block:{plaintextHashSha256}"));
+
+            return nonceSeed.AsSpan(0, NonceSize).ToArray();
+        }
     }
 
     private sealed record StorePayload

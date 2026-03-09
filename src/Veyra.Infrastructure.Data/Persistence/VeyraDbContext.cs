@@ -26,6 +26,7 @@ public class VeyraDbContext : DbContext
     public DbSet<RepositorySnapshot> RepositorySnapshots { get; set; } = null!;
     public DbSet<RepositorySnapshotEntry> RepositorySnapshotEntries { get; set; } = null!;
     public DbSet<UserProfile> UserProfiles { get; set; } = null!;
+    public DbSet<RepositorySyncQueueItem> RepositorySyncQueueItems { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -131,6 +132,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => e.DiffKeySha256);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
+
         modelBuilder.Entity<TextLineAtom>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -190,6 +192,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.HunkId, e.InHunkSequence }).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
+
         modelBuilder.Entity<SnapshotFileLink>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -277,8 +280,39 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.RetentionLastRunAt).IsRequired(false);
             entity.Property(e => e.RetentionLastStatus).HasMaxLength(256);
             entity.HasIndex(e => new { e.RetentionEnabled, e.RetentionLastRunAt });
+            entity.Property(e => e.SyncConflictStrategy).HasMaxLength(32).HasDefaultValue(Repository.DefaultSyncConflictStrategy);
+            entity.Property(e => e.SyncRetryMaxAttempts).HasDefaultValue(5);
+            entity.Property(e => e.SyncRetryBaseDelaySeconds).HasDefaultValue(30);
+            entity.Property(e => e.CloudLastSyncedAt).IsRequired(false);
+            entity.Property(e => e.CloudLastLocalSnapshotId).IsRequired(false);
+            entity.Property(e => e.CloudLastRemoteSnapshotId).IsRequired(false);
+            entity.Property(e => e.CloudSyncLastStatus).HasMaxLength(128);
+            entity.Property(e => e.CloudSyncLastError).HasMaxLength(2048);
+            entity.HasIndex(e => new { e.CloudLastSyncedAt, e.CloudLastRemoteSnapshotId });
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<RepositorySyncQueueItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.OperationType).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.ConflictStrategy).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.LastError).HasMaxLength(2048);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.NextAttemptAtUtc).IsRequired();
+            entity.Property(e => e.MaxAttempts).HasDefaultValue(5);
+
+            entity.HasOne(e => e.Repository)
+                .WithMany(r => r.SyncQueueItems)
+                .HasForeignKey(e => e.RepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.RepositoryId, e.SnapshotId, e.OperationType }).IsUnique();
+            entity.HasIndex(e => new { e.RepositoryId, e.Status, e.NextAttemptAtUtc });
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc, e.CreatedAt });
         });
 
         modelBuilder.Entity<RepositorySnapshot>(entity =>
@@ -331,6 +365,3 @@ public class VeyraDbContext : DbContext
         });
     }
 }
-
-
-

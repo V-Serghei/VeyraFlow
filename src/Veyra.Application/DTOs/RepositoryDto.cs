@@ -12,4 +12,5 @@ public sealed record RepositoryDto(
     int VersionCount,
     long TotalSizeBytes,
     DateTime? LastScannedAt,
-    RepositoryRetentionPolicyDto RetentionPolicy);
+    RepositoryRetentionPolicyDto RetentionPolicy,
+    RepositoryCloudSyncStatusDto? CloudSync = null);

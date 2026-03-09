@@ -25,6 +25,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             existing.DeletedAt = null;
             existing.Name = name;
             existing.Description = description;
+            existing.SyncConflictStrategy = Repository.DefaultSyncConflictStrategy;
+            existing.SyncRetryMaxAttempts = 5;
+            existing.SyncRetryBaseDelaySeconds = 30;
             existing.UpdatedAt = now;
             await db.SaveChangesAsync(ct);
             return existing.Id;
@@ -43,6 +46,14 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             RetentionRunIntervalMinutes = 60,
             RetentionLastRunAt = null,
             RetentionLastStatus = null,
+            SyncConflictStrategy = Repository.DefaultSyncConflictStrategy,
+            SyncRetryMaxAttempts = 5,
+            SyncRetryBaseDelaySeconds = 30,
+            CloudLastSyncedAt = null,
+            CloudLastLocalSnapshotId = null,
+            CloudLastRemoteSnapshotId = null,
+            CloudSyncLastStatus = null,
+            CloudSyncLastError = null,
             CreatedAt = now,
             UpdatedAt = now,
             IsDeleted = false,
@@ -70,11 +81,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
         await db.SaveChangesAsync(ct);
     }
+
     public async Task UpdateRepositoryAsync(
         int id,
         string name,
         string? description,
         RepositoryRetentionPolicyDto retentionPolicy,
+        string syncConflictStrategy,
+        int syncRetryMaxAttempts,
+        int syncRetryBaseDelaySeconds,
         CancellationToken ct = default)
     {
         db.ChangeTracker.Clear();
@@ -93,6 +108,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         entity.RetentionMaxTotalSizeBytes = NormalizePositive(retentionPolicy.MaxTotalSizeBytes);
         entity.RetentionTriggerFilter = SerializeTriggerFilters(retentionPolicy.TriggerFilters);
         entity.RetentionRunIntervalMinutes = Math.Clamp(retentionPolicy.RunIntervalMinutes, 5, 7 * 24 * 60);
+        entity.SyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(syncConflictStrategy);
+        entity.SyncRetryMaxAttempts = Math.Clamp(syncRetryMaxAttempts, 1, 20);
+        entity.SyncRetryBaseDelaySeconds = Math.Clamp(syncRetryBaseDelaySeconds, 5, 600);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -335,6 +353,18 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .OrderBy(p => p)
             .ToListAsync(ct);
 
+        var queueStats = await db.Set<RepositorySyncQueueItem>()
+            .Where(q => q.RepositoryId == repo.Id)
+            .GroupBy(q => q.RepositoryId)
+            .Select(g => new
+            {
+                Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
+                    || q.Status == RepositorySyncQueueItem.StatusRunning
+                    || q.Status == RepositorySyncQueueItem.StatusFailed),
+                Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict)
+            })
+            .FirstOrDefaultAsync(ct);
+
         return new RepositoryDto(
             repo.Id,
             repo.Name,
@@ -347,7 +377,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repo.VersionCount,
             repo.TotalSizeBytes,
             repo.LastScannedAt,
-            MapRetentionPolicy(repo));
+            MapRetentionPolicy(repo),
+            MapCloudSyncStatus(repo, queueStats?.Pending ?? 0, queueStats?.Conflict ?? 0));
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -369,19 +400,45 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .GroupBy(l => l.DirectoryId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Pattern).OrderBy(p => p).ToList());
 
-        return repos.Select(r => new RepositoryDto(
-            r.Id,
-            r.Name,
-            r.Description,
-            r.DirectoryId,
-            r.Directory.Path,
-            formatsByDir.GetValueOrDefault(r.DirectoryId, Array.Empty<string>()),
-            r.IsDeleted,
-            r.FileCount,
-            r.VersionCount,
-            r.TotalSizeBytes,
-            r.LastScannedAt,
-            MapRetentionPolicy(r))).ToList();
+        var repoIds = repos.Select(r => r.Id).ToList();
+        var queueStatsByRepo = repoIds.Count == 0
+            ? new Dictionary<int, (int Pending, int Conflict)>()
+            : await db.Set<RepositorySyncQueueItem>()
+                .Where(q => repoIds.Contains(q.RepositoryId))
+                .GroupBy(q => q.RepositoryId)
+                .Select(g => new
+                {
+                    RepositoryId = g.Key,
+                    Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
+                        || q.Status == RepositorySyncQueueItem.StatusRunning
+                        || q.Status == RepositorySyncQueueItem.StatusFailed),
+                    Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict)
+                })
+                .ToDictionaryAsync(x => x.RepositoryId, x => (x.Pending, x.Conflict), ct);
+
+        return repos.Select(r =>
+        {
+            if (!queueStatsByRepo.TryGetValue(r.Id, out var queue))
+                queue = (0, 0);
+
+            var pending = queue.Pending;
+            var conflict = queue.Conflict;
+
+            return new RepositoryDto(
+                r.Id,
+                r.Name,
+                r.Description,
+                r.DirectoryId,
+                r.Directory.Path,
+                formatsByDir.GetValueOrDefault(r.DirectoryId, Array.Empty<string>()),
+                r.IsDeleted,
+                r.FileCount,
+                r.VersionCount,
+                r.TotalSizeBytes,
+                r.LastScannedAt,
+                MapRetentionPolicy(r),
+                MapCloudSyncStatus(r, pending, conflict));
+        }).ToList();
     }
 
     public async Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default)
@@ -410,6 +467,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     existing.DeletedAt = null;
                     existing.UpdatedAt = now;
                 }
+
+                if (string.IsNullOrWhiteSpace(existing.SyncConflictStrategy))
+                    existing.SyncConflictStrategy = Repository.DefaultSyncConflictStrategy;
+
+                if (existing.SyncRetryMaxAttempts <= 0)
+                    existing.SyncRetryMaxAttempts = 5;
+
+                if (existing.SyncRetryBaseDelaySeconds <= 0)
+                    existing.SyncRetryBaseDelaySeconds = 30;
             }
             else
             {
@@ -429,6 +495,14 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     RetentionRunIntervalMinutes = 60,
                     RetentionLastRunAt = null,
                     RetentionLastStatus = null,
+                    SyncConflictStrategy = Repository.DefaultSyncConflictStrategy,
+                    SyncRetryMaxAttempts = 5,
+                    SyncRetryBaseDelaySeconds = 30,
+                    CloudLastSyncedAt = null,
+                    CloudLastLocalSnapshotId = null,
+                    CloudLastRemoteSnapshotId = null,
+                    CloudSyncLastStatus = null,
+                    CloudSyncLastError = null,
                     CreatedAt = now,
                     UpdatedAt = now,
                     IsDeleted = false,
@@ -461,6 +535,21 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repository.RetentionRunIntervalMinutes,
             repository.RetentionLastRunAt,
             repository.RetentionLastStatus);
+    }
+
+    private static RepositoryCloudSyncStatusDto MapCloudSyncStatus(Repository repository, int pendingCount, int conflictCount)
+    {
+        return new RepositoryCloudSyncStatusDto(
+            ConflictStrategy: RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy),
+            RetryMaxAttempts: Math.Clamp(repository.SyncRetryMaxAttempts, 1, 20),
+            RetryBaseDelaySeconds: Math.Clamp(repository.SyncRetryBaseDelaySeconds, 5, 600),
+            LastSyncedAtUtc: repository.CloudLastSyncedAt,
+            LastLocalSnapshotId: repository.CloudLastLocalSnapshotId,
+            LastRemoteSnapshotId: repository.CloudLastRemoteSnapshotId,
+            LastStatus: repository.CloudSyncLastStatus,
+            LastError: repository.CloudSyncLastError,
+            PendingQueueCount: pendingCount,
+            ConflictQueueCount: conflictCount);
     }
 
     private static IReadOnlyList<string> ParseTriggerFilters(string? csv)
@@ -496,4 +585,3 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
 }
-
