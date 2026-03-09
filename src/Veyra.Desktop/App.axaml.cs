@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -101,6 +102,29 @@ public partial class App : AvaloniaApplication
 
                 shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
             }
+
+            var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
+            if (recovery is not null)
+            {
+                try
+                {
+                    var recoveryResults = recovery.RunStartupHealthCheckAsync().GetAwaiter().GetResult();
+                    foreach (var result in recoveryResults.Where(r => !r.Success || r.AffectedRows > 0))
+                    {
+                        Log.Information(
+                            "Startup health-check result. RepositoryId {RepositoryId}. Success {Success}. Action {Action}. Affected {Affected}. Summary {Summary}",
+                            result.RepositoryId,
+                            result.Success,
+                            result.Action,
+                            result.AffectedRows,
+                            result.Summary);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Startup health-check failed.");
+                }
+            }
         }
 
         _snapshotScheduler = _serviceProvider.GetService<ISnapshotScheduler>();
@@ -135,3 +159,4 @@ public partial class App : AvaloniaApplication
         Log.CloseAndFlush();
     }
 }
+

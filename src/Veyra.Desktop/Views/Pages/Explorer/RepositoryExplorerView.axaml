@@ -190,6 +190,34 @@
                                     HorizontalAlignment="Stretch"
                                     Padding="12,10"/>
 
+                            <Border Classes="panel" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Repository tools" FontWeight="SemiBold"/>
+                                    <WrapPanel Orientation="Horizontal" ItemWidth="170" ItemHeight="34">
+                                        <Button Content="Export bundle" AutomationProperties.Name="Export repository bundle"
+                                                Command="{Binding ExportRepositoryBundleCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle"/>
+                                        <Button Content="Import bundle" AutomationProperties.Name="Import repository bundle"
+                                                Command="{Binding ImportRepositoryBundleCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle"/>
+                                        <Button Content="Repair data" AutomationProperties.Name="Repair repository data"
+                                                Command="{Binding RepairRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle"/>
+                                        <Button Content="Reindex data" AutomationProperties.Name="Reindex repository data"
+                                                Command="{Binding ReindexRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle"/>
+                                        <Button Content="Relink graph" AutomationProperties.Name="Relink repository graph"
+                                                Command="{Binding RelinkRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
                             <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
 
                             <TextBlock Text="Selected file" Classes="section-title"/>
@@ -604,4 +632,3 @@
         </Grid>
     </Grid>
 </UserControl>
-

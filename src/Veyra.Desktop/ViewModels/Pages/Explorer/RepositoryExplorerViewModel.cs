@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -51,6 +52,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
     [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
+    [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
     private int _repositoryId;
 
     [ObservableProperty] private string _repositoryName = string.Empty;
@@ -59,6 +61,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
     [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
+    [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
     private bool _isLoading;
 
     [ObservableProperty] private bool _isEmpty;
@@ -108,15 +111,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
     [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
+    [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
     private bool _isScanRunning;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
+    [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
+    private bool _isMaintenanceRunning;
 
     [ObservableProperty] private int _scanPercent;
     [ObservableProperty] private string? _scanMessage;
     [ObservableProperty] private bool _scanIsIndeterminate;
     [ObservableProperty] private bool _isLiveSyncActive;
 
-    [ObservableProperty] private string _pendingChangesSummary = "Изменений с последнего снимка нет.";
-    [ObservableProperty] private string _lastSnapshotLabel = "Снимок еще не создан.";
+    [ObservableProperty] private string _pendingChangesSummary = "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚.";
+    [ObservableProperty] private string _lastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoPendingChanges))]
@@ -160,7 +170,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasNoSnapshotFiles => SelectedSnapshot is not null && !HasSnapshotFiles;
     public bool HasDiffPreviewRows => DiffPreviewRows.Count > 0;
     public bool HasNoDiffPreviewRows => !IsDiffPreviewLoading && !HasDiffPreviewRows;
-    public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning;
+    public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
+    public bool CanRunMaintenanceActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
     public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
     public bool CanRestoreSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanRunDiffForSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
@@ -218,13 +229,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
-            PendingChangesSummary = "Изменений с последнего снимка нет.";
-            LastSnapshotLabel = "Снимок еще не создан.";
+            PendingChangesSummary = "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚.";
+            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
-                ErrorMessage = "Репозиторий не найден.";
+                ErrorMessage = "Ð ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ð¹ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½.";
                 IsEmpty = true;
                 return;
             }
@@ -239,7 +250,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load explorer for repository {RepositoryId}", repositoryId);
-            ErrorMessage = "Не удалось загрузить содержимое репозитория.";
+            ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ðµ Ñ€ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ñ.";
             Items.Clear();
             TreeNodes.Clear();
             FileVersions.Clear();
@@ -259,8 +270,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
-            PendingChangesSummary = "Не удалось загрузить изменения.";
-            LastSnapshotLabel = "Снимок еще не создан.";
+            PendingChangesSummary = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ.";
+            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
             IsEmpty = true;
         }
         finally
@@ -375,9 +386,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_index_manual",
-            fallbackMessage: "Синхронизация индекса...",
+            fallbackMessage: "Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¸Ð½Ð´ÐµÐºÑÐ°...",
             showErrors: true,
-            successMessage: "Индекс синхронизирован.");
+            successMessage: "Ð˜Ð½Ð´ÐµÐºÑ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½.");
     }
 
     [RelayCommand]
@@ -469,6 +480,165 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         => IsSnapshotHistoryMenuOpen = false;
 
     [RelayCommand]
+    private async Task ExportRepositoryBundleAsync()
+    {
+        if (RepositoryId <= 0 || IsMaintenanceRunning)
+            return;
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            ErrorMessage = "Unable to open file picker window.";
+            return;
+        }
+
+        var suggestedName = BuildSuggestedBundleFileName();
+        var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export repository bundle",
+            SuggestedFileName = suggestedName,
+            DefaultExtension = "zip",
+            ShowOverwritePrompt = true,
+            FileTypeChoices =
+            [
+                new FilePickerFileType("Veyra bundle")
+                {
+                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
+                }
+            ]
+        });
+
+        var bundlePath = file?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(bundlePath))
+            return;
+
+        await RunMaintenanceOperationAsync(
+            actionName: "export",
+            startedMessage: "Exporting repository bundle...",
+            operation: async () => await _mediator.Send(new ExportRepositoryBundleCommand(RepositoryId, bundlePath)),
+            onSuccess: result =>
+            {
+                VersionActionMessage =
+                    $"{result.Summary}\nBundle: {result.BundlePath}\nSize: {FormatSize(result.BundleSizeBytes)}";
+            });
+    }
+
+    [RelayCommand]
+    private async Task ImportRepositoryBundleAsync()
+    {
+        if (IsMaintenanceRunning)
+            return;
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            ErrorMessage = "Unable to open file picker window.";
+            return;
+        }
+
+        var bundleSelection = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import repository bundle",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Veyra bundle")
+                {
+                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
+                }
+            ]
+        });
+
+        var bundlePath = bundleSelection.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(bundlePath))
+            return;
+
+        var validation = await _mediator.Send(new ValidateRepositoryBundleQuery(bundlePath));
+        if (!validation.IsValid)
+        {
+            ErrorMessage = validation.Message;
+            return;
+        }
+
+        var targetDirectorySelection = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select target directory for imported repository",
+            AllowMultiple = false
+        });
+
+        var targetDirectory = targetDirectorySelection.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+            return;
+
+        await RunMaintenanceOperationAsync(
+            actionName: "import",
+            startedMessage: "Importing repository bundle...",
+            operation: async () => await _mediator.Send(new ImportRepositoryBundleCommand(
+                bundlePath,
+                targetDirectory,
+                RepositoryNameOverride: null)),
+            onSuccess: result =>
+            {
+                var warningText = result.Warnings.Count == 0
+                    ? string.Empty
+                    : "\nWarnings:\n" + string.Join('\n', result.Warnings);
+
+                VersionActionMessage =
+                    $"{result.Summary}\nImported repository id: {result.RepositoryId}{warningText}";
+            });
+    }
+
+    [RelayCommand]
+    private async Task RepairRepositoryDataAsync()
+    {
+        if (RepositoryId <= 0 || IsMaintenanceRunning)
+            return;
+
+        await RunMaintenanceOperationAsync(
+            actionName: "repair",
+            startedMessage: "Running repository repair...",
+            operation: async () => await _mediator.Send(new RepairRepositoryDataCommand(
+                RepositoryId,
+                RepairMissingBlocksFromCloud: true)),
+            onSuccess: result =>
+            {
+                VersionActionMessage = FormatRecoveryMessage(result);
+            });
+    }
+
+    [RelayCommand]
+    private async Task ReindexRepositoryDataAsync()
+    {
+        if (RepositoryId <= 0 || IsMaintenanceRunning)
+            return;
+
+        await RunMaintenanceOperationAsync(
+            actionName: "reindex",
+            startedMessage: "Reindexing repository and rebuilding snapshot data...",
+            operation: async () => await _mediator.Send(new ReindexRepositoryDataCommand(RepositoryId)),
+            onSuccess: result =>
+            {
+                VersionActionMessage = FormatRecoveryMessage(result);
+            });
+    }
+
+    [RelayCommand]
+    private async Task RelinkRepositoryDataAsync()
+    {
+        if (RepositoryId <= 0 || IsMaintenanceRunning)
+            return;
+
+        await RunMaintenanceOperationAsync(
+            actionName: "relink",
+            startedMessage: "Relinking snapshot-file graph...",
+            operation: async () => await _mediator.Send(new RelinkRepositoryDataCommand(RepositoryId)),
+            onSuccess: result =>
+            {
+                VersionActionMessage = FormatRecoveryMessage(result);
+            });
+    }
+
+    [RelayCommand]
     private void CloseDiffPreviewMenu()
         => IsDiffPreviewMenuOpen = false;
 
@@ -519,7 +689,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks)
         {
-            ErrorMessage = "Для выбранной версии отсутствуют блоки содержимого.";
+            ErrorMessage = "Ð”Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¹ Ð²ÐµÑ€ÑÐ¸Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð±Ð»Ð¾ÐºÐ¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ð³Ð¾.";
             return;
         }
 
@@ -534,11 +704,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!result.Success)
         {
-            ErrorMessage = result.Error ?? "Не удалось восстановить файл.";
+            ErrorMessage = result.Error ?? "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð».";
             return;
         }
 
-        VersionActionMessage = $"Файл восстановлен поверх текущего:\n{result.Value}";
+        VersionActionMessage = $"Ð¤Ð°Ð¹Ð» Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ Ð¿Ð¾Ð²ÐµÑ€Ñ… Ñ‚ÐµÐºÑƒÑ‰ÐµÐ³Ð¾:\n{result.Value}";
     }
 
     [RelayCommand]
@@ -552,7 +722,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks)
         {
-            ErrorMessage = "Для выбранной версии отсутствуют блоки содержимого.";
+            ErrorMessage = "Ð”Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¹ Ð²ÐµÑ€ÑÐ¸Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð±Ð»Ð¾ÐºÐ¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ð³Ð¾.";
             return;
         }
 
@@ -568,11 +738,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!result.Success)
         {
-            ErrorMessage = result.Error ?? "Не удалось восстановить файл в новый путь.";
+            ErrorMessage = result.Error ?? "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð» Ð² Ð½Ð¾Ð²Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ.";
             return;
         }
 
-        VersionActionMessage = $"Файл восстановлен в новый путь:\n{result.Value}";
+        VersionActionMessage = $"Ð¤Ð°Ð¹Ð» Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ Ð² Ð½Ð¾Ð²Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ:\n{result.Value}";
     }
 
     [RelayCommand]
@@ -697,7 +867,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (!await _scanGate.WaitAsync(0))
         {
             if (showErrors)
-                ErrorMessage = "Сканирование уже выполняется.";
+                ErrorMessage = "Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ ÑƒÐ¶Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ.";
             return false;
         }
 
@@ -735,7 +905,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (!result.Success)
             {
                 if (showErrors)
-                    ErrorMessage = result.Error ?? "Сканирование завершилось с ошибкой.";
+                    ErrorMessage = result.Error ?? "Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð·Ð°Ð²ÐµÑ€ÑˆÐ¸Ð»Ð¾ÑÑŒ Ñ Ð¾ÑˆÐ¸Ð±ÐºÐ¾Ð¹.";
                 return false;
             }
 
@@ -756,7 +926,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 triggerOverride);
 
             if (showErrors)
-                ErrorMessage = "Не удалось выполнить сканирование репозитория.";
+                ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ ÑÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ñ€ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ñ.";
             return false;
         }
         finally
@@ -825,7 +995,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 "Failed to load file versions. RepositoryId {RepositoryId}. Path {Path}",
                 RepositoryId,
                 item.RelativePath);
-            ErrorMessage = "Не удалось загрузить версии файла.";
+            ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð²ÐµÑ€ÑÐ¸Ð¸ Ñ„Ð°Ð¹Ð»Ð°.";
         }
         finally
         {
@@ -887,19 +1057,19 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (pending.BaselineSnapshotAtUtc is null)
         {
-            LastSnapshotLabel = "Снимок еще не создан.";
+            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
             PendingChangesSummary = HasPendingChanges
-                ? $"К фиксации {PendingChanges.Count} файлов"
-                : "Снимков пока нет. Создайте первый снимок.";
+                ? $"Ðš Ñ„Ð¸ÐºÑÐ°Ñ†Ð¸Ð¸ {PendingChanges.Count} Ñ„Ð°Ð¹Ð»Ð¾Ð²"
+                : "Ð¡Ð½Ð¸Ð¼ÐºÐ¾Ð² Ð¿Ð¾ÐºÐ° Ð½ÐµÑ‚. Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº.";
             return;
         }
 
         var local = pending.BaselineSnapshotAtUtc.Value.ToLocalTime();
-        LastSnapshotLabel = $"Последний снимок {local:yyyy-MM-dd HH:mm:ss}";
+        LastSnapshotLabel = $"ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº {local:yyyy-MM-dd HH:mm:ss}";
 
         PendingChangesSummary = pending.AddedCount + pending.ModifiedCount + pending.DeletedCount == 0
-            ? "Изменений с последнего снимка нет."
-            : $"Изменений +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
+            ? "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚."
+            : $"Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
     }
 
     private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0)
@@ -1015,6 +1185,45 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsSnapshotFilesLoading = false;
         }
     }
+
+    private async Task RunMaintenanceOperationAsync<TResult>(
+        string actionName,
+        string startedMessage,
+        Func<Task<OperationResult<TResult>>> operation,
+        Action<TResult> onSuccess)
+    {
+        try
+        {
+            IsMaintenanceRunning = true;
+            ErrorMessage = null;
+            VersionActionMessage = startedMessage;
+
+            var result = await operation();
+
+            if (!result.Success || result.Value is null)
+            {
+                ErrorMessage = result.Error ?? $"Repository {actionName} failed.";
+                VersionActionMessage = null;
+                return;
+            }
+
+            onSuccess(result.Value);
+            await RefreshEntriesAndTreeAsync(clearSelection: false);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Repository {Action} operation failed. RepositoryId {RepositoryId}",
+                actionName,
+                RepositoryId);
+            ErrorMessage = $"Repository {actionName} failed: {ex.Message}";
+            VersionActionMessage = null;
+        }
+        finally
+        {
+            IsMaintenanceRunning = false;
+        }
+    }
     private async Task RefreshEntriesAndTreeAsync(bool clearSelection)
     {
         if (RepositoryId == 0)
@@ -1082,7 +1291,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (success)
         {
             ScanPercent = 100;
-            ScanMessage = "Готово";
+            ScanMessage = "Ð“Ð¾Ñ‚Ð¾Ð²Ð¾";
         }
 
         ScanIsIndeterminate = false;
@@ -1255,7 +1464,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_live_watcher",
-            fallbackMessage: "Синхронизация изменений...",
+            fallbackMessage: "Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹...",
             showErrors: false,
             successMessage: null);
     }
@@ -1373,9 +1582,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static ExplorerItemViewModel MapToItem(RepositoryScanEntryDto entry)
     {
         var type = entry.IsDirectory
-            ? "Папка"
+            ? "ÐŸÐ°Ð¿ÐºÐ°"
             : string.IsNullOrWhiteSpace(entry.Extension)
-                ? "Файл"
+                ? "Ð¤Ð°Ð¹Ð»"
                 : entry.Extension.TrimStart('.').ToUpperInvariant();
 
         return new ExplorerItemViewModel
@@ -1385,7 +1594,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsDirectory = entry.IsDirectory,
             Name = entry.Name,
             Type = type,
-            SizeDisplay = entry.IsDirectory ? "—" : FormatSize(entry.SizeBytes),
+            SizeDisplay = entry.IsDirectory ? "â€”" : FormatSize(entry.SizeBytes),
             ModifiedDisplay = FormatLastActivity(entry.LastWriteUtc),
             HashSha256 = entry.ContentHashSha256
         };
@@ -1594,47 +1803,45 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static string FormatLastActivity(DateTime utc)
     {
         var delta = DateTime.UtcNow - utc;
-        if (delta.TotalSeconds < 60) return "Только что";
-        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} мин назад";
-        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} ч назад";
-        return $"{(int)delta.TotalDays} дн назад";
+        if (delta.TotalSeconds < 60) return "Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ñ‡Ñ‚Ð¾";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} Ð¼Ð¸Ð½ Ð½Ð°Ð·Ð°Ð´";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} Ñ‡ Ð½Ð°Ð·Ð°Ð´";
+        return $"{(int)delta.TotalDays} Ð´Ð½ Ð½Ð°Ð·Ð°Ð´";
     }
-
     private static string FormatSize(long bytes)
     {
-        if (bytes < 1024) return $"{bytes} Б";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} МБ";
-        return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
+        if (bytes < 1024) return $"{bytes} Ð‘";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} ÐšÐ‘";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} ÐœÐ‘";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} Ð“Ð‘";
+    }
+
+    private string BuildSuggestedBundleFileName()
+    {
+        var safeName = string.IsNullOrWhiteSpace(RepositoryName)
+            ? $"repo_{RepositoryId}"
+            : SanitizeFileName(RepositoryName);
+
+        return $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.veyra.zip";
+    }
+
+    private static string FormatRecoveryMessage(RepositoryRecoveryResultDto result)
+    {
+        var extra = result.Messages.Count == 0
+            ? string.Empty
+            : "\n" + string.Join('\n', result.Messages);
+
+        return $"{result.Summary}{extra}";
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = value.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray();
+        var normalized = new string(chars).Trim('_', ' ');
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "repository"
+            : normalized;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
