@@ -110,6 +110,7 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.DiffKeySha256).IsRequired().HasMaxLength(64);
             entity.Property(e => e.RelativePath).IsRequired().HasMaxLength(2048);
             entity.Property(e => e.LinesJson).IsRequired();
+            entity.Property(e => e.StorageFormatVersion).HasDefaultValue(2);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
@@ -319,3 +320,5 @@ public class VeyraDbContext : DbContext
         });
     }
 }
+
+

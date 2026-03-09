@@ -9,9 +9,7 @@ using Veyra.Infrastructure.Native.Interop;
 
 namespace Veyra.Infrastructure.Native.Storage;
 
-public sealed class RustFileContentStore(
-    IConfiguration configuration,
-    ILogger<RustFileContentStore> log) : IFileContentStore
+public sealed class RustFileContentStore : IFileContentStore
 {
     private const int DefaultChunkSize = 64 * 1024;
     private const string ManagedHashPrefix = "sha256-";
@@ -21,7 +19,40 @@ public sealed class RustFileContentStore(
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly string _storeRoot = ResolveStoreRoot(configuration);
+    private readonly ILogger<RustFileContentStore> _log;
+    private readonly string _storeRoot;
+    private readonly object _nativeCapabilityLock = new();
+
+    private bool _nativeStoreAvailable;
+    private bool _nativeRestoreAvailable;
+
+    public RustFileContentStore(
+        IConfiguration configuration,
+        ILogger<RustFileContentStore> log)
+    {
+        _log = log;
+        _storeRoot = ResolveStoreRoot(configuration);
+
+        var native = NativeRuntimeHealth.Probe();
+        _nativeStoreAvailable = native.SupportsStoreFileBlocks;
+        _nativeRestoreAvailable = native.SupportsRestoreFileBlocks;
+
+        if (_nativeStoreAvailable && _nativeRestoreAvailable)
+        {
+            _log.LogInformation(
+                "Native block-store entrypoints detected. Library {LoadedPath}",
+                native.LoadedPath ?? "(unknown)");
+        }
+        else
+        {
+            _log.LogWarning(
+                "Native block-store entrypoints are unavailable at startup. Store {StoreAvailable}. Restore {RestoreAvailable}. Library {LoadedPath}. Error {Error}",
+                _nativeStoreAvailable,
+                _nativeRestoreAvailable,
+                native.LoadedPath ?? "(not loaded)",
+                native.ErrorMessage ?? "(no error details)");
+        }
+    }
 
     public async Task<StoredFileContentDto> StoreFileAsync(string filePath, CancellationToken ct = default)
     {
@@ -31,6 +62,9 @@ public sealed class RustFileContentStore(
             throw new ArgumentException("File path is required.", nameof(filePath));
 
         var fullPath = Path.GetFullPath(filePath);
+
+        if (!_nativeStoreAvailable)
+            return await StoreFileManagedAsync(fullPath, ct);
 
         try
         {
@@ -48,7 +82,7 @@ public sealed class RustFileContentStore(
                     b.StoredSizeBytes))
                 .ToList();
 
-            log.LogInformation(
+            _log.LogInformation(
                 "Stored file in native block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
                 fullPath,
                 payload.BlockCount,
@@ -65,10 +99,7 @@ public sealed class RustFileContentStore(
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
-            log.LogWarning(ex,
-                "Native block-store entrypoints are unavailable. Falling back to managed block-store for {Path}",
-                fullPath);
-
+            DisableNativeStore(ex, fullPath);
             return await StoreFileManagedAsync(fullPath, ct);
         }
     }
@@ -88,6 +119,9 @@ public sealed class RustFileContentStore(
         if (blocks.Count == 0)
             return await CreateEmptyFileAsync(fullTarget, overwriteExisting, ct);
 
+        if (!_nativeRestoreAvailable)
+            return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+
         try
         {
             var payload = blocks
@@ -102,7 +136,7 @@ public sealed class RustFileContentStore(
             var json = JsonSerializer.Serialize(payload);
             var written = VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
 
-            log.LogInformation(
+            _log.LogInformation(
                 "Restored file from native block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
                 fullTarget,
                 written,
@@ -112,10 +146,7 @@ public sealed class RustFileContentStore(
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
-            log.LogWarning(ex,
-                "Native block restore entrypoints are unavailable. Falling back to managed block restore for {Target}",
-                fullTarget);
-
+            DisableNativeRestore(ex, fullTarget);
             return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
         }
     }
@@ -139,7 +170,7 @@ public sealed class RustFileContentStore(
 
         await stream.FlushAsync(ct);
 
-        log.LogInformation(
+        _log.LogInformation(
             "Restored empty file version. Target {Target}. Bytes 0. Blocks 0",
             fullTarget);
 
@@ -217,7 +248,7 @@ public sealed class RustFileContentStore(
             sequence++;
         }
 
-        log.LogInformation(
+        _log.LogInformation(
             "Stored file in managed block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
             fullPath,
             blocks.Count,
@@ -290,13 +321,71 @@ public sealed class RustFileContentStore(
             }
         }
 
-        log.LogInformation(
+        _log.LogInformation(
             "Restored file from managed block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
             fullTarget,
             totalWritten,
             blocks.Count);
 
         return totalWritten;
+    }
+
+    private void DisableNativeStore(Exception ex, string fullPath)
+    {
+        var switched = false;
+
+        lock (_nativeCapabilityLock)
+        {
+            if (_nativeStoreAvailable)
+            {
+                _nativeStoreAvailable = false;
+                switched = true;
+            }
+        }
+
+        if (switched)
+        {
+            _log.LogWarning(
+                ex,
+                "Native block-store entrypoints became unavailable. Switching store operation to managed mode. Path {Path}",
+                fullPath);
+        }
+        else
+        {
+            _log.LogDebug(
+                ex,
+                "Native block-store entrypoint call failed while already in managed store mode. Path {Path}",
+                fullPath);
+        }
+    }
+
+    private void DisableNativeRestore(Exception ex, string fullTarget)
+    {
+        var switched = false;
+
+        lock (_nativeCapabilityLock)
+        {
+            if (_nativeRestoreAvailable)
+            {
+                _nativeRestoreAvailable = false;
+                switched = true;
+            }
+        }
+
+        if (switched)
+        {
+            _log.LogWarning(
+                ex,
+                "Native block restore entrypoints became unavailable. Switching restore operation to managed mode. Target {Target}",
+                fullTarget);
+        }
+        else
+        {
+            _log.LogDebug(
+                ex,
+                "Native block restore entrypoint call failed while already in managed restore mode. Target {Target}",
+                fullTarget);
+        }
     }
 
     private static bool IsNativeBlocksUnavailable(Exception ex)

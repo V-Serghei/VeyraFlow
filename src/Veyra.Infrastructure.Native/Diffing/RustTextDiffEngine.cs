@@ -8,14 +8,27 @@ using Veyra.Infrastructure.Native.Interop;
 
 namespace Veyra.Infrastructure.Native.Diffing;
 
-public sealed class RustTextDiffEngine(
-    ManagedTextDiffEngine managed,
-    ILogger<RustTextDiffEngine> log) : ITextDiffEngine
+public sealed class RustTextDiffEngine : ITextDiffEngine
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private readonly ManagedTextDiffEngine _managed;
+    private readonly ILogger<RustTextDiffEngine> _log;
+    private readonly object _gate = new();
+
+    private bool _nativeDiffAvailable;
+
+    public RustTextDiffEngine(
+        ManagedTextDiffEngine managed,
+        ILogger<RustTextDiffEngine> log)
+    {
+        _managed = managed;
+        _log = log;
+        _nativeDiffAvailable = NativeRuntimeHealth.Probe().SupportsTextDiff;
+    }
 
     public async Task<TextDiffComputationDto> BuildDiffAsync(
         string leftFilePath,
@@ -24,6 +37,9 @@ public sealed class RustTextDiffEngine(
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+
+        if (!_nativeDiffAvailable)
+            return await _managed.BuildDiffAsync(leftFilePath, rightFilePath, maxLines, ct);
 
         try
         {
@@ -60,14 +76,37 @@ public sealed class RustTextDiffEngine(
         }
         catch (Exception ex) when (IsNativeUnavailable(ex))
         {
-            log.LogDebug(ex, "Native diff entrypoint is unavailable. Falling back to managed diff engine.");
+            DisableNativeDiff(ex);
         }
         catch (Exception ex)
         {
-            log.LogWarning(ex, "Native diff failed. Falling back to managed diff engine.");
+            _log.LogWarning(ex, "Native diff failed. Falling back to managed diff engine.");
         }
 
-        return await managed.BuildDiffAsync(leftFilePath, rightFilePath, maxLines, ct);
+        return await _managed.BuildDiffAsync(leftFilePath, rightFilePath, maxLines, ct);
+    }
+
+    private void DisableNativeDiff(Exception ex)
+    {
+        var switched = false;
+
+        lock (_gate)
+        {
+            if (_nativeDiffAvailable)
+            {
+                _nativeDiffAvailable = false;
+                switched = true;
+            }
+        }
+
+        if (switched)
+        {
+            _log.LogWarning(ex, "Native diff entrypoint became unavailable. Switching to managed diff engine.");
+        }
+        else
+        {
+            _log.LogDebug(ex, "Native diff unavailable. Managed diff engine remains active.");
+        }
     }
 
     private static bool IsNativeUnavailable(Exception ex)
@@ -145,4 +184,3 @@ public sealed class RustTextDiffEngine(
         public string? Text { get; init; }
     }
 }
-

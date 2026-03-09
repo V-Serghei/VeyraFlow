@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -78,7 +78,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanRestoreSelectedVersion))]
     [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
+    [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
     private ExplorerFileVersionViewModel? _selectedVersion;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    private ExplorerFileVersionViewModel? _compareLeftVersion;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    private ExplorerFileVersionViewModel? _compareRightVersion;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectedVersionHasNoContentBlocks))]
@@ -134,19 +143,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty] private bool _isSnapshotHistoryMenuOpen;
     [ObservableProperty] private bool _isDiffPreviewMenuOpen;
-    [ObservableProperty] private bool _isDiffPreviewLoading;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoDiffPreviewRows))]
+    private bool _isDiffPreviewLoading;
     [ObservableProperty] private string _diffPreviewTitle = string.Empty;
     [ObservableProperty] private string _diffPreviewSummary = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasDiffPreviewColumns))]
-    [NotifyPropertyChangedFor(nameof(HasNoDiffPreviewColumns))]
-    private string _diffPreviewLeftColumn = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasDiffPreviewColumns))]
-    [NotifyPropertyChangedFor(nameof(HasNoDiffPreviewColumns))]
-    private string _diffPreviewRightColumn = string.Empty;
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
     public bool HasNoSelectedItem => !HasSelectedItem;
@@ -157,13 +158,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasNoSnapshotHistory => !HasSnapshotHistory;
     public bool HasNoSelectedSnapshot => SelectedSnapshot is null;
     public bool HasNoSnapshotFiles => SelectedSnapshot is not null && !HasSnapshotFiles;
-    public bool HasDiffPreviewColumns
-        => !string.IsNullOrWhiteSpace(DiffPreviewLeftColumn) || !string.IsNullOrWhiteSpace(DiffPreviewRightColumn);
-    public bool HasNoDiffPreviewColumns => !HasDiffPreviewColumns;
+    public bool HasDiffPreviewRows => DiffPreviewRows.Count > 0;
+    public bool HasNoDiffPreviewRows => !IsDiffPreviewLoading && !HasDiffPreviewRows;
     public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning;
     public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
     public bool CanRestoreSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanRunDiffForSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
+    public bool CanCompareSelectedVersionPair
+        => CompareLeftVersion is { HasContentBlocks: true, IsDeletionMarker: false } left
+           && CompareRightVersion is { HasContentBlocks: true, IsDeletionMarker: false } right
+           && left.FileVersionId != right.FileVersionId;
 
     public ObservableCollection<ExplorerTreeNodeViewModel> TreeNodes { get; } = [];
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
@@ -171,6 +175,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public ObservableCollection<RepositoryPendingChangeViewModel> PendingChanges { get; } = [];
     public ObservableCollection<RepositorySnapshotHistoryEntryViewModel> SnapshotHistory { get; } = [];
     public ObservableCollection<RepositorySnapshotFileChangeViewModel> SnapshotFiles { get; } = [];
+    public ObservableCollection<DiffPreviewRowViewModel> DiffPreviewRows { get; } = [];
 
     public RepositoryExplorerViewModel(
         IMediator mediator,
@@ -180,6 +185,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _mediator = mediator;
         _windows = windows;
         _log = log;
+        DiffPreviewRows.CollectionChanged += OnDiffPreviewRowsCollectionChanged;
     }
 
     public async Task LoadAsync(int repositoryId)
@@ -193,6 +199,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreview = null;
             SelectedItem = null;
             SelectedVersion = null;
+            CompareLeftVersion = null;
+            CompareRightVersion = null;
             FileVersions.Clear();
             PendingChanges.Clear();
             SnapshotHistory.Clear();
@@ -209,8 +217,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsDiffPreviewLoading = false;
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
-            DiffPreviewLeftColumn = string.Empty;
-            DiffPreviewRightColumn = string.Empty;
+            DiffPreviewRows.Clear();
             PendingChangesSummary = "Изменений с последнего снимка нет.";
             LastSnapshotLabel = "Снимок еще не создан.";
 
@@ -251,8 +258,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsDiffPreviewLoading = false;
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
-            DiffPreviewLeftColumn = string.Empty;
-            DiffPreviewRightColumn = string.Empty;
+            DiffPreviewRows.Clear();
             PendingChangesSummary = "Не удалось загрузить изменения.";
             LastSnapshotLabel = "Снимок еще не создан.";
             IsEmpty = true;
@@ -307,6 +313,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnSelectedVersionChanged(ExplorerFileVersionViewModel? value)
     {
         SelectedVersionHasContentBlocks = value?.HasContentBlocks == true;
+
+        if (value is { HasContentBlocks: true, IsDeletionMarker: false })
+            CompareLeftVersion = value;
+
+        OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
     }
 
     private void SelectItemFromSnapshotFile(RepositorySnapshotFileChangeViewModel value)
@@ -595,6 +606,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             return;
         }
 
+        CompareLeftVersion = selectedVersion;
+        CompareRightVersion = previous;
+
+        await ShowDiffPreviewAsync(selectedVersion, previous);
+    }
+
+
+    [RelayCommand]
+    private async Task CompareSelectedVersionsAsync()
+    {
+        if (!CanCompareSelectedVersionPair || CompareLeftVersion is null || CompareRightVersion is null)
+        {
+            ErrorMessage = "Select two different versions with stored content to compare.";
+            return;
+        }
+
+        await ShowDiffPreviewAsync(CompareLeftVersion, CompareRightVersion);
+    }
+
+    private async Task ShowDiffPreviewAsync(
+        ExplorerFileVersionViewModel leftVersion,
+        ExplorerFileVersionViewModel rightVersion)
+    {
         ErrorMessage = null;
         DiffPreview = null;
         VersionActionMessage = null;
@@ -603,30 +637,28 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         IsDiffPreviewMenuOpen = true;
         DiffPreviewTitle = SelectedItem?.Name ?? string.Empty;
         DiffPreviewSummary = "Building preview...";
-        DiffPreviewLeftColumn = string.Empty;
-        DiffPreviewRightColumn = string.Empty;
+        DiffPreviewRows.Clear();
 
         OperationResult<TextDiffResultDto> diffResult;
 
         try
         {
             diffResult = await Task.Run(() => _mediator.Send(new GetTextDiffQuery(
-                selectedVersion.FileVersionId,
-                previous.FileVersionId,
+                leftVersion.FileVersionId,
+                rightVersion.FileVersionId,
                 4000)));
         }
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "Failed to build diff preview. RepositoryId {RepositoryId}. VersionId {VersionId}",
+                "Failed to build diff preview. RepositoryId {RepositoryId}. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 RepositoryId,
-                selectedVersion.FileVersionId);
+                leftVersion.FileVersionId,
+                rightVersion.FileVersionId);
 
-            var failureText = "Unable to build diff preview.";
-            ErrorMessage = failureText;
-            DiffPreviewSummary = failureText;
-            DiffPreviewLeftColumn = string.Empty;
-            DiffPreviewRightColumn = string.Empty;
+            ErrorMessage = "Unable to build diff preview.";
+            DiffPreviewSummary = ErrorMessage;
+            DiffPreviewRows.Clear();
             IsDiffPreviewLoading = false;
             return;
         }
@@ -635,26 +667,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!diffResult.Success || diffResult.Value is null)
         {
-            var failureText = diffResult.Error ?? "Unable to build diff preview.";
-            ErrorMessage = failureText;
-            DiffPreviewSummary = failureText;
-            DiffPreviewLeftColumn = string.Empty;
-            DiffPreviewRightColumn = string.Empty;
+            ErrorMessage = diffResult.Error ?? "Unable to build diff preview.";
+            DiffPreviewSummary = ErrorMessage;
+            DiffPreviewRows.Clear();
             return;
         }
 
         var value = diffResult.Value;
         DiffPreviewTitle = SelectedItem?.Name ?? value.RelativePath;
-        DiffPreviewSummary = $"{value.RelativePath}   +{value.AddedLines} / -{value.RemovedLines}" +
-                             (value.IsTruncated ? "  (truncated)" : string.Empty);
+        DiffPreviewSummary = $"{value.RelativePath}   +{value.AddedLines} / -{value.RemovedLines}"
+                             + (value.IsTruncated ? "  (truncated)" : string.Empty);
 
-        BuildSideBySideDiffColumns(value.Lines, value.Hunks, out var leftColumn, out var rightColumn);
-
-        DiffPreviewLeftColumn = leftColumn;
-        DiffPreviewRightColumn = rightColumn;
+        DiffPreviewRows.Clear();
+        foreach (var row in BuildDiffPreviewRows(value.Lines, value.Hunks))
+            DiffPreviewRows.Add(row);
         VersionActionMessage = $"Diff ready: +{value.AddedLines} / -{value.RemovedLines}";
     }
-
     private async Task<bool> ExecuteScanAsync(
         bool saveFileVersions,
         string triggerOverride,
@@ -742,14 +770,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         FileVersions.Clear();
         SelectedVersion = null;
+        CompareLeftVersion = null;
+        CompareRightVersion = null;
         DiffPreview = null;
         VersionActionMessage = null;
         IsDiffPreviewMenuOpen = false;
         IsDiffPreviewLoading = false;
         DiffPreviewTitle = string.Empty;
         DiffPreviewSummary = string.Empty;
-        DiffPreviewLeftColumn = string.Empty;
-        DiffPreviewRightColumn = string.Empty;
+        DiffPreviewRows.Clear();
 
         if (item is null || item.IsDirectory || RepositoryId == 0)
             return;
@@ -787,6 +816,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 SelectedVersion = FileVersions.FirstOrDefault(v => v.HasContentBlocks && !v.IsDeletionMarker)
                                   ?? FileVersions.FirstOrDefault();
             }
+
+            InitializeVersionComparePair();
         }
         catch (Exception ex)
         {
@@ -802,6 +833,39 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+
+    private void InitializeVersionComparePair()
+    {
+        var comparable = FileVersions
+            .Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
+            .ToList();
+
+        if (comparable.Count == 0)
+        {
+            CompareLeftVersion = null;
+            CompareRightVersion = null;
+            OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
+            return;
+        }
+
+        if (SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false } selected)
+        {
+            CompareLeftVersion = selected;
+
+            var index = comparable.FindIndex(v => v.FileVersionId == selected.FileVersionId);
+            CompareRightVersion = index >= 0
+                ? comparable.Skip(index + 1).FirstOrDefault()
+                  ?? comparable.FirstOrDefault(v => v.FileVersionId != selected.FileVersionId)
+                : comparable.FirstOrDefault(v => v.FileVersionId != selected.FileVersionId);
+        }
+        else
+        {
+            CompareLeftVersion = comparable[0];
+            CompareRightVersion = comparable.Skip(1).FirstOrDefault();
+        }
+
+        OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
+    }
     private async Task LoadPendingChangesAsync()
     {
         var pending = await _mediator.Send(new GetRepositoryPendingChangesQuery(RepositoryId, 400));
@@ -1344,95 +1408,187 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static string? NormalizeParent(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;
 
-    private static void BuildSideBySideDiffColumns(
-        IReadOnlyList<TextDiffLineDto> lines,
-        IReadOnlyList<TextDiffHunkDto> hunks,
-        out string left,
-        out string right)
+    private void OnDiffPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        var leftBuilder = new StringBuilder();
-        var rightBuilder = new StringBuilder();
+        OnPropertyChanged(nameof(HasDiffPreviewRows));
+        OnPropertyChanged(nameof(HasNoDiffPreviewRows));
+    }
 
+    private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
+        IReadOnlyList<TextDiffLineDto> lines,
+        IReadOnlyList<TextDiffHunkDto> hunks)
+    {
         if (lines.Count == 0)
-        {
-            left = string.Empty;
-            right = string.Empty;
-            return;
-        }
+            return [];
+
+        var rows = new List<DiffPreviewRowViewModel>(lines.Count + (hunks.Count * 3));
 
         if (hunks.Count > 0)
         {
-            var firstHunk = true;
             foreach (var hunk in hunks.OrderBy(h => h.Sequence))
             {
                 var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
                 var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
 
-                if (!firstHunk)
-                {
-                    AppendDiffColumnLine(leftBuilder, null, '~', "...");
-                    AppendDiffColumnLine(rightBuilder, null, '~', "...");
-                }
+                rows.Add(DiffPreviewRowViewModel.CreateHunkHeader(
+                    FormatHunkRange(hunk.OldStartLine, hunk.OldLineCount),
+                    FormatHunkRange(hunk.NewStartLine, hunk.NewLineCount),
+                    NormalizeChangeKindLabel(hunk.ChangeKind)));
 
-                for (var i = start; i <= end; i++)
-                {
-                    var line = lines[i];
-                    switch (line.Kind)
-                    {
-                        case "remove":
-                            AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
-                            AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
-                            break;
-                        case "add":
-                            AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
-                            AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
-                            break;
-                        default:
-                            AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
-                            AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
-                            break;
-                    }
-                }
-
-                firstHunk = false;
+                AppendHunkRows(lines, start, end, rows);
             }
         }
         else
         {
-            foreach (var line in lines)
-            {
-                switch (line.Kind)
-                {
-                    case "remove":
-                        AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, '-', line.Text);
-                        AppendDiffColumnLine(rightBuilder, null, ' ', string.Empty);
-                        break;
-                    case "add":
-                        AppendDiffColumnLine(leftBuilder, null, ' ', string.Empty);
-                        AppendDiffColumnLine(rightBuilder, line.RightLineNumber, '+', line.Text);
-                        break;
-                    default:
-                        AppendDiffColumnLine(leftBuilder, line.LeftLineNumber, ' ', line.Text);
-                        AppendDiffColumnLine(rightBuilder, line.RightLineNumber, ' ', line.Text);
-                        break;
-                }
-            }
+            rows.Add(DiffPreviewRowViewModel.CreateHunkHeader("(full)", "(full)", "context"));
+            AppendHunkRows(lines, 0, lines.Count - 1, rows);
         }
 
-        left = leftBuilder.ToString().TrimEnd();
-        right = rightBuilder.ToString().TrimEnd();
+        return rows;
     }
-    private static void AppendDiffColumnLine(StringBuilder builder, int? lineNumber, char marker, string text)
-    {
-        if (lineNumber is null)
-            builder.Append("    ");
-        else
-            builder.Append(lineNumber.Value.ToString("D4"));
 
-        builder.Append(' ');
-        builder.Append(marker);
-        builder.Append(' ');
-        builder.AppendLine(text ?? string.Empty);
+    private static void AppendHunkRows(
+        IReadOnlyList<TextDiffLineDto> lines,
+        int startInclusive,
+        int endInclusive,
+        ICollection<DiffPreviewRowViewModel> rows)
+    {
+        if (startInclusive > endInclusive)
+            return;
+
+        var index = startInclusive;
+        while (index <= endInclusive)
+        {
+            var kind = NormalizeDiffKind(lines[index].Kind);
+
+            if (kind == "remove")
+            {
+                var removed = new List<TextDiffLineDto>();
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "remove")
+                {
+                    removed.Add(lines[index]);
+                    index++;
+                }
+
+                var added = new List<TextDiffLineDto>();
+                var addCursor = index;
+                while (addCursor <= endInclusive && NormalizeDiffKind(lines[addCursor].Kind) == "add")
+                {
+                    added.Add(lines[addCursor]);
+                    addCursor++;
+                }
+
+                if (added.Count > 0)
+                    index = addCursor;
+
+                var pairCount = Math.Max(removed.Count, added.Count);
+                for (var i = 0; i < pairCount; i++)
+                {
+                    var left = i < removed.Count ? removed[i] : null;
+                    var right = i < added.Count ? added[i] : null;
+                    rows.Add(CreatePairedDiffRow(left, right));
+                }
+
+                continue;
+            }
+
+            if (kind == "add")
+            {
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "add")
+                {
+                    rows.Add(CreatePairedDiffRow(null, lines[index]));
+                    index++;
+                }
+
+                continue;
+            }
+
+            rows.Add(CreatePairedDiffRow(lines[index], lines[index]));
+            index++;
+        }
+    }
+
+    private static DiffPreviewRowViewModel CreatePairedDiffRow(
+        TextDiffLineDto? left,
+        TextDiffLineDto? right)
+    {
+        var leftKind = NormalizeDiffKind(left?.Kind);
+        var rightKind = NormalizeDiffKind(right?.Kind);
+
+        return new DiffPreviewRowViewModel
+        {
+            LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
+            LeftMarker = leftKind switch
+            {
+                "remove" => "-",
+                "equal" => "|",
+                _ => " "
+            },
+            LeftText = left?.Text ?? string.Empty,
+            LeftBackground = leftKind switch
+            {
+                "remove" => "#45202B",
+                "equal" => "#173149",
+                _ => "#10233A"
+            },
+            LeftMarkerForeground = leftKind switch
+            {
+                "remove" => "#FF8FA3",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
+            },
+            RightLineNumber = right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
+            RightMarker = rightKind switch
+            {
+                "add" => "+",
+                "equal" => "|",
+                _ => " "
+            },
+            RightText = right?.Text ?? string.Empty,
+            RightBackground = rightKind switch
+            {
+                "add" => "#1E4A39",
+                "equal" => "#173149",
+                _ => "#10233A"
+            },
+            RightMarkerForeground = rightKind switch
+            {
+                "add" => "#89FFD0",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
+            }
+        };
+    }
+
+    private static string NormalizeChangeKindLabel(string? kind)
+    {
+        if (string.Equals(kind, "added", StringComparison.OrdinalIgnoreCase))
+            return "added";
+
+        if (string.Equals(kind, "removed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(kind, "deleted", StringComparison.OrdinalIgnoreCase))
+            return "removed";
+
+        return "modified";
+    }
+
+    private static string FormatHunkRange(int startLine, int count)
+        => count <= 0
+            ? $"{Math.Max(0, startLine)}"
+            : $"{Math.Max(0, startLine)},{count}";
+
+    private static string FormatLineNumber(int? lineNumber)
+        => lineNumber is int value ? value.ToString("D4") : string.Empty;
+
+    private static string NormalizeDiffKind(string? kind)
+    {
+        if (string.Equals(kind, "add", StringComparison.OrdinalIgnoreCase))
+            return "add";
+
+        if (string.Equals(kind, "remove", StringComparison.OrdinalIgnoreCase))
+            return "remove";
+
+        return "equal";
     }
 
     private static string FormatLastActivity(DateTime utc)
@@ -1452,6 +1608,25 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

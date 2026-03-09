@@ -14,6 +14,7 @@ public class FileVersionTextDiff
     public int AddedLines { get; set; }
     public int RemovedLines { get; set; }
     public bool IsTruncated { get; set; }
+    public int StorageFormatVersion { get; set; } = 2;
 
     public string LinesJson { get; set; } = "[]";
 
@@ -26,5 +27,7 @@ public class FileVersionTextDiff
     public ICollection<FileVersionTextDiffHunk> Hunks { get; set; } = new List<FileVersionTextDiffHunk>();
     public ICollection<FileVersionTextDiffLine> Lines { get; set; } = new List<FileVersionTextDiffLine>();
 }
+
+
 
 

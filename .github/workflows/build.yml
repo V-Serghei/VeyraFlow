@@ -34,7 +34,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '9.0.x'
+        dotnet-version: '10.0.x'
 
     - name: Cache NuGet
       uses: actions/cache@v4
@@ -108,6 +108,20 @@ jobs:
 
     - name: Build .NET solution
       run: dotnet build --no-restore --configuration Release
+    - name: Native smoke-check (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $env:VEYRA_CORE_PATH = (Resolve-Path "native\veyra_core\target\${{ matrix.rust-target }}\release").Path
+        dotnet run --project tools/NativeSmokeCheck/NativeSmokeCheck.csproj --configuration Release
+
+    - name: Native smoke-check (Unix)
+      if: matrix.os != 'windows-latest'
+      shell: bash
+      run: |
+        set -euxo pipefail
+        export VEYRA_CORE_PATH="$PWD/native/veyra_core/target/${{ matrix.rust-target }}/release"
+        dotnet run --project tools/NativeSmokeCheck/NativeSmokeCheck.csproj --configuration Release
 
     - name: Test .NET solution
       run: dotnet test --no-build --configuration Release --verbosity normal
@@ -165,7 +179,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: veyraflow-${{ matrix.rid }}
-        path: src/Veyra.Desktop/bin/Release/net9.0/${{ matrix.rid }}/publish/
+        path: src/Veyra.Desktop/bin/Release/net10.0/${{ matrix.rid }}/publish/
 
     - name: Upload sync agent artifact (Windows)
       if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
@@ -232,3 +246,4 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+

@@ -218,81 +218,172 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         if (lines.Count == 0)
             return [];
 
-        var rows = new List<SnapshotDiffRowItemViewModel>(lines.Count + 8);
+        var rows = new List<SnapshotDiffRowItemViewModel>(lines.Count + (hunks.Count * 3));
 
         if (hunks.Count > 0)
         {
-            var firstHunk = true;
             foreach (var hunk in hunks.OrderBy(h => h.Sequence))
             {
                 var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
                 var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
 
-                if (!firstHunk)
-                    rows.Add(SnapshotDiffRowItemViewModel.CreateSeparator());
+                rows.Add(SnapshotDiffRowItemViewModel.CreateHunkHeader(
+                    FormatHunkRange(hunk.OldStartLine, hunk.OldLineCount),
+                    FormatHunkRange(hunk.NewStartLine, hunk.NewLineCount),
+                    NormalizeChangeKindLabel(hunk.ChangeKind)));
 
-                for (var i = start; i <= end; i++)
-                    rows.Add(CreateDiffRow(lines[i]));
-
-                firstHunk = false;
+                AppendHunkRows(lines, start, end, rows);
             }
         }
         else
         {
-            foreach (var line in lines)
-                rows.Add(CreateDiffRow(line));
+            rows.Add(SnapshotDiffRowItemViewModel.CreateHunkHeader("(full)", "(full)", "context"));
+            AppendHunkRows(lines, 0, lines.Count - 1, rows);
         }
 
         return rows;
     }
 
-    private static SnapshotDiffRowItemViewModel CreateDiffRow(TextDiffLineDto line)
+    private static void AppendHunkRows(
+        IReadOnlyList<TextDiffLineDto> lines,
+        int startInclusive,
+        int endInclusive,
+        ICollection<SnapshotDiffRowItemViewModel> rows)
     {
-        var normalizedKind = (line.Kind ?? string.Empty).Trim().ToLowerInvariant();
+        if (startInclusive > endInclusive)
+            return;
 
-        return normalizedKind switch
+        var index = startInclusive;
+        while (index <= endInclusive)
         {
-            "remove" => new SnapshotDiffRowItemViewModel
+            var kind = NormalizeDiffKind(lines[index].Kind);
+
+            if (kind == "remove")
             {
-                LeftLineNumber = FormatLineNumber(line.LeftLineNumber),
-                LeftMarker = "-",
-                LeftText = line.Text ?? string.Empty,
-                LeftBackground = "#332028",
-                LeftMarkerForeground = "#FF9AA5",
-                RightLineNumber = string.Empty,
-                RightMarker = " ",
-                RightText = string.Empty,
-                RightBackground = "#17263A",
-                RightMarkerForeground = "#8FA5BF"
+                var removed = new List<TextDiffLineDto>();
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "remove")
+                {
+                    removed.Add(lines[index]);
+                    index++;
+                }
+
+                var added = new List<TextDiffLineDto>();
+                var addCursor = index;
+                while (addCursor <= endInclusive && NormalizeDiffKind(lines[addCursor].Kind) == "add")
+                {
+                    added.Add(lines[addCursor]);
+                    addCursor++;
+                }
+
+                if (added.Count > 0)
+                    index = addCursor;
+
+                var pairCount = Math.Max(removed.Count, added.Count);
+                for (var i = 0; i < pairCount; i++)
+                {
+                    var left = i < removed.Count ? removed[i] : null;
+                    var right = i < added.Count ? added[i] : null;
+                    rows.Add(CreatePairedDiffRow(left, right));
+                }
+
+                continue;
+            }
+
+            if (kind == "add")
+            {
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "add")
+                {
+                    rows.Add(CreatePairedDiffRow(null, lines[index]));
+                    index++;
+                }
+
+                continue;
+            }
+
+            rows.Add(CreatePairedDiffRow(lines[index], lines[index]));
+            index++;
+        }
+    }
+
+    private static SnapshotDiffRowItemViewModel CreatePairedDiffRow(
+        TextDiffLineDto? left,
+        TextDiffLineDto? right)
+    {
+        var leftKind = NormalizeDiffKind(left?.Kind);
+        var rightKind = NormalizeDiffKind(right?.Kind);
+
+        return new SnapshotDiffRowItemViewModel
+        {
+            LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
+            LeftMarker = leftKind switch
+            {
+                "remove" => "-",
+                "equal" => "|",
+                _ => " "
             },
-            "add" => new SnapshotDiffRowItemViewModel
+            LeftText = left?.Text ?? string.Empty,
+            LeftBackground = leftKind switch
             {
-                LeftLineNumber = string.Empty,
-                LeftMarker = " ",
-                LeftText = string.Empty,
-                LeftBackground = "#17263A",
-                LeftMarkerForeground = "#8FA5BF",
-                RightLineNumber = FormatLineNumber(line.RightLineNumber),
-                RightMarker = "+",
-                RightText = line.Text ?? string.Empty,
-                RightBackground = "#1E3A31",
-                RightMarkerForeground = "#8AF5C5"
+                "remove" => "#45202B",
+                "equal" => "#173149",
+                _ => "#10233A"
             },
-            _ => new SnapshotDiffRowItemViewModel
+            LeftMarkerForeground = leftKind switch
             {
-                LeftLineNumber = FormatLineNumber(line.LeftLineNumber),
-                LeftMarker = " ",
-                LeftText = line.Text ?? string.Empty,
-                LeftBackground = "#1B2C42",
-                LeftMarkerForeground = "#8FA5BF",
-                RightLineNumber = FormatLineNumber(line.RightLineNumber),
-                RightMarker = " ",
-                RightText = line.Text ?? string.Empty,
-                RightBackground = "#1B2C42",
-                RightMarkerForeground = "#8FA5BF"
+                "remove" => "#FF8FA3",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
+            },
+            RightLineNumber = right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
+            RightMarker = rightKind switch
+            {
+                "add" => "+",
+                "equal" => "|",
+                _ => " "
+            },
+            RightText = right?.Text ?? string.Empty,
+            RightBackground = rightKind switch
+            {
+                "add" => "#1E4A39",
+                "equal" => "#173149",
+                _ => "#10233A"
+            },
+            RightMarkerForeground = rightKind switch
+            {
+                "add" => "#89FFD0",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
             }
         };
     }
+
+    private static string NormalizeDiffKind(string? kind)
+    {
+        if (string.Equals(kind, "remove", StringComparison.OrdinalIgnoreCase))
+            return "remove";
+
+        if (string.Equals(kind, "add", StringComparison.OrdinalIgnoreCase))
+            return "add";
+
+        return "equal";
+    }
+
+    private static string NormalizeChangeKindLabel(string? kind)
+    {
+        if (string.Equals(kind, "added", StringComparison.OrdinalIgnoreCase))
+            return "added";
+
+        if (string.Equals(kind, "removed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(kind, "deleted", StringComparison.OrdinalIgnoreCase))
+            return "removed";
+
+        return "modified";
+    }
+
+    private static string FormatHunkRange(int startLine, int count)
+        => count <= 0
+            ? $"{Math.Max(0, startLine)}"
+            : $"{Math.Max(0, startLine)},{count}";
 
     private static string FormatLineNumber(int? lineNumber)
         => lineNumber is int value ? value.ToString("D4") : string.Empty;
@@ -311,3 +402,4 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoPreviewRows));
     }
 }
+

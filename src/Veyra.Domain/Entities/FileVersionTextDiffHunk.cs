@@ -8,6 +8,8 @@ public class FileVersionTextDiffHunk
     public FileVersionTextDiff Diff { get; set; } = null!;
 
     public int Sequence { get; set; }
+    public int StartLineSequence { get; set; }
+    public int EndLineSequence { get; set; }
 
     public int OldStartLine { get; set; }
     public int OldLineCount { get; set; }
@@ -23,4 +25,5 @@ public class FileVersionTextDiffHunk
 
     public ICollection<FileVersionTextDiffLine> Lines { get; set; } = new List<FileVersionTextDiffLine>();
 }
+
 

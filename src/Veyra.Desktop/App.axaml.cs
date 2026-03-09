@@ -12,6 +12,7 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Infrastructure.Data.Persistence;
+using Veyra.Infrastructure.Native;
 using AvaloniaApplication = Avalonia.Application;
 using DependencyInjection = Veyra.Desktop.CompositionRoot.DependencyInjection;
 
@@ -60,6 +61,21 @@ public partial class App : AvaloniaApplication
             BackfillSoftDeleteMigrationHistoryIfNeeded(db);
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
             db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+            var nativeHealth = NativeRuntimeHealth.Probe();
+            if (nativeHealth.IsHealthy)
+            {
+                Log.Information(
+                    "Native runtime smoke-check passed. Library {Path}",
+                    nativeHealth.LoadedPath ?? "(unknown)");
+            }
+            else
+            {
+                Log.Warning(
+                    "Native runtime smoke-check failed. Library {Path}. Error {Error}. Missing entrypoints {Missing}",
+                    nativeHealth.LoadedPath ?? "(not loaded)",
+                    nativeHealth.ErrorMessage ?? "(none)",
+                    string.Join(", ", nativeHealth.MissingEntrypoints));
+            }
 
             var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
             var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
@@ -465,14 +481,63 @@ public partial class App : AvaloniaApplication
                 createDiffLines.CommandText = "CREATE TABLE IF NOT EXISTS \"FileVersionTextDiffLines\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_FileVersionTextDiffLines\" PRIMARY KEY AUTOINCREMENT, \"DiffId\" INTEGER NOT NULL, \"Sequence\" INTEGER NOT NULL, \"Kind\" TEXT NOT NULL, \"LeftLineNumber\" INTEGER NULL, \"RightLineNumber\" INTEGER NULL, \"HunkId\" INTEGER NULL, \"InHunkSequence\" INTEGER NULL, \"TextLineAtomId\" INTEGER NOT NULL, \"CreatedAt\" TEXT NOT NULL, CONSTRAINT \"FK_FileVersionTextDiffLines_FileVersionTextDiffs_DiffId\" FOREIGN KEY (\"DiffId\") REFERENCES \"FileVersionTextDiffs\" (\"Id\") ON DELETE CASCADE, CONSTRAINT \"FK_FileVersionTextDiffLines_TextLineAtoms_TextLineAtomId\" FOREIGN KEY (\"TextLineAtomId\") REFERENCES \"TextLineAtoms\" (\"Id\") ON DELETE CASCADE);";
                 createDiffLines.ExecuteNonQuery();
             }
+
             using (var createHunks = connection.CreateCommand())
             {
                 createHunks.CommandText = "CREATE TABLE IF NOT EXISTS \"FileVersionTextDiffHunks\" (\"Id\" INTEGER NOT NULL CONSTRAINT \"PK_FileVersionTextDiffHunks\" PRIMARY KEY AUTOINCREMENT, \"DiffId\" INTEGER NOT NULL, \"Sequence\" INTEGER NOT NULL, \"OldStartLine\" INTEGER NOT NULL, \"OldLineCount\" INTEGER NOT NULL, \"NewStartLine\" INTEGER NOT NULL, \"NewLineCount\" INTEGER NOT NULL, \"ChangeKind\" TEXT NOT NULL, \"CreatedAt\" TEXT NOT NULL, CONSTRAINT \"FK_FileVersionTextDiffHunks_FileVersionTextDiffs_DiffId\" FOREIGN KEY (\"DiffId\") REFERENCES \"FileVersionTextDiffs\" (\"Id\") ON DELETE CASCADE);";
                 createHunks.ExecuteNonQuery();
             }
 
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffs", "StorageFormatVersion", "INTEGER NOT NULL DEFAULT 2");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffs", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffs", "DeletedAt", "TEXT NULL");
             EnsureSqliteColumnExists(connection, "FileVersionTextDiffLines", "HunkId", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "FileVersionTextDiffLines", "InHunkSequence", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffHunks", "StartLineSequence", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "FileVersionTextDiffHunks", "EndLineSequence", "INTEGER NOT NULL DEFAULT 0");
+
+            using (var backfillRanges = connection.CreateCommand())
+            {
+                backfillRanges.CommandText = @"
+UPDATE ""FileVersionTextDiffHunks""
+SET ""StartLineSequence"" = COALESCE((
+        SELECT MIN(l.""Sequence"")
+        FROM ""FileVersionTextDiffLines"" AS l
+        WHERE l.""HunkId"" = ""FileVersionTextDiffHunks"".""Id""), 0),
+    ""EndLineSequence"" = COALESCE((
+        SELECT MAX(l.""Sequence"")
+        FROM ""FileVersionTextDiffLines"" AS l
+        WHERE l.""HunkId"" = ""FileVersionTextDiffHunks"".""Id""), 0)
+;";
+                backfillRanges.ExecuteNonQuery();
+            }
+
+            using (var upgradeFormat = connection.CreateCommand())
+            {
+                upgradeFormat.CommandText = @"
+UPDATE ""FileVersionTextDiffs""
+SET ""StorageFormatVersion"" = 2
+WHERE EXISTS (
+      SELECT 1
+      FROM ""FileVersionTextDiffLines"" AS l
+      WHERE l.""DiffId"" = ""FileVersionTextDiffs"".""Id"")
+  AND EXISTS (
+      SELECT 1
+      FROM ""FileVersionTextDiffHunks"" AS h
+      WHERE h.""DiffId"" = ""FileVersionTextDiffs"".""Id"");";
+                upgradeFormat.ExecuteNonQuery();
+            }
+
+            using (var invalidateLegacy = connection.CreateCommand())
+            {
+                invalidateLegacy.CommandText = @"
+UPDATE ""FileVersionTextDiffs""
+SET ""IsDeleted"" = 1,
+    ""DeletedAt"" = COALESCE(""DeletedAt"", CURRENT_TIMESTAMP)
+WHERE ""StorageFormatVersion"" < 2
+  AND NOT (""IsDeleted"");";
+                invalidateLegacy.ExecuteNonQuery();
+            }
 
             using (var createIdx1 = connection.CreateCommand())
             {
@@ -605,5 +670,12 @@ public partial class App : AvaloniaApplication
         Log.CloseAndFlush();
     }
 }
+
+
+
+
+
+
+
 
 

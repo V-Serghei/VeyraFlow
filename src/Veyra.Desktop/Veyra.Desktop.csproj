@@ -8,6 +8,13 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <VeyraCoreNativeWinPath Condition="Exists('..\..\native\veyra_core\target\x86_64-pc-windows-msvc\release\veyra_core.dll')">..\..\native\veyra_core\target\x86_64-pc-windows-msvc\release\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\release\veyra_core.dll')">..\..\native\veyra_core\target\release\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\x86_64-pc-windows-msvc\debug\veyra_core.dll')">..\..\native\veyra_core\target\x86_64-pc-windows-msvc\debug\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\debug\veyra_core.dll')">..\..\native\veyra_core\target\debug\veyra_core.dll</VeyraCoreNativeWinPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <Folder Include="Views\Controls\" />
@@ -41,11 +48,13 @@
   <ItemGroup>
     <None Include="runtimes\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </None>
 
-    <None Include="..\..\native\veyra_core\target\release\veyra_core.dll" Condition="Exists('..\..\native\veyra_core\target\release\veyra_core.dll')">
+    <None Include="$(VeyraCoreNativeWinPath)" Condition="'$(VeyraCoreNativeWinPath)' != ''">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <Link>runtimes\win-x64\native\veyra_core.dll</Link>
     </None>
   </ItemGroup>

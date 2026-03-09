@@ -2,12 +2,46 @@ using System.Buffers;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using Veyra.Infrastructure.Native;
 
 namespace Veyra.Infrastructure.Native.Interop;
 
 internal static class VeyraCoreNative
 {
     private const string LibraryName = "veyra_core";
+
+    internal const string EntryScanDirectory = "veyra_scan_directory_utf8";
+    internal const string EntryScanDirectoryLimited = "veyra_scan_directory_limited_utf8";
+    internal const string EntryScanDirectoryLimitedV2 = "veyra_scan_directory_limited_v2_utf8";
+    internal const string EntryStoreFileBlocks = "veyra_store_file_blocks_utf8";
+    internal const string EntryRestoreFileBlocks = "veyra_restore_file_blocks_utf8";
+    internal const string EntryBuildTextDiff = "veyra_build_text_diff_utf8";
+    internal const string EntryCompareSnapshotLinks = "veyra_compare_snapshot_links_utf8";
+    internal const string EntryCompareRepositoryPaths = "veyra_compare_repository_paths_utf8";
+    internal const string EntryPlanRepositoryVersions = "veyra_plan_repository_versions_utf8";
+    internal const string EntryLastError = "veyra_last_error_utf8";
+
+    private static readonly string[] RequiredEntrypoints =
+    [
+        EntryLastError,
+        EntryScanDirectory,
+        EntryStoreFileBlocks,
+        EntryRestoreFileBlocks,
+        EntryBuildTextDiff,
+        EntryCompareSnapshotLinks,
+        EntryCompareRepositoryPaths,
+        EntryPlanRepositoryVersions
+    ];
+
+    private static readonly string[] OptionalEntrypoints =
+    [
+        EntryScanDirectoryLimited,
+        EntryScanDirectoryLimitedV2
+    ];
+
+    private static readonly Lazy<NativeLibraryProbe> LibraryProbe = new(
+        ProbeNativeLibrary,
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
     private delegate int NativeUtf8Writer(byte[]? output, ulong outputLen, out ulong written);
 
@@ -67,6 +101,7 @@ internal static class VeyraCoreNative
         byte[]? output,
         ulong outputLen,
         out ulong written);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_compare_snapshot_links_utf8(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string currentStatesJson,
@@ -74,6 +109,7 @@ internal static class VeyraCoreNative
         byte[]? output,
         ulong outputLen,
         out ulong written);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_compare_repository_paths_utf8(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string currentStatesJson,
@@ -82,17 +118,88 @@ internal static class VeyraCoreNative
         byte[]? output,
         ulong outputLen,
         out ulong written);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_plan_repository_versions_utf8(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string statesJson,
         byte[]? output,
         ulong outputLen,
         out ulong written);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_last_error_utf8(
         byte[]? output,
         ulong outputLen,
         out ulong written);
+
+    internal static NativeRuntimeHealthReport ProbeRuntimeHealth()
+    {
+        var probe = LibraryProbe.Value;
+        var candidatePaths = probe.CandidatePaths;
+
+        if (probe.Handle == IntPtr.Zero)
+        {
+            return new NativeRuntimeHealthReport(
+                IsLoaded: false,
+                IsHealthy: false,
+                SupportsScan: false,
+                SupportsStoreFileBlocks: false,
+                SupportsRestoreFileBlocks: false,
+                SupportsTextDiff: false,
+                SupportsSnapshotComparison: false,
+                SupportsRepositoryPathComparison: false,
+                SupportsVersionPlanning: false,
+                LoadedPath: null,
+                ErrorMessage: probe.LoadError ?? "Unable to load native veyra_core library.",
+                MissingEntrypoints: RequiredEntrypoints,
+                CandidatePaths: candidatePaths);
+        }
+
+        var missingEntrypoints = RequiredEntrypoints
+            .Where(entrypoint => !probe.ExportedEntrypoints.Contains(entrypoint))
+            .ToArray();
+
+        var supportsScan = HasEntrypoint(probe, EntryScanDirectory);
+        var supportsStore = HasEntrypoint(probe, EntryStoreFileBlocks);
+        var supportsRestore = HasEntrypoint(probe, EntryRestoreFileBlocks);
+        var supportsTextDiff = HasEntrypoint(probe, EntryBuildTextDiff);
+        var supportsSnapshotComparison = HasEntrypoint(probe, EntryCompareSnapshotLinks);
+        var supportsRepositoryPathComparison = HasEntrypoint(probe, EntryCompareRepositoryPaths);
+        var supportsVersionPlanning = HasEntrypoint(probe, EntryPlanRepositoryVersions);
+
+        var isHealthy = missingEntrypoints.Length == 0;
+        string? runtimeCheckError = null;
+
+        if (isHealthy)
+        {
+            try
+            {
+                _ = CompareSnapshotLinksJson("[]", "[]");
+                _ = CompareRepositoryPathsJson("[]", "[]", 1);
+                _ = PlanRepositoryVersionsJson("[]");
+            }
+            catch (Exception ex)
+            {
+                isHealthy = false;
+                runtimeCheckError = ex.Message;
+            }
+        }
+
+        return new NativeRuntimeHealthReport(
+            IsLoaded: true,
+            IsHealthy: isHealthy,
+            SupportsScan: supportsScan,
+            SupportsStoreFileBlocks: supportsStore,
+            SupportsRestoreFileBlocks: supportsRestore,
+            SupportsTextDiff: supportsTextDiff,
+            SupportsSnapshotComparison: supportsSnapshotComparison,
+            SupportsRepositoryPathComparison: supportsRepositoryPathComparison,
+            SupportsVersionPlanning: supportsVersionPlanning,
+            LoadedPath: probe.LoadedPath,
+            ErrorMessage: probe.LoadError ?? runtimeCheckError,
+            MissingEntrypoints: missingEntrypoints,
+            CandidatePaths: candidatePaths);
+    }
 
     public static string ScanDirectoryJson(
         string rootPath,
@@ -153,7 +260,6 @@ internal static class VeyraCoreNative
             "Native text diff failed");
     }
 
-
     public static string CompareSnapshotLinksJson(string currentStatesJson, string previousStatesJson)
     {
         return ReadJsonResult(
@@ -161,6 +267,7 @@ internal static class VeyraCoreNative
                 veyra_compare_snapshot_links_utf8(currentStatesJson, previousStatesJson, buffer, len, out written),
             "Native snapshot comparison failed");
     }
+
     public static string CompareRepositoryPathsJson(string currentStatesJson, string baselineStatesJson, int take)
     {
         var safeTake = (uint)Math.Clamp(take, 1, 5000);
@@ -169,6 +276,7 @@ internal static class VeyraCoreNative
                 veyra_compare_repository_paths_utf8(currentStatesJson, baselineStatesJson, safeTake, buffer, len, out written),
             "Native repository path comparison failed");
     }
+
     public static string PlanRepositoryVersionsJson(string statesJson)
     {
         return ReadJsonResult(
@@ -176,6 +284,7 @@ internal static class VeyraCoreNative
                 veyra_plan_repository_versions_utf8(statesJson, buffer, len, out written),
             "Native repository version planner failed");
     }
+
     public static long RestoreFileBlocks(string storeRoot, string blocksJson, string targetPath, bool overwriteExisting)
     {
         var status = veyra_restore_file_blocks_utf8(storeRoot, blocksJson, targetPath, overwriteExisting ? 1 : 0);
@@ -261,18 +370,72 @@ internal static class VeyraCoreNative
         if (!libraryName.Equals(LibraryName, StringComparison.Ordinal))
             return IntPtr.Zero;
 
+        return LibraryProbe.Value.Handle;
+    }
+
+    private static NativeLibraryProbe ProbeNativeLibrary()
+    {
         var candidates = BuildCandidates();
+        var loadErrors = new List<string>();
+
         foreach (var candidate in candidates)
         {
             if (!File.Exists(candidate))
                 continue;
 
-            if (NativeLibrary.TryLoad(candidate, out var handle))
-                return handle;
+            try
+            {
+                var handle = NativeLibrary.Load(candidate);
+                var exports = ReadExportedEntrypoints(handle);
+
+                return new NativeLibraryProbe(
+                    Handle: handle,
+                    LoadedPath: candidate,
+                    ExportedEntrypoints: exports,
+                    CandidatePaths: candidates,
+                    LoadError: null);
+            }
+            catch (Exception ex)
+            {
+                loadErrors.Add($"{candidate}: {ex.Message}");
+            }
         }
 
-        return IntPtr.Zero;
+        var missingHint = candidates.Count == 0
+            ? "No native candidates were generated."
+            : "Checked candidates but did not load veyra_core.";
+
+        var errorMessage = loadErrors.Count > 0
+            ? string.Join(" | ", loadErrors)
+            : missingHint;
+
+        return new NativeLibraryProbe(
+            Handle: IntPtr.Zero,
+            LoadedPath: null,
+            ExportedEntrypoints: new HashSet<string>(StringComparer.Ordinal),
+            CandidatePaths: candidates,
+            LoadError: errorMessage);
     }
+
+    private static HashSet<string> ReadExportedEntrypoints(IntPtr handle)
+    {
+        var allEntrypoints = RequiredEntrypoints
+            .Concat(OptionalEntrypoints)
+            .Distinct(StringComparer.Ordinal);
+
+        var exports = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var entrypoint in allEntrypoints)
+        {
+            if (NativeLibrary.TryGetExport(handle, entrypoint, out _))
+                exports.Add(entrypoint);
+        }
+
+        return exports;
+    }
+
+    private static bool HasEntrypoint(NativeLibraryProbe probe, string entrypoint)
+        => probe.ExportedEntrypoints.Contains(entrypoint);
 
     private static IReadOnlyList<string> BuildCandidates()
     {
@@ -291,12 +454,16 @@ internal static class VeyraCoreNative
 
         var list = new List<string>
         {
-            Path.Combine(baseDir, fileName),
             Path.Combine(baseDir, "runtimes", rid, "native", fileName)
         };
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
             list.Add(Path.Combine(baseDir, "runtimes", "win-x64", "native", fileName));
+            list.Add(Path.Combine(baseDir, "runtimes", "win-arm64", "native", fileName));
+        }
+
+        list.Add(Path.Combine(baseDir, fileName));
 
         var envPath = Environment.GetEnvironmentVariable("VEYRA_CORE_PATH");
         if (!string.IsNullOrWhiteSpace(envPath))
@@ -305,12 +472,47 @@ internal static class VeyraCoreNative
             list.Add(Directory.Exists(p) ? Path.Combine(p, fileName) : p);
         }
 
-        var srcRootDevPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "native", "veyra_core", "target", "release", fileName));
-        var repoRootDevPath = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "native", "veyra_core", "target", "release", fileName));
+        var repoRoots = new[]
+        {
+            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..")),
+            Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."))
+        };
 
-        list.Add(srcRootDevPath);
-        list.Add(repoRootDevPath);
+        var rustTargets = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new[] { "x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc" }
+            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? new[] { "x86_64-apple-darwin", "aarch64-apple-darwin" }
+                : new[] { "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu" };
 
-        return list.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var root in repoRoots)
+        {
+            var targetRoot = Path.Combine(root, "native", "veyra_core", "target");
+
+            foreach (var rustTarget in rustTargets)
+            {
+                list.Add(Path.Combine(targetRoot, rustTarget, "release", fileName));
+            }
+
+            list.Add(Path.Combine(targetRoot, "release", fileName));
+
+            foreach (var rustTarget in rustTargets)
+            {
+                list.Add(Path.Combine(targetRoot, rustTarget, "debug", fileName));
+            }
+
+            list.Add(Path.Combine(targetRoot, "debug", fileName));
+        }
+
+        return list
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
+
+    private sealed record NativeLibraryProbe(
+        IntPtr Handle,
+        string? LoadedPath,
+        HashSet<string> ExportedEntrypoints,
+        IReadOnlyList<string> CandidatePaths,
+        string? LoadError);
 }
+

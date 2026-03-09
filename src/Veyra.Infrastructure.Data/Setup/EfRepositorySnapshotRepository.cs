@@ -18,6 +18,7 @@ public sealed class EfRepositorySnapshotRepository(
     ILogger<EfRepositorySnapshotRepository> log) : IRepositorySnapshotRepository
 {
     private const int PrecomputedDiffMaxLines = 4000;
+    private const int CurrentTextDiffStorageFormatVersion = 2;
 
     private static readonly JsonSerializerOptions DiffJsonOptions = new();
 
@@ -501,7 +502,8 @@ public sealed class EfRepositorySnapshotRepository(
         var normalizedPath = NormalizeRelativePath(relativePath);
 
         var identity = await db.Set<FileIdentity>()
-            .FirstOrDefaultAsync(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath && !i.IsDeleted, ct);
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath && !i.Repository.IsDeleted, ct);
 
         if (identity is null)
             return Array.Empty<FileVersionInfoDto>();
@@ -509,6 +511,7 @@ public sealed class EfRepositorySnapshotRepository(
         var limit = Math.Clamp(take, 1, 500);
 
         return await db.Set<FileVersion>()
+            .IgnoreQueryFilters()
             .Where(v => v.FileIdentityId == identity.Id && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ThenByDescending(v => v.Id)
@@ -618,7 +621,8 @@ public sealed class EfRepositorySnapshotRepository(
         var snapshotIds = snapshots.Select(s => s.SnapshotId).ToList();
 
         var linkRows = await db.Set<SnapshotFileLink>()
-            .Where(l => snapshotIds.Contains(l.SnapshotId) && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
+                        .IgnoreQueryFilters()
+            .Where(l => snapshotIds.Contains(l.SnapshotId) && !l.IsDeleted && !l.Snapshot.IsDeleted && !l.FileVersion.IsDeleted && !l.FileIdentity.Repository.IsDeleted)
             .Select(l => new SnapshotLinkState(
                 l.SnapshotId,
                 l.FileIdentityId,
@@ -689,7 +693,8 @@ public sealed class EfRepositorySnapshotRepository(
             : 0;
 
         var currentRows = await db.Set<SnapshotFileLink>()
-            .Where(l => l.SnapshotId == snapshotId && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
+            .IgnoreQueryFilters()
+            .Where(l => l.SnapshotId == snapshotId && !l.IsDeleted && !l.Snapshot.IsDeleted && !l.FileVersion.IsDeleted && !l.FileIdentity.Repository.IsDeleted)
             .Select(l => new SnapshotLinkState(
                 l.SnapshotId,
                 l.FileIdentityId,
@@ -704,7 +709,8 @@ public sealed class EfRepositorySnapshotRepository(
         var previousRows = previousSnapshotId == 0
             ? []
             : await db.Set<SnapshotFileLink>()
-                .Where(l => l.SnapshotId == previousSnapshotId && !l.IsDeleted && !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
+                .IgnoreQueryFilters()
+                .Where(l => l.SnapshotId == previousSnapshotId && !l.IsDeleted && !l.Snapshot.IsDeleted && !l.FileVersion.IsDeleted && !l.FileIdentity.Repository.IsDeleted)
                 .Select(l => new SnapshotLinkState(
                     l.SnapshotId,
                     l.FileIdentityId,
@@ -875,6 +881,12 @@ public sealed class EfRepositorySnapshotRepository(
         if (row is null)
             return null;
 
+        if (row.StorageFormatVersion != CurrentTextDiffStorageFormatVersion)
+        {
+            await InvalidateTextDiffCacheRowAsync(row.Id, ct);
+            return null;
+        }
+
         var lineRows = await db.Set<FileVersionTextDiffLine>()
             .AsNoTracking()
             .Where(l => l.DiffId == row.Id && !l.IsDeleted)
@@ -886,14 +898,33 @@ public sealed class EfRepositorySnapshotRepository(
                 l.TextLineAtom.Text))
             .ToListAsync(ct);
 
+        if (lineRows.Count == 0)
+        {
+            if (row.AddedLines == 0 && row.RemovedLines == 0)
+            {
+                return new TextDiffResultDto(
+                    row.RelativePath,
+                    row.LeftFileVersionId,
+                    row.RightFileVersionId,
+                    row.AddedLines,
+                    row.RemovedLines,
+                    row.IsTruncated,
+                    lineRows,
+                    Array.Empty<TextDiffHunkDto>());
+            }
+
+            await InvalidateTextDiffCacheRowAsync(row.Id, ct);
+            return null;
+        }
+
         var hunkRows = await db.Set<FileVersionTextDiffHunk>()
             .AsNoTracking()
             .Where(h => h.DiffId == row.Id && !h.IsDeleted)
             .OrderBy(h => h.Sequence)
             .Select(h => new TextDiffHunkDto(
                 h.Sequence,
-                h.Sequence,
-                h.Sequence,
+                h.StartLineSequence,
+                h.EndLineSequence,
                 h.OldStartLine,
                 h.OldLineCount,
                 h.NewStartLine,
@@ -901,50 +932,34 @@ public sealed class EfRepositorySnapshotRepository(
                 h.ChangeKind))
             .ToListAsync(ct);
 
-        if (lineRows.Count > 0)
+        if (hunkRows.Count == 0)
         {
-            var hunks = hunkRows.Count > 0
-                ? await RebuildStoredHunksWithRangesAsync(row.Id, hunkRows, ct)
-                : TextDiffHunkBuilder.Build(lineRows, 3);
+            if (row.AddedLines == 0 && row.RemovedLines == 0)
+            {
+                return new TextDiffResultDto(
+                    row.RelativePath,
+                    row.LeftFileVersionId,
+                    row.RightFileVersionId,
+                    row.AddedLines,
+                    row.RemovedLines,
+                    row.IsTruncated,
+                    lineRows,
+                    Array.Empty<TextDiffHunkDto>());
+            }
 
-            return new TextDiffResultDto(
-                row.RelativePath,
-                row.LeftFileVersionId,
-                row.RightFileVersionId,
-                row.AddedLines,
-                row.RemovedLines,
-                row.IsTruncated,
-                lineRows,
-                hunks);
-        }
-
-        try
-        {
-            var lines = JsonSerializer.Deserialize<List<TextDiffLineDto>>(row.LinesJson, DiffJsonOptions)
-                        ?? [];
-
-            var hunks = TextDiffHunkBuilder.Build(lines, 3);
-
-            return new TextDiffResultDto(
-                row.RelativePath,
-                row.LeftFileVersionId,
-                row.RightFileVersionId,
-                row.AddedLines,
-                row.RemovedLines,
-                row.IsTruncated,
-                lines,
-                hunks);
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(
-                ex,
-                "Failed to deserialize cached text diff. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
-                leftFileVersionId,
-                rightFileVersionId);
-
+            await InvalidateTextDiffCacheRowAsync(row.Id, ct);
             return null;
         }
+
+        return new TextDiffResultDto(
+            row.RelativePath,
+            row.LeftFileVersionId,
+            row.RightFileVersionId,
+            row.AddedLines,
+            row.RemovedLines,
+            row.IsTruncated,
+            lineRows,
+            hunkRows);
     }
 
     public async Task SaveStoredTextDiffAsync(
@@ -1010,6 +1025,7 @@ public sealed class EfRepositorySnapshotRepository(
         existing.RemovedLines = diff.RemovedLines;
         existing.IsTruncated = diff.IsTruncated;
         existing.LinesJson = linesJson;
+        existing.StorageFormatVersion = CurrentTextDiffStorageFormatVersion;
         existing.IsDeleted = false;
         existing.DeletedAt = null;
         existing.UpdatedAt = nowUtc;
@@ -1031,6 +1047,8 @@ public sealed class EfRepositorySnapshotRepository(
                 {
                     Diff = existing,
                     Sequence = h.Sequence,
+                    StartLineSequence = h.StartLineSequence,
+                    EndLineSequence = h.EndLineSequence,
                     OldStartLine = h.OldStartLine,
                     OldLineCount = h.OldLineCount,
                     NewStartLine = h.NewStartLine,
@@ -1139,13 +1157,16 @@ public sealed class EfRepositorySnapshotRepository(
         CancellationToken ct = default)
     {
         var version = await db.Set<FileVersion>()
+            .IgnoreQueryFilters()
             .Include(v => v.FileIdentity)
-            .FirstOrDefaultAsync(v => v.Id == fileVersionId && !v.IsDeleted && !v.FileIdentity.IsDeleted && !v.FileIdentity.Repository.IsDeleted, ct);
+            .ThenInclude(i => i.Repository)
+            .FirstOrDefaultAsync(v => v.Id == fileVersionId && !v.IsDeleted && !v.FileIdentity.Repository.IsDeleted, ct);
 
         if (version is null)
             return null;
 
         var blocks = await db.Set<FileVersionBlock>()
+            .IgnoreQueryFilters()
             .Where(b => b.FileVersionId == fileVersionId && !b.IsDeleted)
             .OrderBy(b => b.Sequence)
             .Select(b => new StoredFileBlockDto(
@@ -1250,60 +1271,39 @@ public sealed class EfRepositorySnapshotRepository(
         return TextExtensions.Contains(normalized);
     }
 
-    private async Task<IReadOnlyList<TextDiffHunkDto>> RebuildStoredHunksWithRangesAsync(
-        long diffId,
-        IReadOnlyList<TextDiffHunkDto> hunks,
-        CancellationToken ct)
+    private async Task InvalidateTextDiffCacheRowAsync(long diffId, CancellationToken ct)
     {
-        if (hunks.Count == 0)
-            return Array.Empty<TextDiffHunkDto>();
+        if (diffId <= 0)
+            return;
 
-        var mappings = await db.Set<FileVersionTextDiffLine>()
-            .AsNoTracking()
-            .Where(l => l.DiffId == diffId && !l.IsDeleted && l.HunkId.HasValue)
-            .Select(l => new
-            {
-                HunkId = l.HunkId!.Value,
-                l.Sequence
-            })
-            .GroupBy(x => x.HunkId)
-            .Select(g => new
-            {
-                HunkId = g.Key,
-                StartLineSequence = g.Min(x => x.Sequence),
-                EndLineSequence = g.Max(x => x.Sequence)
-            })
-            .ToListAsync(ct);
+        var deletedAt = DateTime.UtcNow;
 
-        var byHunkId = mappings.ToDictionary(m => m.HunkId, m => (m.StartLineSequence, m.EndLineSequence));
-
-        var hunkIdBySequence = await db.Set<FileVersionTextDiffHunk>()
-            .AsNoTracking()
-            .Where(h => h.DiffId == diffId && !h.IsDeleted)
-            .Select(h => new { h.Id, h.Sequence })
-            .ToListAsync(ct);
-
-        var idBySequence = hunkIdBySequence.ToDictionary(x => x.Sequence, x => x.Id);
-
-        var rebuilt = new List<TextDiffHunkDto>(hunks.Count);
-        foreach (var h in hunks.OrderBy(x => x.Sequence))
+        try
         {
-            var start = h.StartLineSequence;
-            var end = h.EndLineSequence;
+            await db.Set<FileVersionTextDiffLine>()
+                .Where(l => l.DiffId == diffId && !l.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(l => l.IsDeleted, _ => true)
+                    .SetProperty(l => l.DeletedAt, _ => deletedAt), ct);
 
-            if (idBySequence.TryGetValue(h.Sequence, out var hunkId)
-                && byHunkId.TryGetValue(hunkId, out var range))
-            {
-                start = range.StartLineSequence;
-                end = range.EndLineSequence;
-            }
+            await db.Set<FileVersionTextDiffHunk>()
+                .Where(h => h.DiffId == diffId && !h.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(h => h.IsDeleted, _ => true)
+                    .SetProperty(h => h.DeletedAt, _ => deletedAt), ct);
 
-            rebuilt.Add(h with { StartLineSequence = start, EndLineSequence = end });
+            await db.Set<FileVersionTextDiff>()
+                .Where(d => d.Id == diffId && !d.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(d => d.IsDeleted, _ => true)
+                    .SetProperty(d => d.DeletedAt, _ => deletedAt)
+                    .SetProperty(d => d.UpdatedAt, _ => deletedAt), ct);
         }
-
-        return rebuilt;
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Failed to invalidate stale text diff cache row {DiffId}", diffId);
+        }
     }
-
     private static IReadOnlyList<TextDiffHunkDto> NormalizeHunks(
         IReadOnlyList<TextDiffHunkDto> hunks,
         IReadOnlyList<TextDiffLineDto> normalizedLines,
@@ -1492,3 +1492,10 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+
+
+
+
+
+
