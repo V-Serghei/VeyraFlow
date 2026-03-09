@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<ISetupRepository, EfSetupRepository>();
         services.AddScoped<IRepositoryRepository, EfRepositoryRepository>();
         services.AddScoped<IRepositoryRetentionService, EfRepositoryRetentionService>();
+        services.AddScoped<IRepositoryIntegrityService, EfRepositoryIntegrityService>();
         services.AddScoped<IRepositorySnapshotRepository, EfRepositorySnapshotRepository>();
         services.AddScoped<IUserProfileRepository, EfUserProfileRepository>();
 
@@ -43,4 +44,3 @@ public sealed class SqliteConnectionFactory(string connectionString) : ISqliteCo
 {
     public SqliteConnection CreateConnection() => new(connectionString);
 }
-

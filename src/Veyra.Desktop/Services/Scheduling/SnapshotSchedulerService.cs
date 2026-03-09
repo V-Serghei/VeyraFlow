@@ -7,6 +7,8 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using System.Linq;
+
 
 namespace Veyra.Desktop.Services.Scheduling;
 
@@ -35,14 +37,16 @@ public sealed class SnapshotSchedulerService(
         _loop = Task.Run(() => RunAsync(_cts.Token));
 
         log.LogInformation(
-            "Snapshot scheduler started. Poll {PollSeconds}s. Interval {IntervalMinutes}m. QuietHours {Start}-{End}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}. Retries {Retries}",
+            "Snapshot scheduler started. Poll {PollSeconds}s. Interval {IntervalMinutes}m. QuietHours {Start}-{End}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}. Retries {Retries}. Integrity {IntegrityEnabled} every {IntegrityIntervalMinutes}m",
             options.PollSeconds,
             options.IntervalMinutes,
             options.QuietHoursStartHour,
             options.QuietHoursEndHour,
             options.MaxReadBytesPerSecond,
             options.MaxIoOperationsPerSecond,
-            options.RetryCount);
+            options.RetryCount,
+            options.IntegrityEnabled,
+            options.IntegrityIntervalMinutes);
     }
 
     public async Task StopAsync()
@@ -114,6 +118,7 @@ public sealed class SnapshotSchedulerService(
         var repositories = scope.ServiceProvider.GetRequiredService<IRepositoryRepository>();
         var scanner = scope.ServiceProvider.GetRequiredService<IRepositoryScanner>();
         var retention = scope.ServiceProvider.GetRequiredService<IRepositoryRetentionService>();
+        var integrity = scope.ServiceProvider.GetRequiredService<IRepositoryIntegrityService>();
         var cloudSync = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
 
         var all = await repositories.GetAllRepositoriesAsync(ct);
@@ -142,6 +147,33 @@ public sealed class SnapshotSchedulerService(
             log.LogInformation(
                 "Scheduled retention completed for {Count} repositories",
                 retentionRuns.Count);
+        }
+
+        if (options.IntegrityEnabled)
+        {
+            var integrityRuns = await integrity.VerifyDueRepositoriesAsync(
+                options.IntegrityIntervalMinutes,
+                options.IntegrityRepairFromCloud,
+                options.IntegrityIssueSampleLimit,
+                ct: ct);
+
+            if (integrityRuns.Count > 0)
+            {
+                var problematic = integrityRuns.Count(r => r.UnresolvedIssueCount > 0);
+                if (problematic > 0)
+                {
+                    log.LogWarning(
+                        "Scheduled integrity verification found unresolved issues in {Problematic}/{Total} repositories",
+                        problematic,
+                        integrityRuns.Count);
+                }
+                else
+                {
+                    log.LogInformation(
+                        "Scheduled integrity verification completed for {Count} repositories with no unresolved issues",
+                        integrityRuns.Count);
+                }
+            }
         }
 
         await cloudSync.ProcessPendingQueueAsync(ct);

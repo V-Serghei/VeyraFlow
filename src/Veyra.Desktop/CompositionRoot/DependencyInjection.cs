@@ -56,7 +56,11 @@ public static class DependencyInjection
             MaxReadBytesPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? 0,
             MaxIoOperationsPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? 0,
             RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,
-            RetryDelaySeconds = cfg.GetValue<int?>("SnapshotScheduler:RetryDelaySeconds") ?? 10
+            RetryDelaySeconds = cfg.GetValue<int?>("SnapshotScheduler:RetryDelaySeconds") ?? 10,
+            IntegrityEnabled = cfg.GetValue<bool?>("SnapshotScheduler:IntegrityEnabled") ?? true,
+            IntegrityIntervalMinutes = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIntervalMinutes") ?? 180,
+            IntegrityRepairFromCloud = cfg.GetValue<bool?>("SnapshotScheduler:IntegrityRepairFromCloud") ?? false,
+            IntegrityIssueSampleLimit = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIssueSampleLimit") ?? 200
         };
 
         services.AddSingleton(schedulerOptions);

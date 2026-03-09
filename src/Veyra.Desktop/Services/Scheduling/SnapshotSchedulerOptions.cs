@@ -11,5 +11,9 @@ public sealed class SnapshotSchedulerOptions
     public int MaxIoOperationsPerSecond { get; init; } = 0;
     public int RetryCount { get; init; } = 2;
     public int RetryDelaySeconds { get; init; } = 10;
-}
 
+    public bool IntegrityEnabled { get; init; } = true;
+    public int IntegrityIntervalMinutes { get; init; } = 180;
+    public bool IntegrityRepairFromCloud { get; init; } = false;
+    public int IntegrityIssueSampleLimit { get; init; } = 200;
+}
