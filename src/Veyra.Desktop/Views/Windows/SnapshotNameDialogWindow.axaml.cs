@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Veyra.Desktop.ViewModels.Windows;
 
@@ -5,6 +6,10 @@ namespace Veyra.Desktop.Views.Windows;
 
 public partial class SnapshotNameDialogWindow : Window
 {
+    private bool _isSyncingDiffScroll;
+    private ScrollViewer? _leftDiffScrollViewer;
+    private ScrollViewer? _rightDiffScrollViewer;
+
     public bool IsConfirmed { get; private set; }
     public string? SnapshotTitle { get; private set; }
 
@@ -14,6 +19,9 @@ public partial class SnapshotNameDialogWindow : Window
 
         Opened += (_, _) =>
         {
+            _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
+            _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
+
             if (DataContext is SnapshotNameDialogWindowViewModel vm)
                 vm.RequestClose += OnRequestClose;
         };
@@ -39,5 +47,52 @@ public partial class SnapshotNameDialogWindow : Window
 
         Close();
     }
-}
 
+    private void OnLeftDiffScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer source)
+            return;
+
+        var offset = source.GetValue(ScrollViewer.OffsetProperty);
+        SyncDiffScroll(fromLeft: true, offset);
+    }
+
+    private void OnRightDiffScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer source)
+            return;
+
+        var offset = source.GetValue(ScrollViewer.OffsetProperty);
+        SyncDiffScroll(fromLeft: false, offset);
+    }
+
+    private void SyncDiffScroll(bool fromLeft, Vector offset)
+    {
+        if (_isSyncingDiffScroll)
+            return;
+
+        if (DataContext is SnapshotNameDialogWindowViewModel vm)
+            vm.UpdatePinnedHunkHeaderByScroll(offset.Y);
+
+        if (_leftDiffScrollViewer is null || _rightDiffScrollViewer is null)
+            return;
+
+        ScrollViewer target = fromLeft ? _rightDiffScrollViewer : _leftDiffScrollViewer;
+        var targetOffset = target.GetValue(ScrollViewer.OffsetProperty);
+        if (AreClose(targetOffset.X, offset.X) && AreClose(targetOffset.Y, offset.Y))
+            return;
+
+        _isSyncingDiffScroll = true;
+        try
+        {
+            target.SetCurrentValue(ScrollViewer.OffsetProperty, offset);
+        }
+        finally
+        {
+            _isSyncingDiffScroll = false;
+        }
+    }
+
+    private static bool AreClose(double left, double right)
+        => System.Math.Abs(left - right) < 0.5d;
+}

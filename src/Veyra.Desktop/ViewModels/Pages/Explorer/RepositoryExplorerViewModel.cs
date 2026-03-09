@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -44,7 +44,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private bool _liveSyncPending;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
     private bool _isSyncingSelectionFromSnapshot;
+    private bool _isClearingSnapshotFileSelection;
+    private long? _preferredSnapshotId;
+    private string? _preferredSnapshotFileRelativePath;
     private long? _preferredSnapshotFileVersionId;
+    private CancellationTokenSource? _snapshotFilesLoadCts;
+    private long _snapshotFilesLoadRequestId;
+    private CancellationTokenSource? _versionsLoadCts;
+    private long _versionsLoadRequestId;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -82,6 +89,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanRestoreSelectedVersion))]
     [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
     [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    [NotifyPropertyChangedFor(nameof(HasSelectedVersion))]
     private ExplorerFileVersionViewModel? _selectedVersion;
 
     [ObservableProperty]
@@ -98,7 +106,21 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
     private bool _selectedVersionHasContentBlocks;
 
-    [ObservableProperty] private bool _isVersionLoading;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoFileVersions))]
+    [NotifyPropertyChangedFor(nameof(HasVersionPanelError))]
+    private bool _isVersionLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasVersionPanelError))]
+    [NotifyPropertyChangedFor(nameof(HasNoFileVersions))]
+    private string? _versionPanelError;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRestoreSelectedVersion))]
+    [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
+    [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    private bool _isVersionActionRunning;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasVersionActionMessage))]
@@ -125,8 +147,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty] private bool _scanIsIndeterminate;
     [ObservableProperty] private bool _isLiveSyncActive;
 
-    [ObservableProperty] private string _pendingChangesSummary = "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚.";
-    [ObservableProperty] private string _lastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
+    [ObservableProperty] private string _pendingChangesSummary = "No changes since the last snapshot.";
+    [ObservableProperty] private string _lastSnapshotLabel = "No snapshot has been created yet.";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoPendingChanges))]
@@ -161,7 +183,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
     public bool HasNoSelectedItem => !HasSelectedItem;
+    public bool HasSelectedVersion => SelectedVersion is not null;
     public bool HasVersionActionMessage => !string.IsNullOrWhiteSpace(VersionActionMessage);
+    public bool HasVersionPanelError => !string.IsNullOrWhiteSpace(VersionPanelError);
+    public bool HasNoFileVersions => !IsVersionLoading && !HasVersionPanelError && FileVersions.Count == 0;
     public bool HasDiffPreview => !string.IsNullOrWhiteSpace(DiffPreview);
     public bool SelectedVersionHasNoContentBlocks => SelectedVersion is not null && !SelectedVersionHasContentBlocks;
     public bool HasNoPendingChanges => !HasPendingChanges;
@@ -173,10 +198,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
     public bool CanRunMaintenanceActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
     public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
-    public bool CanRestoreSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
-    public bool CanRunDiffForSelectedVersion => SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
+    public bool CanRestoreSelectedVersion
+        => !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
+    public bool CanRunDiffForSelectedVersion
+        => !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanCompareSelectedVersionPair
-        => CompareLeftVersion is { HasContentBlocks: true, IsDeletionMarker: false } left
+        => !IsVersionActionRunning
+           && CompareLeftVersion is { HasContentBlocks: true, IsDeletionMarker: false } left
            && CompareRightVersion is { HasContentBlocks: true, IsDeletionMarker: false } right
            && left.FileVersionId != right.FileVersionId;
 
@@ -196,6 +224,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _mediator = mediator;
         _windows = windows;
         _log = log;
+        FileVersions.CollectionChanged += OnFileVersionsCollectionChanged;
         DiffPreviewRows.CollectionChanged += OnDiffPreviewRowsCollectionChanged;
     }
 
@@ -204,8 +233,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         try
         {
             StopLiveSync();
+            CancelPanelLoadRequests();
             IsLoading = true;
             ErrorMessage = null;
+            VersionPanelError = null;
+            IsVersionActionRunning = false;
             VersionActionMessage = null;
             DiffPreview = null;
             SelectedItem = null;
@@ -218,6 +250,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
             SelectedSnapshotFile = null;
+            _preferredSnapshotId = null;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
             HasPendingChanges = false;
             HasSnapshotHistory = false;
             HasSnapshotFiles = false;
@@ -229,13 +264,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
-            PendingChangesSummary = "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚.";
-            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
+            PendingChangesSummary = "No changes since the last snapshot.";
+            LastSnapshotLabel = "No snapshot has been created yet.";
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
-                ErrorMessage = "Ð ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ð¹ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½.";
+                ErrorMessage = "Repository not found.";
                 IsEmpty = true;
                 return;
             }
@@ -250,7 +285,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load explorer for repository {RepositoryId}", repositoryId);
-            ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ðµ Ñ€ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ñ.";
+            ErrorMessage = "Failed to load repository explorer data.";
+            VersionPanelError = null;
+            IsVersionActionRunning = false;
             Items.Clear();
             TreeNodes.Clear();
             FileVersions.Clear();
@@ -259,6 +296,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
             SelectedSnapshotFile = null;
+            _preferredSnapshotId = null;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
             HasPendingChanges = false;
             HasSnapshotHistory = false;
             HasSnapshotFiles = false;
@@ -270,8 +310,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
-            PendingChangesSummary = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ.";
-            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
+            PendingChangesSummary = "Failed to load pending changes.";
+            LastSnapshotLabel = "No snapshot has been created yet.";
             IsEmpty = true;
         }
         finally
@@ -297,8 +337,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             && SelectedSnapshotFile is not null
             && !value.RelativePath.Equals(SelectedSnapshotFile.RelativePath, StringComparison.OrdinalIgnoreCase))
         {
+            _preferredSnapshotFileRelativePath = null;
             _preferredSnapshotFileVersionId = null;
+            _isClearingSnapshotFileSelection = true;
             SelectedSnapshotFile = null;
+            _isClearingSnapshotFileSelection = false;
         }
 
         _ = LoadVersionsForSelectedItemAsync(value);
@@ -306,6 +349,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     partial void OnSelectedSnapshotChanged(RepositorySnapshotHistoryEntryViewModel? value)
     {
+        var previousSnapshotId = _preferredSnapshotId;
+        _preferredSnapshotId = value?.SnapshotId;
+
+        if (value is null)
+        {
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
+        }
+        else if (previousSnapshotId != value.SnapshotId)
+        {
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
+        }
+
         _ = LoadSnapshotFilesForSelectedSnapshotAsync(value?.SnapshotId);
     }
 
@@ -313,10 +370,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         if (value is null)
         {
-            _preferredSnapshotFileVersionId = null;
+            if (!_isClearingSnapshotFileSelection)
+            {
+                _preferredSnapshotFileRelativePath = null;
+                _preferredSnapshotFileVersionId = null;
+            }
+
             return;
         }
 
+        _preferredSnapshotFileRelativePath = value.RelativePath;
         _preferredSnapshotFileVersionId = value.FileVersionId;
         SelectItemFromSnapshotFile(value);
     }
@@ -327,6 +390,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (value is { HasContentBlocks: true, IsDeletionMarker: false })
             CompareLeftVersion = value;
+
+        if (value is not null)
+            _preferredSnapshotFileVersionId = value.FileVersionId;
 
         OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
     }
@@ -386,9 +452,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_index_manual",
-            fallbackMessage: "Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¸Ð½Ð´ÐµÐºÑÐ°...",
+            fallbackMessage: "Synchronizing index...",
             showErrors: true,
-            successMessage: "Ð˜Ð½Ð´ÐµÐºÑ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½.");
+            successMessage: "Index synchronized.");
     }
 
     [RelayCommand]
@@ -679,41 +745,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RestoreVersionOverwriteAsync()
-    {
-        var selectedItem = SelectedItem;
-        var selectedVersion = SelectedVersion;
-
-        if (selectedItem is null || selectedItem.IsDirectory || selectedVersion is null)
-            return;
-
-        if (!selectedVersion.HasContentBlocks)
-        {
-            ErrorMessage = "Ð”Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¹ Ð²ÐµÑ€ÑÐ¸Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð±Ð»Ð¾ÐºÐ¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ð³Ð¾.";
-            return;
-        }
-
-        VersionActionMessage = null;
-        ErrorMessage = null;
-
-        var result = await Task.Run(() => _mediator.Send(new RestoreFileVersionCommand(
-            RepositoryId,
-            selectedItem.RelativePath,
-            selectedVersion.FileVersionId,
-            OverwriteCurrent: true)));
-
-        if (!result.Success)
-        {
-            ErrorMessage = result.Error ?? "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð».";
-            return;
-        }
-
-        VersionActionMessage = $"Ð¤Ð°Ð¹Ð» Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ Ð¿Ð¾Ð²ÐµÑ€Ñ… Ñ‚ÐµÐºÑƒÑ‰ÐµÐ³Ð¾:\n{result.Value}";
-    }
+    private Task RestoreVersionOverwriteAsync()
+        => ExecuteRestoreVersionActionAsync(overwriteCurrent: true);
 
     [RelayCommand]
-    private async Task RestoreVersionAsCopyAsync()
+    private Task RestoreVersionAsCopyAsync()
+        => ExecuteRestoreVersionActionAsync(overwriteCurrent: false);
+
+    private async Task ExecuteRestoreVersionActionAsync(bool overwriteCurrent)
     {
+        if (IsVersionActionRunning)
+            return;
+
         var selectedItem = SelectedItem;
         var selectedVersion = SelectedVersion;
 
@@ -722,28 +765,61 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks)
         {
-            ErrorMessage = "Ð”Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¹ Ð²ÐµÑ€ÑÐ¸Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð±Ð»Ð¾ÐºÐ¸ ÑÐ¾Ð´ÐµÑ€Ð¶Ð¸Ð¼Ð¾Ð³Ð¾.";
+            ErrorMessage = "No content blocks are stored for the selected version.";
             return;
         }
 
+        IsVersionActionRunning = true;
         VersionActionMessage = null;
+        VersionPanelError = null;
         ErrorMessage = null;
 
-        var result = await Task.Run(() => _mediator.Send(new RestoreFileVersionCommand(
-            RepositoryId,
-            selectedItem.RelativePath,
-            selectedVersion.FileVersionId,
-            OverwriteCurrent: false,
-            TargetPath: null)));
-
-        if (!result.Success)
+        try
         {
-            ErrorMessage = result.Error ?? "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð» Ð² Ð½Ð¾Ð²Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ.";
-            return;
-        }
+            var result = await _mediator.Send(new RestoreFileVersionCommand(
+                RepositoryId,
+                selectedItem.RelativePath,
+                selectedVersion.FileVersionId,
+                OverwriteCurrent: overwriteCurrent,
+                TargetPath: null));
 
-        VersionActionMessage = $"Ð¤Ð°Ð¹Ð» Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ Ð² Ð½Ð¾Ð²Ñ‹Ð¹ Ð¿ÑƒÑ‚ÑŒ:\n{result.Value}";
+            if (!result.Success)
+            {
+                var message = result.Error ?? "Failed to restore selected file version.";
+                ErrorMessage = message;
+                VersionPanelError = message;
+                return;
+            }
+
+            VersionActionMessage = overwriteCurrent
+                ? $"File restored over current file:\n{result.Value}"
+                : $"File restored as copy:\n{result.Value}";
+
+            _preferredSnapshotFileVersionId = selectedVersion.FileVersionId;
+            await RefreshEntriesAndTreeAsync(clearSelection: false);
+        }
+        catch (OperationCanceledException)
+        {
+            // panel load cancellation can race with action refresh; safe to ignore
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Restore action failed. RepositoryId {RepositoryId}. Path {Path}. Version {VersionId}. Overwrite {Overwrite}",
+                RepositoryId,
+                selectedItem.RelativePath,
+                selectedVersion.FileVersionId,
+                overwriteCurrent);
+            var message = "Failed to run restore action for selected file version.";
+            ErrorMessage = message;
+            VersionPanelError = message;
+        }
+        finally
+        {
+            IsVersionActionRunning = false;
+        }
     }
+
 
     [RelayCommand]
     private async Task CompareSelectedWithPreviousAsync()
@@ -867,7 +943,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (!await _scanGate.WaitAsync(0))
         {
             if (showErrors)
-                ErrorMessage = "Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ ÑƒÐ¶Ðµ Ð²Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ.";
+                ErrorMessage = "Scan is already running.";
             return false;
         }
 
@@ -905,7 +981,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (!result.Success)
             {
                 if (showErrors)
-                    ErrorMessage = result.Error ?? "Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð·Ð°Ð²ÐµÑ€ÑˆÐ¸Ð»Ð¾ÑÑŒ Ñ Ð¾ÑˆÐ¸Ð±ÐºÐ¾Ð¹.";
+                    ErrorMessage = result.Error ?? "Scan finished with an error.";
                 return false;
             }
 
@@ -926,7 +1002,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 triggerOverride);
 
             if (showErrors)
-                ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ ÑÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ñ€ÐµÐ¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€Ð¸Ñ.";
+                ErrorMessage = "Failed to scan repository.";
             return false;
         }
         finally
@@ -938,12 +1014,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private async Task LoadVersionsForSelectedItemAsync(ExplorerItemViewModel? item)
     {
+        var (requestId, ct) = BeginVersionsLoadRequest();
+
         FileVersions.Clear();
+        OnPropertyChanged(nameof(HasNoFileVersions));
         SelectedVersion = null;
         CompareLeftVersion = null;
         CompareRightVersion = null;
         DiffPreview = null;
         VersionActionMessage = null;
+        VersionPanelError = null;
         IsDiffPreviewMenuOpen = false;
         IsDiffPreviewLoading = false;
         DiffPreviewTitle = string.Empty;
@@ -951,7 +1031,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         DiffPreviewRows.Clear();
 
         if (item is null || item.IsDirectory || RepositoryId == 0)
+        {
+            if (IsLatestVersionsLoadRequest(requestId))
+                IsVersionLoading = false;
+
             return;
+        }
 
         try
         {
@@ -960,7 +1045,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             var versions = await _mediator.Send(new GetFileVersionHistoryQuery(
                 RepositoryId,
                 item.RelativePath,
-                40));
+                40), ct);
+
+            if (!IsLatestVersionsLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
 
             foreach (var version in versions)
             {
@@ -971,7 +1059,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     SizeBytes = version.SizeBytes,
                     IsDeletionMarker = version.IsDeletionMarker,
                     HasContentBlocks = version.HasContentBlocks,
-                    ContentHashSha256 = version.ContentHashSha256
+                    ContentHashSha256 = version.ContentHashSha256,
+                    RelativePath = item.RelativePath
                 });
             }
 
@@ -989,20 +1078,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             InitializeVersionComparePair();
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // rapid navigation cancels previous version loads
+        }
         catch (Exception ex)
         {
+            if (!IsLatestVersionsLoadRequest(requestId))
+                return;
+
             _log.LogError(ex,
                 "Failed to load file versions. RepositoryId {RepositoryId}. Path {Path}",
                 RepositoryId,
                 item.RelativePath);
-            ErrorMessage = "ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð²ÐµÑ€ÑÐ¸Ð¸ Ñ„Ð°Ð¹Ð»Ð°.";
+            const string message = "Unable to load file versions for the selected file.";
+            ErrorMessage = message;
+            VersionPanelError = message;
         }
         finally
         {
-            IsVersionLoading = false;
+            if (IsLatestVersionsLoadRequest(requestId))
+                IsVersionLoading = false;
         }
     }
-
 
     private void InitializeVersionComparePair()
     {
@@ -1057,19 +1155,19 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (pending.BaselineSnapshotAtUtc is null)
         {
-            LastSnapshotLabel = "Ð¡Ð½Ð¸Ð¼Ð¾Ðº ÐµÑ‰Ðµ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½.";
+            LastSnapshotLabel = "No snapshot has been created yet.";
             PendingChangesSummary = HasPendingChanges
-                ? $"Ðš Ñ„Ð¸ÐºÑÐ°Ñ†Ð¸Ð¸ {PendingChanges.Count} Ñ„Ð°Ð¹Ð»Ð¾Ð²"
-                : "Ð¡Ð½Ð¸Ð¼ÐºÐ¾Ð² Ð¿Ð¾ÐºÐ° Ð½ÐµÑ‚. Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº.";
+                ? $"{PendingChanges.Count} files ready to snapshot"
+                : "No snapshots yet. Create the first snapshot.";
             return;
         }
 
         var local = pending.BaselineSnapshotAtUtc.Value.ToLocalTime();
-        LastSnapshotLabel = $"ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ ÑÐ½Ð¸Ð¼Ð¾Ðº {local:yyyy-MM-dd HH:mm:ss}";
+        LastSnapshotLabel = $"Last snapshot {local:yyyy-MM-dd HH:mm:ss}";
 
         PendingChangesSummary = pending.AddedCount + pending.ModifiedCount + pending.DeletedCount == 0
-            ? "Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ Ñ Ð¿Ð¾ÑÐ»ÐµÐ´Ð½ÐµÐ³Ð¾ ÑÐ½Ð¸Ð¼ÐºÐ° Ð½ÐµÑ‚."
-            : $"Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹ +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
+            ? "No changes since the last snapshot."
+            : $"Changes +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
     }
 
     private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0)
@@ -1098,20 +1196,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             HasSnapshotHistory = SnapshotHistory.Count > 0;
 
-            var selected = preferredSnapshotId > 0
-                ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == preferredSnapshotId)
+            var targetSnapshotId = preferredSnapshotId > 0
+                ? preferredSnapshotId
+                : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
+
+            var selected = targetSnapshotId > 0
+                ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == targetSnapshotId)
                 : null;
 
             if (selected is null && SnapshotHistory.Count > 0)
                 selected = SnapshotHistory[0];
 
             SelectedSnapshot = selected;
+            _preferredSnapshotId = selected?.SnapshotId;
 
             if (selected is null)
             {
                 SnapshotFiles.Clear();
+                _isClearingSnapshotFileSelection = true;
                 SelectedSnapshotFile = null;
+                _isClearingSnapshotFileSelection = false;
                 HasSnapshotFiles = false;
+                _preferredSnapshotFileRelativePath = null;
+                _preferredSnapshotFileVersionId = null;
             }
         }
         catch (Exception ex)
@@ -1120,9 +1227,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SnapshotHistory.Clear();
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
+            _isClearingSnapshotFileSelection = true;
             SelectedSnapshotFile = null;
+            _isClearingSnapshotFileSelection = false;
             HasSnapshotHistory = false;
             HasSnapshotFiles = false;
+            _preferredSnapshotId = null;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
         }
         finally
         {
@@ -1132,12 +1244,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private async Task LoadSnapshotFilesForSelectedSnapshotAsync(long? snapshotId)
     {
+        var (requestId, ct) = BeginSnapshotFilesLoadRequest();
+        var preferredFilePath = _preferredSnapshotFileRelativePath;
+
         SnapshotFiles.Clear();
+        _isClearingSnapshotFileSelection = true;
         SelectedSnapshotFile = null;
+        _isClearingSnapshotFileSelection = false;
         HasSnapshotFiles = false;
 
         if (snapshotId is null || snapshotId <= 0 || RepositoryId == 0)
+        {
+            if (IsLatestSnapshotFilesLoadRequest(requestId))
+                IsSnapshotFilesLoading = false;
+
             return;
+        }
 
         IsSnapshotFilesLoading = true;
 
@@ -1146,7 +1268,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             var files = await _mediator.Send(new GetRepositorySnapshotChangedFilesQuery(
                 RepositoryId,
                 snapshotId.Value,
-                2000));
+                2000), ct);
+
+            if (!IsLatestSnapshotFilesLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
 
             foreach (var file in files)
             {
@@ -1159,17 +1284,39 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     Name = file.Name,
                     ChangeKind = file.ChangeKind,
                     CurrentSizeBytes = file.CurrentSizeBytes,
-                    PreviousSizeBytes = file.PreviousSizeBytes
+                    PreviousSizeBytes = file.PreviousSizeBytes,
+                    VersionCreatedAtUtc = file.VersionCreatedAtUtc
                 });
             }
 
             HasSnapshotFiles = SnapshotFiles.Count > 0;
 
             if (HasSnapshotFiles)
-                SelectedSnapshotFile = SnapshotFiles[0];
+            {
+                var selected = !string.IsNullOrWhiteSpace(preferredFilePath)
+                    ? SnapshotFiles.FirstOrDefault(x => x.RelativePath.Equals(preferredFilePath, StringComparison.OrdinalIgnoreCase))
+                    : null;
+
+                selected ??= SnapshotFiles[0];
+                SelectedSnapshotFile = selected;
+                _preferredSnapshotFileRelativePath = selected.RelativePath;
+                _preferredSnapshotFileVersionId = selected.FileVersionId;
+            }
+            else
+            {
+                _preferredSnapshotFileRelativePath = null;
+                _preferredSnapshotFileVersionId = null;
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // quick navigation cancels stale snapshot-file loads
         }
         catch (Exception ex)
         {
+            if (!IsLatestSnapshotFilesLoadRequest(requestId))
+                return;
+
             _log.LogError(
                 ex,
                 "Failed to load snapshot files for repository {RepositoryId}, snapshot {SnapshotId}",
@@ -1177,12 +1324,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 snapshotId);
 
             SnapshotFiles.Clear();
+            _isClearingSnapshotFileSelection = true;
             SelectedSnapshotFile = null;
+            _isClearingSnapshotFileSelection = false;
             HasSnapshotFiles = false;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
         }
         finally
         {
-            IsSnapshotFilesLoading = false;
+            if (IsLatestSnapshotFilesLoadRequest(requestId))
+                IsSnapshotFilesLoading = false;
         }
     }
 
@@ -1232,10 +1384,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var previousDirectoryPath = clearSelection ? null : _selectedDirectoryPath;
         var previousItemPath = clearSelection ? null : SelectedItem?.RelativePath;
         var previousSnapshotId = clearSelection ? 0 : SelectedSnapshot?.SnapshotId ?? 0;
+        var previousSnapshotFilePath = clearSelection
+            ? null
+            : SelectedSnapshotFile?.RelativePath ?? _preferredSnapshotFileRelativePath;
+        long? previousVersionId = clearSelection
+            ? null
+            : SelectedVersion?.FileVersionId ?? _preferredSnapshotFileVersionId;
+
+        _preferredSnapshotId = previousSnapshotId > 0 ? previousSnapshotId : null;
+        _preferredSnapshotFileRelativePath = previousSnapshotFilePath;
+        _preferredSnapshotFileVersionId = previousVersionId;
 
         _entries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(RepositoryId));
         await LoadPendingChangesAsync();
         await LoadSnapshotHistoryAsync(previousSnapshotId);
+        if (SelectedSnapshot is not null)
+            await LoadSnapshotFilesForSelectedSnapshotAsync(SelectedSnapshot.SnapshotId);
         BuildTree();
 
         if (!string.IsNullOrWhiteSpace(previousDirectoryPath)
@@ -1291,11 +1455,79 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (success)
         {
             ScanPercent = 100;
-            ScanMessage = "Ð“Ð¾Ñ‚Ð¾Ð²Ð¾";
+            ScanMessage = "Done";
         }
 
         ScanIsIndeterminate = false;
         IsScanRunning = false;
+    }
+
+    private void CancelPanelLoadRequests()
+    {
+        CancelSnapshotFilesLoadRequest();
+        CancelVersionsLoadRequest();
+    }
+
+    private (long RequestId, CancellationToken Token) BeginSnapshotFilesLoadRequest()
+    {
+        CancelSnapshotFilesLoadRequest();
+
+        _snapshotFilesLoadCts = new CancellationTokenSource();
+        var requestId = Interlocked.Increment(ref _snapshotFilesLoadRequestId);
+        return (requestId, _snapshotFilesLoadCts.Token);
+    }
+
+    private bool IsLatestSnapshotFilesLoadRequest(long requestId)
+        => requestId == Volatile.Read(ref _snapshotFilesLoadRequestId);
+
+    private void CancelSnapshotFilesLoadRequest()
+    {
+        if (_snapshotFilesLoadCts is null)
+            return;
+
+        try
+        {
+            _snapshotFilesLoadCts.Cancel();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _snapshotFilesLoadCts.Dispose();
+            _snapshotFilesLoadCts = null;
+        }
+    }
+
+    private (long RequestId, CancellationToken Token) BeginVersionsLoadRequest()
+    {
+        CancelVersionsLoadRequest();
+
+        _versionsLoadCts = new CancellationTokenSource();
+        var requestId = Interlocked.Increment(ref _versionsLoadRequestId);
+        return (requestId, _versionsLoadCts.Token);
+    }
+
+    private bool IsLatestVersionsLoadRequest(long requestId)
+        => requestId == Volatile.Read(ref _versionsLoadRequestId);
+
+    private void CancelVersionsLoadRequest()
+    {
+        if (_versionsLoadCts is null)
+            return;
+
+        try
+        {
+            _versionsLoadCts.Cancel();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _versionsLoadCts.Dispose();
+            _versionsLoadCts = null;
+        }
     }
 
     private void StartLiveSync(string rootPath, IReadOnlyCollection<string> linkedFormats)
@@ -1347,6 +1579,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private void StopLiveSync()
     {
         IsLiveSyncActive = false;
+        CancelPanelLoadRequests();
 
         if (_liveSyncWatcher is not null)
         {
@@ -1464,7 +1697,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_live_watcher",
-            fallbackMessage: "Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¸Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ð¹...",
+            fallbackMessage: "Synchronizing file changes...",
             showErrors: false,
             successMessage: null);
     }
@@ -1582,9 +1815,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static ExplorerItemViewModel MapToItem(RepositoryScanEntryDto entry)
     {
         var type = entry.IsDirectory
-            ? "ÐŸÐ°Ð¿ÐºÐ°"
+            ? "Folder"
             : string.IsNullOrWhiteSpace(entry.Extension)
-                ? "Ð¤Ð°Ð¹Ð»"
+                ? "File"
                 : entry.Extension.TrimStart('.').ToUpperInvariant();
 
         return new ExplorerItemViewModel
@@ -1594,7 +1827,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsDirectory = entry.IsDirectory,
             Name = entry.Name,
             Type = type,
-            SizeDisplay = entry.IsDirectory ? "â€”" : FormatSize(entry.SizeBytes),
+            SizeDisplay = entry.IsDirectory ? "-" : FormatSize(entry.SizeBytes),
             ModifiedDisplay = FormatLastActivity(entry.LastWriteUtc),
             HashSha256 = entry.ContentHashSha256
         };
@@ -1616,6 +1849,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private static string? NormalizeParent(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private void OnFileVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasNoFileVersions));
+    }
 
     private void OnDiffPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -1803,17 +2041,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static string FormatLastActivity(DateTime utc)
     {
         var delta = DateTime.UtcNow - utc;
-        if (delta.TotalSeconds < 60) return "Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ñ‡Ñ‚Ð¾";
-        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} Ð¼Ð¸Ð½ Ð½Ð°Ð·Ð°Ð´";
-        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} Ñ‡ Ð½Ð°Ð·Ð°Ð´";
-        return $"{(int)delta.TotalDays} Ð´Ð½ Ð½Ð°Ð·Ð°Ð´";
+        if (delta.TotalSeconds < 60) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} min ago";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} h ago";
+        return $"{(int)delta.TotalDays} d ago";
     }
     private static string FormatSize(long bytes)
     {
-        if (bytes < 1024) return $"{bytes} Ð‘";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} ÐšÐ‘";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} ÐœÐ‘";
-        return $"{bytes / (1024.0 * 1024 * 1024):F1} Ð“Ð‘";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 
     private string BuildSuggestedBundleFileName()

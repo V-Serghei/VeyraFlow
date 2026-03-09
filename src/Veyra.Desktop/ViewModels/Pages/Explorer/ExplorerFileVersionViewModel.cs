@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
@@ -11,26 +12,48 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
     public bool IsDeletionMarker { get; init; }
     public bool HasContentBlocks { get; init; }
     public string ContentHashSha256 { get; init; } = string.Empty;
+    public string RelativePath { get; init; } = string.Empty;
+
+    public string VersionName => $"v{FileVersionId}";
 
     public string Title
     {
         get
         {
             var baseTitle = IsDeletionMarker
-                ? $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss} · удаление"
+                ? $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss} · deleted"
                 : $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss}";
 
-            return HasContentBlocks ? baseTitle : baseTitle + " · без данных";
+            return HasContentBlocks ? baseTitle : baseTitle + " · no content";
         }
     }
 
+    public string FileName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(RelativePath))
+                return "(unknown)";
+
+            var normalized = RelativePath.Replace('\\', '/');
+            return Path.GetFileName(normalized);
+        }
+    }
+
+    public string CreatedAtDisplay => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     public string SizeDisplay => IsDeletionMarker ? "—" : FormatSize(SizeBytes);
+    public string HashDisplay => string.IsNullOrWhiteSpace(ContentHashSha256) ? "—" : ContentHashSha256;
+    public string HashShort => string.IsNullOrWhiteSpace(ContentHashSha256)
+        ? "—"
+        : ContentHashSha256.Length <= 16
+            ? ContentHashSha256
+            : ContentHashSha256[..16] + "...";
 
     private static string FormatSize(long bytes)
     {
-        if (bytes < 1024) return $"{bytes} Б";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} МБ";
-        return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }

@@ -1,42 +1,99 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Styles.Resources>
+        <!-- Design tokens: palette -->
+        <Color x:Key="VeyraColorBg0">#08111F</Color>
+        <Color x:Key="VeyraColorBg1">#0F1D31</Color>
+        <Color x:Key="VeyraColorBg2">#162841</Color>
+        <Color x:Key="VeyraColorSurface">#142338</Color>
+        <Color x:Key="VeyraColorSurfaceRaised">#1B2F4A</Color>
+        <Color x:Key="VeyraColorSurfaceSoft">#112033</Color>
+        <Color x:Key="VeyraColorBorder">#35577D</Color>
+        <Color x:Key="VeyraColorBorderSoft">#2B4665</Color>
+        <Color x:Key="VeyraColorAccent">#4ED5B6</Color>
+        <Color x:Key="VeyraColorAccentStrong">#2FB997</Color>
+        <Color x:Key="VeyraColorAccentSubtle">#1E665A</Color>
+        <Color x:Key="VeyraColorText">#F6FAFF</Color>
+        <Color x:Key="VeyraColorTextMuted">#B7CBE3</Color>
+        <Color x:Key="VeyraColorTextSoft">#8FA7C5</Color>
+        <Color x:Key="VeyraColorDanger">#FF7A92</Color>
+        <Color x:Key="VeyraColorWarning">#FFCA6E</Color>
+        <Color x:Key="VeyraColorSuccess">#7BE8C8</Color>
+        <Color x:Key="VeyraColorFocus">#8FD4FF</Color>
+        <Color x:Key="VeyraColorOverlay">#B30A1422</Color>
+
+        <!-- Backward-compatible brush keys -->
         <LinearGradientBrush x:Key="VeyraCanvasBrush" StartPoint="0,0" EndPoint="1,1">
-            <GradientStop Color="#0A111A" Offset="0"/>
-            <GradientStop Color="#0D1623" Offset="0.5"/>
-            <GradientStop Color="#0A1D2A" Offset="1"/>
+            <GradientStop Color="{StaticResource VeyraColorBg0}" Offset="0"/>
+            <GradientStop Color="{StaticResource VeyraColorBg1}" Offset="0.55"/>
+            <GradientStop Color="{StaticResource VeyraColorBg2}" Offset="1"/>
         </LinearGradientBrush>
 
-        <SolidColorBrush x:Key="VeyraSurfaceBrush" Color="#121D2B"/>
-        <SolidColorBrush x:Key="VeyraSurfaceRaisedBrush" Color="#182638"/>
-        <SolidColorBrush x:Key="VeyraSurfaceSoftBrush" Color="#0F1926"/>
-        <SolidColorBrush x:Key="VeyraBorderBrush" Color="#28405A"/>
-        <SolidColorBrush x:Key="VeyraBorderSoftBrush" Color="#203449"/>
-        <SolidColorBrush x:Key="VeyraAccentBrush" Color="#2FB8A8"/>
-        <SolidColorBrush x:Key="VeyraAccentStrongBrush" Color="#1F8D80"/>
-        <SolidColorBrush x:Key="VeyraTextPrimaryBrush" Color="#F2F6FB"/>
-        <SolidColorBrush x:Key="VeyraTextMutedBrush" Color="#AABBCF"/>
-        <SolidColorBrush x:Key="VeyraDangerBrush" Color="#FF7B85"/>
-        <SolidColorBrush x:Key="VeyraWarningBrush" Color="#FFC867"/>
+        <SolidColorBrush x:Key="VeyraSurfaceBrush" Color="{StaticResource VeyraColorSurface}"/>
+        <SolidColorBrush x:Key="VeyraSurfaceRaisedBrush" Color="{StaticResource VeyraColorSurfaceRaised}"/>
+        <SolidColorBrush x:Key="VeyraSurfaceSoftBrush" Color="{StaticResource VeyraColorSurfaceSoft}"/>
+        <SolidColorBrush x:Key="VeyraBorderBrush" Color="{StaticResource VeyraColorBorder}"/>
+        <SolidColorBrush x:Key="VeyraBorderSoftBrush" Color="{StaticResource VeyraColorBorderSoft}"/>
+        <SolidColorBrush x:Key="VeyraAccentBrush" Color="{StaticResource VeyraColorAccent}"/>
+        <SolidColorBrush x:Key="VeyraAccentStrongBrush" Color="{StaticResource VeyraColorAccentStrong}"/>
+        <SolidColorBrush x:Key="VeyraTextPrimaryBrush" Color="{StaticResource VeyraColorText}"/>
+        <SolidColorBrush x:Key="VeyraTextMutedBrush" Color="{StaticResource VeyraColorTextMuted}"/>
+        <SolidColorBrush x:Key="VeyraDangerBrush" Color="{StaticResource VeyraColorDanger}"/>
+        <SolidColorBrush x:Key="VeyraWarningBrush" Color="{StaticResource VeyraColorWarning}"/>
+        <SolidColorBrush x:Key="VeyraSuccessBrush" Color="{StaticResource VeyraColorSuccess}"/>
+        <SolidColorBrush x:Key="VeyraOverlayBrush" Color="{StaticResource VeyraColorOverlay}"/>
+        <!-- Design tokens: typography -->
+<x:Double x:Key="VeyraFontSmall">11</x:Double>
+        <x:Double x:Key="VeyraFontBody">13</x:Double>
+        <x:Double x:Key="VeyraFontTitle">18</x:Double>
+        <x:Double x:Key="VeyraFontHero">24</x:Double>
     </Styles.Resources>
 
-    <Style Selector="UserControl">
-        <Setter Property="FontFamily" Value="Bahnschrift, Segoe UI"/>
+    <!-- App baseline -->
+    <Style Selector="UserControl,Window">
+        <Setter Property="FontFamily" Value="Segoe UI Variable, Bahnschrift, Segoe UI"/>
+        <Setter Property="FontSize" Value="{DynamicResource VeyraFontBody}"/>
     </Style>
 
-    <Style Selector="TextBlock">
+    
+    <Style Selector="TextBlock.caption">
+        <Setter Property="FontSize" Value="{DynamicResource VeyraFontSmall}"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
+        <Setter Property="Opacity" Value="0.9"/>
+    </Style>
+
+    
+    <Style Selector="TextBlock.muted">
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
+        <Setter Property="Opacity" Value="0.92"/>
+    </Style>
+
+    <Style Selector="TextBlock.section-title">
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
     </Style>
 
+    <!-- Surfaces -->
     <Style Selector="Border.panel">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="14"/>
+        <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="12"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
+                <BrushTransition Property="Background" Duration="0:0:0.12"/>
+            </Transitions>
+        </Setter>
     </Style>
 
-    <Style Selector="Border.hero">
+    <Style Selector="Border.panel:hover">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.hero, Border.dialog-hero">
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="16"/>
@@ -44,93 +101,189 @@
         <Setter Property="Background">
             <Setter.Value>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#1A2A3E" Offset="0"/>
-                    <GradientStop Color="#102033" Offset="0.55"/>
-                    <GradientStop Color="#132E3A" Offset="1"/>
+                    <GradientStop Color="#1D3C63" Offset="0"/>
+                    <GradientStop Color="#194A6D" Offset="0.45"/>
+                    <GradientStop Color="#1D605E" Offset="1"/>
                 </LinearGradientBrush>
             </Setter.Value>
         </Setter>
     </Style>
 
+    <Style Selector="Border.card, Border.list-item, Border.dialog-shell, Border.diff-surface">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.10"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.10"/>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.10"/>
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="Border.card:hover, Border.list-item:hover">
+        <Setter Property="Background" Value="#223955"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
+    </Style>
+
+    <Style Selector="Border.diff-side">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="8,4"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="#3B6186"/>
+    </Style>
+
+    <Style Selector="Border.overlay-backdrop">
+        <Setter Property="Background" Value="{DynamicResource VeyraOverlayBrush}"/>
+    </Style>
+
+    <!-- Badges -->
+    <Style Selector="Border.badge">
+        <Setter Property="CornerRadius" Value="999"/>
+        <Setter Property="Padding" Value="8,3"/>
+        <Setter Property="Background" Value="#2A4868"/>
+        <Setter Property="BorderBrush" Value="#456A90"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+
+    <Style Selector="Border.badge.success">
+        <Setter Property="Background" Value="#224E43"/>
+        <Setter Property="BorderBrush" Value="#3E816F"/>
+    </Style>
+
+    <Style Selector="Border.badge.warning">
+        <Setter Property="Background" Value="#5A4620"/>
+        <Setter Property="BorderBrush" Value="#8D6D2F"/>
+    </Style>
+
+    <Style Selector="Border.badge.danger">
+        <Setter Property="Background" Value="#5A2531"/>
+        <Setter Property="BorderBrush" Value="#8E3C4E"/>
+    </Style>
+
+    <!-- Buttons + states -->
     <Style Selector="Button">
-        <Setter Property="Background" Value="#1B2B3D"/>
+        <Setter Property="Background" Value="#233A56"/>
         <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="#315171"/>
+        <Setter Property="BorderBrush" Value="#42678D"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="Padding" Value="12,8"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
+    <Style Selector="Button /template/ ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.11"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.11"/>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.11"/>
+            </Transitions>
+        </Setter>
+    </Style>
+
     <Style Selector="Button:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#25425E"/>
+        <Setter Property="Background" Value="#2C4D70"/>
+        <Setter Property="BorderBrush" Value="#5F89B6"/>
     </Style>
 
     <Style Selector="Button:pressed /template/ ContentPresenter">
-        <Setter Property="Background" Value="#183249"/>
+        <Setter Property="Background" Value="#1B3550"/>
+        <Setter Property="BorderBrush" Value="#3B638A"/>
+    </Style>
+
+    <Style Selector="Button:disabled /template/ ContentPresenter">
+        <Setter Property="Opacity" Value="0.45"/>
+        <Setter Property="Background" Value="#1C2A3A"/>
+    </Style>
+
+    <Style Selector="Button:focus-visible /template/ ContentPresenter">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraColorFocus}"/>
     </Style>
 
     <Style Selector="Button.primary">
         <Setter Property="Background" Value="{DynamicResource VeyraAccentBrush}"/>
-        <Setter Property="Foreground" Value="#052A28"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraAccentStrongBrush}"/>
+        <Setter Property="Foreground" Value="#04352E"/>
     </Style>
 
     <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#38CDBB"/>
+        <Setter Property="Background" Value="#63E8C8"/>
+        <Setter Property="BorderBrush" Value="#3CCCA8"/>
     </Style>
 
     <Style Selector="Button.subtle">
-        <Setter Property="Background" Value="#122031"/>
-        <Setter Property="BorderBrush" Value="#274058"/>
+        <Setter Property="Background" Value="#1A2C43"/>
+        <Setter Property="BorderBrush" Value="#3A5B7F"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
     </Style>
 
-    <Style Selector="TextBox">
-        <Setter Property="Background" Value="#0E1824"/>
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="#5A2634"/>
+        <Setter Property="BorderBrush" Value="#8A3E53"/>
+        <Setter Property="Foreground" Value="#FFDCE4"/>
+    </Style>
+
+    <Style Selector="Button.success">
+        <Setter Property="Background" Value="#1F4D42"/>
+        <Setter Property="BorderBrush" Value="#337665"/>
+        <Setter Property="Foreground" Value="#CFFFF2"/>
+    </Style>
+
+    <!-- Inputs + states -->
+    <Style Selector="TextBox, ComboBox">
+        <Setter Property="Background" Value="#102138"/>
         <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="#2C455F"/>
+        <Setter Property="BorderBrush" Value="#34587D"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="10,8"/>
         <Setter Property="CornerRadius" Value="10"/>
-        <Setter Property="SelectionBrush" Value="#6692D4FF"/>
     </Style>
 
-    <Style Selector="ComboBox">
-        <Setter Property="Background" Value="#0E1824"/>
-        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="#2C455F"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="10,8"/>
-        <Setter Property="CornerRadius" Value="10"/>
+    <Style Selector="TextBox:focus-visible, ComboBox:focus-visible">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraColorFocus}"/>
+    </Style>
+
+    <Style Selector="TextBox:disabled, ComboBox:disabled">
+        <Setter Property="Opacity" Value="0.55"/>
+    </Style>
+
+    <Style Selector="TextBox.error, ComboBox.error">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraDangerBrush}"/>
     </Style>
 
     <Style Selector="ProgressBar">
-        <Setter Property="Background" Value="#102133"/>
+        <Setter Property="Background" Value="#18314B"/>
         <Setter Property="Foreground" Value="{DynamicResource VeyraAccentBrush}"/>
     </Style>
 
-    <Style Selector="TreeView">
+    <Style Selector="TreeView, ListBox.clean-list">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="0"/>
     </Style>
 
-    <Style Selector="TextBlock.caption">
-        <Setter Property="Opacity" Value="0.76"/>
-        <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
+    <Style Selector="ListBox.clean-list > ListBoxItem">
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="0,0,0,8"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
     </Style>
 
-    <Style Selector="TextBlock.section-title">
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
+    <Style Selector="ListBox.clean-list > ListBoxItem:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#243E5C"/>
     </Style>
 
-    <Style Selector="Border.card">
-        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="12"/>
-        <Setter Property="Padding" Value="10"/>
+    <Style Selector="ListBox.clean-list > ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="#2E4E73"/>
     </Style>
 </Styles>
+
+
+
+
+
+

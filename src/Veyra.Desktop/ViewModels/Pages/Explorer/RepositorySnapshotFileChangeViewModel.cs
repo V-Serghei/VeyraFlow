@@ -1,3 +1,5 @@
+﻿using System;
+
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
 public sealed class RepositorySnapshotFileChangeViewModel
@@ -10,6 +12,7 @@ public sealed class RepositorySnapshotFileChangeViewModel
     public string ChangeKind { get; init; } = string.Empty;
     public long CurrentSizeBytes { get; init; }
     public long PreviousSizeBytes { get; init; }
+    public DateTime VersionCreatedAtUtc { get; init; }
 
     public string ChangeKindLabel => ChangeKind switch
     {
@@ -35,4 +38,6 @@ public sealed class RepositorySnapshotFileChangeViewModel
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
+
+
 

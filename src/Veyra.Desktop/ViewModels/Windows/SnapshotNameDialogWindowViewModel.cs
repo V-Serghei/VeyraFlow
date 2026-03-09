@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -15,11 +16,17 @@ namespace Veyra.Desktop.ViewModels.Windows;
 
 public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 {
+    private const int ContextCollapseThreshold = 14;
+    private const int ContextKeepEdgeLines = 3;
+    private static readonly Regex WordDiffTokenRegex = new(@"\w+|\s+|[^\w\s]", RegexOptions.Compiled);
     public event Action<bool>? RequestClose;
 
     private Func<SnapshotPendingFileItemViewModel, CancellationToken, Task<PendingFileDiffPreviewDto>>? _previewLoader;
     private CancellationTokenSource? _previewCts;
     private readonly List<string> _tempPreviewFiles = [];
+
+    private IReadOnlyList<TextDiffLineDto> _currentTextLines = Array.Empty<TextDiffLineDto>();
+    private IReadOnlyList<TextDiffHunkDto> _currentTextHunks = Array.Empty<TextDiffHunkDto>();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -60,6 +67,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
     private Bitmap? _rightImagePreview;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
+    private bool _isWrapEnabled;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPinnedHunkHeader))]
+    private string _pinnedHunkHeader = string.Empty;
+
     [ObservableProperty] private string _leftImageCaption = "Before";
     [ObservableProperty] private string _rightImageCaption = "After";
 
@@ -93,12 +108,15 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
     public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
     public bool HasNoImagePreviews => !HasImagePreviews;
+    public bool HasPinnedHunkHeader => !string.IsNullOrWhiteSpace(PinnedHunkHeader);
 
     public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && HasPreviewRows;
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
 
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
+
+    public string WrapToggleLabel => IsWrapEnabled ? "Wrap: On" : "Wrap: Off";
 
     public string ChangedFilesCountLabel => HasChangedFiles
         ? $"{ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s") }"
@@ -185,6 +203,84 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         RequestClose?.Invoke(true);
     }
 
+    [RelayCommand]
+    private void ToggleWrapMode()
+    {
+        IsWrapEnabled = !IsWrapEnabled;
+    }
+
+    [RelayCommand]
+    private void ExpandContextFold(SnapshotDiffRowItemViewModel? row)
+    {
+        if (row is null || !row.IsContextFoldRow || row.HiddenContextRows.Count == 0)
+            return;
+
+        var index = PreviewRows.IndexOf(row);
+        if (index < 0)
+            return;
+
+        PreviewRows.RemoveAt(index);
+
+        var insertAt = index;
+        foreach (var hidden in row.HiddenContextRows)
+        {
+            PreviewRows.Insert(insertAt, hidden);
+            insertAt++;
+        }
+
+        RefreshPinnedHunkHeaderFromRows();
+    }
+
+    [RelayCommand]
+    private void PinHunkHeader(SnapshotDiffRowItemViewModel? row)
+    {
+        if (row is null)
+            return;
+
+        if (row.IsHunkHeader)
+        {
+            PinnedHunkHeader = row.HunkHeader;
+            return;
+        }
+
+        var index = PreviewRows.IndexOf(row);
+        if (index < 0)
+            return;
+
+        for (var i = index; i >= 0; i--)
+        {
+            if (!PreviewRows[i].IsHunkHeader)
+                continue;
+
+            PinnedHunkHeader = PreviewRows[i].HunkHeader;
+            return;
+        }
+    }
+
+    public void UpdatePinnedHunkHeaderByScroll(double verticalOffset)
+    {
+        if (PreviewRows.Count == 0)
+        {
+            PinnedHunkHeader = string.Empty;
+            return;
+        }
+
+        const double estimatedRowHeight = 34d;
+        var startIndex = (int)Math.Floor(Math.Max(0, verticalOffset) / estimatedRowHeight);
+        if (startIndex >= PreviewRows.Count)
+            startIndex = PreviewRows.Count - 1;
+
+        for (var i = startIndex; i >= 0; i--)
+        {
+            if (!PreviewRows[i].IsHunkHeader)
+                continue;
+
+            PinnedHunkHeader = PreviewRows[i].HunkHeader;
+            return;
+        }
+
+        PinnedHunkHeader = PreviewRows.FirstOrDefault(x => x.IsHunkHeader)?.HunkHeader ?? string.Empty;
+    }
     private async Task LoadPreviewForSelectionAsync(SnapshotPendingFileItemViewModel? file)
     {
         _previewCts?.Cancel();
@@ -231,10 +327,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             {
                 case PendingDiffPreviewKind.Text:
                 {
-                    var rows = BuildPreviewRows(preview.Lines, preview.Hunks);
-                    PreviewRows.Clear();
-                    foreach (var row in rows)
-                        PreviewRows.Add(row);
+                    _currentTextLines = preview.Lines;
+                    _currentTextHunks = preview.Hunks;
+                    RebuildTextPreviewRows();
 
                     PreviewKind = PendingDiffPreviewKind.Text;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
@@ -281,6 +376,23 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         }
     }
 
+    private void RebuildTextPreviewRows()
+    {
+        PreviewRows.Clear();
+
+        if (_currentTextLines.Count == 0)
+        {
+            PinnedHunkHeader = string.Empty;
+            return;
+        }
+
+        var rows = BuildPreviewRows(_currentTextLines, _currentTextHunks);
+        foreach (var row in rows)
+            PreviewRows.Add(row);
+
+        RefreshPinnedHunkHeaderFromRows();
+    }
+
     private async Task LoadImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
     {
         LeftImageCaption = "Before";
@@ -314,7 +426,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         if (width is null || height is null)
             return prefix;
 
-        return $"{prefix} · {width} x {height}";
+        return $"{prefix} - {width} x {height}";
     }
 
     private void ApplyBinaryMetrics(
@@ -360,7 +472,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 "Dimensions",
-                $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? " (changed)" : "")));
+                $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? " (changed)" : string.Empty)));
 
             if (imagePreview.SimilarityRatio.HasValue)
             {
@@ -407,6 +519,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         PreviewSummary = message;
         PreviewRows.Clear();
         PreviewMetrics.Clear();
+        PinnedHunkHeader = string.Empty;
+        _currentTextLines = Array.Empty<TextDiffLineDto>();
+        _currentTextHunks = Array.Empty<TextDiffHunkDto>();
     }
 
     private void ReleasePreviewResources()
@@ -414,6 +529,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         PreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
+        PinnedHunkHeader = string.Empty;
+        _currentTextLines = Array.Empty<TextDiffLineDto>();
+        _currentTextHunks = Array.Empty<TextDiffHunkDto>();
 
         LeftImagePreview?.Dispose();
         RightImagePreview?.Dispose();
@@ -449,32 +567,99 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         if (hunks.Count > 0)
         {
+            var hunkSequence = 0;
             foreach (var hunk in hunks.OrderBy(h => h.Sequence))
             {
+                hunkSequence++;
+
                 var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
                 var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
 
                 rows.Add(SnapshotDiffRowItemViewModel.CreateHunkHeader(
+                    hunkSequence,
                     FormatHunkRange(hunk.OldStartLine, hunk.OldLineCount),
                     FormatHunkRange(hunk.NewStartLine, hunk.NewLineCount),
                     NormalizeChangeKindLabel(hunk.ChangeKind)));
 
-                AppendHunkRows(lines, start, end, rows);
+                var hunkRows = new List<SnapshotDiffRowItemViewModel>();
+                AppendHunkRows(lines, start, end, hunkSequence, hunkRows);
+                rows.AddRange(CollapseContextRows(hunkRows, hunkSequence));
             }
         }
         else
         {
-            rows.Add(SnapshotDiffRowItemViewModel.CreateHunkHeader("(full)", "(full)", "context"));
-            AppendHunkRows(lines, 0, lines.Count - 1, rows);
+            rows.Add(SnapshotDiffRowItemViewModel.CreateHunkHeader(1, "(full)", "(full)", "context"));
+            var hunkRows = new List<SnapshotDiffRowItemViewModel>();
+            AppendHunkRows(lines, 0, lines.Count - 1, 1, hunkRows);
+            rows.AddRange(CollapseContextRows(hunkRows, 1));
         }
 
         return rows;
+    }
+
+    private static IReadOnlyList<SnapshotDiffRowItemViewModel> CollapseContextRows(
+        IReadOnlyList<SnapshotDiffRowItemViewModel> source,
+        int hunkSequence)
+    {
+        if (source.Count == 0)
+            return source;
+
+        var collapsed = new List<SnapshotDiffRowItemViewModel>(source.Count);
+
+        var index = 0;
+        while (index < source.Count)
+        {
+            if (!string.Equals(source[index].DiffKind, "context", StringComparison.Ordinal))
+            {
+                collapsed.Add(source[index]);
+                index++;
+                continue;
+            }
+
+            var start = index;
+            while (index < source.Count
+                   && string.Equals(source[index].DiffKind, "context", StringComparison.Ordinal))
+            {
+                index++;
+            }
+
+            var count = index - start;
+            if (count <= ContextCollapseThreshold)
+            {
+                for (var i = start; i < index; i++)
+                    collapsed.Add(source[i]);
+
+                continue;
+            }
+
+            var keepHead = Math.Min(ContextKeepEdgeLines, count / 2);
+            var keepTail = Math.Min(ContextKeepEdgeLines, count - keepHead);
+            var hiddenCount = count - keepHead - keepTail;
+
+            for (var i = start; i < start + keepHead; i++)
+                collapsed.Add(source[i]);
+
+            var hidden = source.Skip(start + keepHead)
+                .Take(hiddenCount)
+                .ToList();
+
+            collapsed.Add(SnapshotDiffRowItemViewModel.CreateContextFold(
+                hunkSequence,
+                hiddenCount,
+                hidden));
+
+            for (var i = index - keepTail; i < index; i++)
+                collapsed.Add(source[i]);
+        }
+
+        return collapsed;
     }
 
     private static void AppendHunkRows(
         IReadOnlyList<TextDiffLineDto> lines,
         int startInclusive,
         int endInclusive,
+        int hunkSequence,
         ICollection<SnapshotDiffRowItemViewModel> rows)
     {
         if (startInclusive > endInclusive)
@@ -510,7 +695,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 {
                     var left = i < removed.Count ? removed[i] : null;
                     var right = i < added.Count ? added[i] : null;
-                    rows.Add(CreatePairedDiffRow(left, right));
+                    rows.Add(CreatePairedDiffRow(left, right, hunkSequence));
                 }
 
                 continue;
@@ -520,69 +705,323 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             {
                 while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "add")
                 {
-                    rows.Add(CreatePairedDiffRow(null, lines[index]));
+                    rows.Add(CreatePairedDiffRow(null, lines[index], hunkSequence));
                     index++;
                 }
 
                 continue;
             }
 
-            rows.Add(CreatePairedDiffRow(lines[index], lines[index]));
+            rows.Add(CreatePairedDiffRow(lines[index], lines[index], hunkSequence));
             index++;
         }
     }
 
     private static SnapshotDiffRowItemViewModel CreatePairedDiffRow(
         TextDiffLineDto? left,
-        TextDiffLineDto? right)
+        TextDiffLineDto? right,
+        int hunkSequence)
     {
         var leftKind = NormalizeDiffKind(left?.Kind);
         var rightKind = NormalizeDiffKind(right?.Kind);
 
-        return new SnapshotDiffRowItemViewModel
-        {
-            LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
-            LeftMarker = leftKind switch
-            {
-                "remove" => "-",
-                "equal" => "|",
-                _ => " "
-            },
-            LeftText = left?.Text ?? string.Empty,
-            LeftBackground = leftKind switch
-            {
-                "remove" => "#45202B",
-                "equal" => "#173149",
-                _ => "#10233A"
-            },
-            LeftMarkerForeground = leftKind switch
-            {
-                "remove" => "#FF8FA3",
-                "equal" => "#9BB5D1",
-                _ => "#94AECB"
-            },
-            RightLineNumber = right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
-            RightMarker = rightKind switch
-            {
-                "add" => "+",
-                "equal" => "|",
-                _ => " "
-            },
-            RightText = right?.Text ?? string.Empty,
-            RightBackground = rightKind switch
-            {
-                "add" => "#1E4A39",
-                "equal" => "#173149",
-                _ => "#10233A"
-            },
-            RightMarkerForeground = rightKind switch
-            {
-                "add" => "#89FFD0",
-                "equal" => "#9BB5D1",
-                _ => "#94AECB"
-            }
-        };
+        var rowKind = ResolveRowKind(leftKind, rightKind, left, right);
+
+        var leftSegments = BuildSideSegments(
+            left?.Text ?? string.Empty,
+            rowKind,
+            isRightSide: false,
+            left?.Text,
+            right?.Text);
+
+        var rightSegments = BuildSideSegments(
+            right?.Text ?? string.Empty,
+            rowKind,
+            isRightSide: true,
+            left?.Text,
+            right?.Text);
+
+        return SnapshotDiffRowItemViewModel.CreateContentRow(
+            hunkSequence,
+            rowKind,
+            left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
+            GetMarker(rowKind, isRightSide: false),
+            GetBackground(rowKind, isRightSide: false),
+            GetMarkerForeground(rowKind, isRightSide: false),
+            leftSegments,
+            right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
+            GetMarker(rowKind, isRightSide: true),
+            GetBackground(rowKind, isRightSide: true),
+            GetMarkerForeground(rowKind, isRightSide: true),
+            rightSegments);
     }
+
+    private static IReadOnlyList<SnapshotDiffTextSegmentViewModel> BuildSideSegments(
+        string sideText,
+        string rowKind,
+        bool isRightSide,
+        string? leftText,
+        string? rightText)
+    {
+        if (rowKind == "modified"
+            && !string.IsNullOrEmpty(leftText)
+            && !string.IsNullOrEmpty(rightText))
+        {
+            return BuildModifiedSegments(leftText, rightText, isRightSide);
+        }
+
+        var (fg, bg, emphasized) = GetSegmentColors(rowKind, isRightSide, isChangedChunk: true);
+        return
+        [
+            new SnapshotDiffTextSegmentViewModel
+            {
+                Text = sideText,
+                Foreground = fg,
+                Background = bg,
+                IsEmphasized = emphasized
+            }
+        ];
+    }
+
+    private static IReadOnlyList<SnapshotDiffTextSegmentViewModel> BuildModifiedSegments(
+        string leftText,
+        string rightText,
+        bool isRightSide)
+    {
+        if (string.Equals(leftText, rightText, StringComparison.Ordinal))
+            return BuildSideSegments(isRightSide ? rightText : leftText, "context", isRightSide, leftText, rightText);
+
+        var leftTokens = TokenizeWordDiffText(leftText);
+        var rightTokens = TokenizeWordDiffText(rightText);
+        var operations = BuildWordDiffOperations(leftTokens, rightTokens);
+
+        var segments = new List<SnapshotDiffTextSegmentViewModel>(Math.Max(leftTokens.Count, rightTokens.Count) + 2);
+
+        foreach (var operation in operations)
+        {
+            switch (operation.Kind)
+            {
+                case WordDiffOperationKind.Equal:
+                    AppendSegment(segments, operation.Token, "context", isRightSide, isChangedChunk: false);
+                    break;
+                case WordDiffOperationKind.Remove when !isRightSide:
+                    AppendSegment(segments, operation.Token, "remove", isRightSide, isChangedChunk: true);
+                    break;
+                case WordDiffOperationKind.Add when isRightSide:
+                    AppendSegment(segments, operation.Token, "add", isRightSide, isChangedChunk: true);
+                    break;
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            var (fg, bg, emphasized) = GetSegmentColors("context", isRightSide, isChangedChunk: false);
+            segments.Add(new SnapshotDiffTextSegmentViewModel
+            {
+                Text = string.Empty,
+                Foreground = fg,
+                Background = bg,
+                IsEmphasized = emphasized
+            });
+        }
+
+        return segments;
+    }
+
+    private static IReadOnlyList<string> TokenizeWordDiffText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return [string.Empty];
+
+        var matches = WordDiffTokenRegex.Matches(text);
+        if (matches.Count == 0)
+            return [text];
+
+        var tokens = new List<string>(matches.Count);
+        foreach (Match match in matches)
+            tokens.Add(match.Value);
+
+        return tokens;
+    }
+
+    private static IReadOnlyList<WordDiffOperation> BuildWordDiffOperations(
+        IReadOnlyList<string> leftTokens,
+        IReadOnlyList<string> rightTokens)
+    {
+        var leftCount = leftTokens.Count;
+        var rightCount = rightTokens.Count;
+
+        var lcs = new int[leftCount + 1, rightCount + 1];
+        for (var i = leftCount - 1; i >= 0; i--)
+        {
+            for (var j = rightCount - 1; j >= 0; j--)
+            {
+                lcs[i, j] = string.Equals(leftTokens[i], rightTokens[j], StringComparison.Ordinal)
+                    ? lcs[i + 1, j + 1] + 1
+                    : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+            }
+        }
+
+        var operations = new List<WordDiffOperation>(leftCount + rightCount);
+        var leftIndex = 0;
+        var rightIndex = 0;
+
+        while (leftIndex < leftCount && rightIndex < rightCount)
+        {
+            if (string.Equals(leftTokens[leftIndex], rightTokens[rightIndex], StringComparison.Ordinal))
+            {
+                operations.Add(new WordDiffOperation(WordDiffOperationKind.Equal, leftTokens[leftIndex]));
+                leftIndex++;
+                rightIndex++;
+                continue;
+            }
+
+            if (lcs[leftIndex + 1, rightIndex] >= lcs[leftIndex, rightIndex + 1])
+            {
+                operations.Add(new WordDiffOperation(WordDiffOperationKind.Remove, leftTokens[leftIndex]));
+                leftIndex++;
+            }
+            else
+            {
+                operations.Add(new WordDiffOperation(WordDiffOperationKind.Add, rightTokens[rightIndex]));
+                rightIndex++;
+            }
+        }
+
+        while (leftIndex < leftCount)
+        {
+            operations.Add(new WordDiffOperation(WordDiffOperationKind.Remove, leftTokens[leftIndex]));
+            leftIndex++;
+        }
+
+        while (rightIndex < rightCount)
+        {
+            operations.Add(new WordDiffOperation(WordDiffOperationKind.Add, rightTokens[rightIndex]));
+            rightIndex++;
+        }
+
+        return operations;
+    }
+
+    private static void AppendSegment(
+        IList<SnapshotDiffTextSegmentViewModel> segments,
+        string token,
+        string rowKind,
+        bool isRightSide,
+        bool isChangedChunk)
+    {
+        if (string.IsNullOrEmpty(token))
+            return;
+
+        var (fg, bg, emphasized) = GetSegmentColors(rowKind, isRightSide, isChangedChunk);
+
+        if (segments.Count > 0)
+        {
+            var last = segments[^1];
+            if (string.Equals(last.Foreground, fg, StringComparison.Ordinal)
+                && string.Equals(last.Background, bg, StringComparison.Ordinal)
+                && last.IsEmphasized == emphasized)
+            {
+                segments[^1] = new SnapshotDiffTextSegmentViewModel
+                {
+                    Text = last.Text + token,
+                    Foreground = last.Foreground,
+                    Background = last.Background,
+                    IsEmphasized = last.IsEmphasized
+                };
+                return;
+            }
+        }
+
+        segments.Add(new SnapshotDiffTextSegmentViewModel
+        {
+            Text = token,
+            Foreground = fg,
+            Background = bg,
+            IsEmphasized = emphasized
+        });
+    }
+
+    private enum WordDiffOperationKind
+    {
+        Equal,
+        Remove,
+        Add
+    }
+
+    private sealed record WordDiffOperation(WordDiffOperationKind Kind, string Token);
+    private static string ResolveRowKind(
+        string leftKind,
+        string rightKind,
+        TextDiffLineDto? left,
+        TextDiffLineDto? right)
+    {
+        if (left is not null && right is not null
+            && leftKind == "remove" && rightKind == "add")
+            return "modified";
+
+        if (left is not null && leftKind == "remove")
+            return "remove";
+
+        if (right is not null && rightKind == "add")
+            return "add";
+
+        return "context";
+    }
+
+    private static (string Foreground, string Background, bool Emphasized) GetSegmentColors(
+        string rowKind,
+        bool isRightSide,
+        bool isChangedChunk)
+    {
+        if (rowKind == "add" && isRightSide)
+            return ("#CCFFE9", isChangedChunk ? "#205841" : "Transparent", isChangedChunk);
+
+        if (rowKind == "remove" && !isRightSide)
+            return ("#FFDCE2", isChangedChunk ? "#6C2B39" : "Transparent", isChangedChunk);
+
+        if (rowKind == "modified")
+        {
+            if (isChangedChunk)
+                return isRightSide
+                    ? ("#C6FFEA", "#2A674D", true)
+                    : ("#FFE2E8", "#7A3344", true);
+
+            return ("#EAF2FF", "Transparent", false);
+        }
+
+        return ("#EAF2FF", "Transparent", false);
+    }
+
+    private static string GetBackground(string rowKind, bool isRightSide)
+        => rowKind switch
+        {
+            "add" when isRightSide => "#173E31",
+            "remove" when !isRightSide => "#3F1F28",
+            "modified" when isRightSide => "#1E4A39",
+            "modified" => "#45202B",
+            _ => "#142C46"
+        };
+
+    private static string GetMarkerForeground(string rowKind, bool isRightSide)
+        => rowKind switch
+        {
+            "add" when isRightSide => "#8DFFD0",
+            "remove" when !isRightSide => "#FF9FB0",
+            "modified" when isRightSide => "#8DFFD0",
+            "modified" => "#FF9FB0",
+            _ => "#A9C2DD"
+        };
+
+    private static string GetMarker(string rowKind, bool isRightSide)
+        => rowKind switch
+        {
+            "add" when isRightSide => "+",
+            "remove" when !isRightSide => "-",
+            "modified" when isRightSide => "+",
+            "modified" => "-",
+            _ => "|"
+        };
 
     private static string NormalizeDiffKind(string? kind)
     {
@@ -615,6 +1054,23 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private static string FormatLineNumber(int? lineNumber)
         => lineNumber is int value ? value.ToString("D4") : string.Empty;
 
+    private void RefreshPinnedHunkHeaderFromRows()
+    {
+        if (PreviewRows.Count == 0)
+        {
+            PinnedHunkHeader = string.Empty;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(PinnedHunkHeader)
+            && PreviewRows.Any(x => x.IsHunkHeader && string.Equals(x.HunkHeader, PinnedHunkHeader, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        PinnedHunkHeader = PreviewRows.FirstOrDefault(x => x.IsHunkHeader)?.HunkHeader ?? string.Empty;
+    }
+
     private void OnChangedFilesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasChangedFiles));
@@ -637,5 +1093,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoPreviewContent));
     }
 }
+
 
 
