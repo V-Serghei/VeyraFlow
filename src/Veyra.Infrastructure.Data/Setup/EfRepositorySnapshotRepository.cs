@@ -19,6 +19,7 @@ public sealed class EfRepositorySnapshotRepository(
 {
     private const int PrecomputedDiffMaxLines = 4000;
     private const int CurrentTextDiffStorageFormatVersion = 2;
+    private const int ManagedPreviewChunkSize = 64 * 1024;
 
     private static readonly JsonSerializerOptions DiffJsonOptions = new();
 
@@ -27,6 +28,11 @@ public sealed class EfRepositorySnapshotRepository(
         ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
         ".cs", ".js", ".ts", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
         ".html", ".css", ".sql", ".xaml", ".axaml"
+    };
+
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"
     };
 
     public async Task<SnapshotSaveResultDto> SaveSnapshotAsync(
@@ -770,8 +776,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (Directory.Exists(absolutePath))
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Selected path is a directory.");
 
-        if (!IsTextExtension(Path.GetExtension(absolutePath)))
-            return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Diff preview is available only for text files.");
+        var extension = Path.GetExtension(absolutePath);
 
         var identity = await db.Set<FileIdentity>()
             .AsNoTracking()
@@ -794,7 +799,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (baselineVersion is null)
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "No previous content version found.");
 
-        var blocks = baselineVersion.SizeBytes == 0
+        var baselineBlocks = baselineVersion.SizeBytes == 0
             ? []
             : await db.Set<FileVersionBlock>()
                 .AsNoTracking()
@@ -807,46 +812,123 @@ public sealed class EfRepositorySnapshotRepository(
                     b.StoredSizeBytes))
                 .ToListAsync(ct);
 
-        if (baselineVersion.SizeBytes > 0 && blocks.Count == 0)
+        if (baselineVersion.SizeBytes > 0 && baselineBlocks.Count == 0)
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Baseline version blocks are missing.");
 
-        var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-diff-preview");
-        Directory.CreateDirectory(tempDir);
-
-        var baselineTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline.tmp");
+        string? imageTempToCleanup = null;
 
         try
         {
-            if (baselineVersion.SizeBytes == 0)
+
+            var currentDigest = await ComputeCurrentFileDigestAsync(absolutePath, ManagedPreviewChunkSize, ct);
+            var binarySummary = BuildPendingBinarySummary(
+                baselineVersion.SizeBytes,
+                baselineVersion.ContentHashSha256,
+                baselineBlocks,
+                currentDigest);
+
+            if (IsTextExtension(extension))
             {
-                await File.WriteAllTextAsync(baselineTemp, string.Empty, ct);
+                var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-diff-preview");
+                Directory.CreateDirectory(tempDir);
+
+                var baselineTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline.tmp");
+
+                try
+                {
+                    if (baselineVersion.SizeBytes == 0)
+                    {
+                        await File.WriteAllTextAsync(baselineTemp, string.Empty, ct);
+                    }
+                    else
+                    {
+                        await contentStore.RestoreFileAsync(baselineBlocks, baselineTemp, true, ct);
+                    }
+
+                    var computed = await diffEngine.BuildDiffAsync(
+                        baselineTemp,
+                        absolutePath,
+                        normalizedMaxLines,
+                        ct);
+
+                    var summary = $"{normalizedPath}   +{computed.AddedLines} / -{computed.RemovedLines}" +
+                                  (computed.IsTruncated ? "  (truncated)" : string.Empty);
+
+                    return PendingFileDiffPreviewDto.FromText(
+                        relativePath: normalizedPath,
+                        message: summary,
+                        addedLines: computed.AddedLines,
+                        removedLines: computed.RemovedLines,
+                        isTruncated: computed.IsTruncated,
+                        lines: computed.Lines,
+                        hunks: computed.Hunks);
+                }
+                finally
+                {
+                    TryDelete(baselineTemp);
+                }
             }
-            else
+
+            if (IsImageExtension(extension))
             {
-                await contentStore.RestoreFileAsync(blocks, baselineTemp, true, ct);
+                var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-image-preview");
+                Directory.CreateDirectory(tempDir);
+
+                var baselineExt = string.IsNullOrWhiteSpace(extension) ? ".bin" : extension;
+                var baselineTempImage = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline{baselineExt}");
+                imageTempToCleanup = baselineTempImage;
+
+                if (baselineVersion.SizeBytes > 0)
+                {
+                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempImage, true, ct);
+                }
+                else
+                {
+                    await File.WriteAllBytesAsync(baselineTempImage, [], ct);
+                }
+
+                var byteSimilarity = await ComputeByteSimilarityAsync(baselineTempImage, absolutePath, ct);
+
+                binarySummary = binarySummary with { ByteSimilarityRatio = byteSimilarity };
+
+                var baselineSize = TryReadImageDimensions(baselineTempImage);
+                var currentSize = TryReadImageDimensions(absolutePath);
+
+                var imagePreview = new PendingImageDiffPreviewDto(
+                    BaselineImagePath: baselineTempImage,
+                    IsBaselineTempFile: true,
+                    CurrentImagePath: absolutePath,
+                    IsCurrentTempFile: false,
+                    BaselineWidth: baselineSize?.Width,
+                    BaselineHeight: baselineSize?.Height,
+                    CurrentWidth: currentSize?.Width,
+                    CurrentHeight: currentSize?.Height,
+                    HasDimensionMismatch: baselineSize.HasValue
+                                          && currentSize.HasValue
+                                          && (baselineSize.Value.Width != currentSize.Value.Width
+                                              || baselineSize.Value.Height != currentSize.Value.Height),
+                    SimilarityRatio: byteSimilarity);
+
+                var imageMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "image");
+                imageTempToCleanup = null;
+                return PendingFileDiffPreviewDto.FromImage(
+                    relativePath: normalizedPath,
+                    message: imageMessage,
+                    binarySummary: binarySummary,
+                    imagePreview: imagePreview);
             }
 
-            var computed = await diffEngine.BuildDiffAsync(
-                baselineTemp,
-                absolutePath,
-                normalizedMaxLines,
-                ct);
-
-            var summary = $"{normalizedPath}   +{computed.AddedLines} / -{computed.RemovedLines}" +
-                          (computed.IsTruncated ? "  (truncated)" : string.Empty);
-
-            return new PendingFileDiffPreviewDto(
-                RelativePath: normalizedPath,
-                IsAvailable: true,
-                Message: summary,
-                AddedLines: computed.AddedLines,
-                RemovedLines: computed.RemovedLines,
-                IsTruncated: computed.IsTruncated,
-                Lines: computed.Lines,
-                Hunks: computed.Hunks);
+            var binaryMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "binary");
+            return PendingFileDiffPreviewDto.FromBinary(
+                relativePath: normalizedPath,
+                message: binaryMessage,
+                binarySummary: binarySummary);
         }
         catch (Exception ex)
         {
+            if (!string.IsNullOrWhiteSpace(imageTempToCleanup))
+                TryDelete(imageTempToCleanup);
+
             log.LogWarning(
                 ex,
                 "Failed to build pending file diff preview. RepositoryId {RepositoryId}. Path {Path}",
@@ -854,10 +936,6 @@ public sealed class EfRepositorySnapshotRepository(
                 normalizedPath);
 
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Unable to build diff preview for selected file.");
-        }
-        finally
-        {
-            TryDelete(baselineTemp);
         }
     }
     public async Task<TextDiffResultDto?> GetStoredTextDiffAsync(
@@ -1261,14 +1339,26 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static bool IsTextExtension(string? extension)
     {
+        var normalized = NormalizeExtension(extension);
+        return normalized is not null && TextExtensions.Contains(normalized);
+    }
+
+    private static bool IsImageExtension(string? extension)
+    {
+        var normalized = NormalizeExtension(extension);
+        return normalized is not null && ImageExtensions.Contains(normalized);
+    }
+
+    private static string? NormalizeExtension(string? extension)
+    {
         if (string.IsNullOrWhiteSpace(extension))
-            return false;
+            return null;
 
         var normalized = extension.Trim();
         if (!normalized.StartsWith('.'))
             normalized = "." + normalized;
 
-        return TextExtensions.Contains(normalized);
+        return normalized;
     }
 
     private async Task InvalidateTextDiffCacheRowAsync(long diffId, CancellationToken ct)
@@ -1367,6 +1457,346 @@ public sealed class EfRepositorySnapshotRepository(
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    private static PendingBinaryDiffSummaryDto BuildPendingBinarySummary(
+        long baselineSizeBytes,
+        string? baselineHashSha256,
+        IReadOnlyList<StoredFileBlockDto> baselineBlocks,
+        CurrentFileDigest currentDigest)
+    {
+        var baselineManagedHashes = baselineBlocks
+            .Select(b => b.BlockHashBlake3)
+            .Where(h => h.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var currentBlockCount = currentDigest.ChunkHashes.Count;
+        var sharedBlockCount = 0;
+
+        if (baselineManagedHashes.Count > 0 && currentBlockCount > 0)
+        {
+            foreach (var hash in currentDigest.ChunkHashes)
+            {
+                if (baselineManagedHashes.Contains(hash))
+                    sharedBlockCount++;
+            }
+        }
+
+        var dedupRatio = baselineManagedHashes.Count > 0 && currentBlockCount > 0
+            ? (double)sharedBlockCount / currentBlockCount
+            : null;
+
+        var changedBlockRatio = dedupRatio.HasValue
+            ? 1d - dedupRatio.Value
+            : null;
+
+        return new PendingBinaryDiffSummaryDto(
+            BaselineSizeBytes: baselineSizeBytes,
+            CurrentSizeBytes: currentDigest.SizeBytes,
+            SizeDeltaBytes: currentDigest.SizeBytes - baselineSizeBytes,
+            BaselineHashSha256: baselineHashSha256 ?? string.Empty,
+            CurrentHashSha256: currentDigest.Sha256,
+            ChunkSizeBytes: ManagedPreviewChunkSize,
+            BaselineBlockCount: baselineBlocks.Count,
+            CurrentBlockCount: currentBlockCount,
+            SharedBlockCount: sharedBlockCount,
+            DedupRatio: dedupRatio,
+            ChangedBlockRatio: changedBlockRatio,
+            ByteSimilarityRatio: null);
+    }
+
+    private static async Task<CurrentFileDigest> ComputeCurrentFileDigestAsync(
+        string absolutePath,
+        int chunkSize,
+        CancellationToken ct)
+    {
+        var chunkHashes = new List<string>();
+        var totalBytes = 0L;
+        var buffer = new byte[chunkSize];
+
+        using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await using var stream = new FileStream(
+            absolutePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: chunkSize,
+            useAsync: true);
+
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+            if (read <= 0)
+                break;
+
+            totalBytes += read;
+
+            var payload = buffer.AsSpan(0, read);
+            hasher.AppendData(payload);
+
+            var chunkHash = SHA256.HashData(payload);
+            chunkHashes.Add($"msha256:{Convert.ToHexString(chunkHash).ToLowerInvariant()}");
+        }
+
+        var fileHash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
+        return new CurrentFileDigest(fileHash, totalBytes, chunkHashes);
+    }
+
+    private static async Task<double?> ComputeByteSimilarityAsync(
+        string baselinePath,
+        string currentPath,
+        CancellationToken ct)
+    {
+        if (!File.Exists(baselinePath) || !File.Exists(currentPath))
+            return null;
+
+        await using var baseline = new FileStream(
+            baselinePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 128 * 1024,
+            useAsync: true);
+
+        await using var current = new FileStream(
+            currentPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 128 * 1024,
+            useAsync: true);
+
+        var comparedLength = Math.Min(baseline.Length, current.Length);
+        if (comparedLength <= 0)
+            return baseline.Length == current.Length ? 1d : 0d;
+
+        var baselineBuffer = new byte[128 * 1024];
+        var currentBuffer = new byte[128 * 1024];
+
+        long comparedBytes = 0;
+        long equalBytes = 0;
+
+        while (comparedBytes < comparedLength)
+        {
+            var toRead = (int)Math.Min(baselineBuffer.Length, comparedLength - comparedBytes);
+            var readLeft = await baseline.ReadAsync(baselineBuffer.AsMemory(0, toRead), ct);
+            var readRight = await current.ReadAsync(currentBuffer.AsMemory(0, toRead), ct);
+
+            var read = Math.Min(readLeft, readRight);
+            if (read <= 0)
+                break;
+
+            for (var i = 0; i < read; i++)
+            {
+                if (baselineBuffer[i] == currentBuffer[i])
+                    equalBytes++;
+            }
+
+            comparedBytes += read;
+        }
+
+        if (comparedBytes <= 0)
+            return null;
+
+        return (double)equalBytes / comparedBytes;
+    }
+
+    private static (int Width, int Height)? TryReadImageDimensions(string path)
+    {
+        if (!File.Exists(path))
+            return null;
+
+        try
+        {
+            var extension = Path.GetExtension(path);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            if (string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase))
+                return TryReadPngDimensions(stream);
+
+            if (string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase))
+                return TryReadJpegDimensions(stream);
+
+            if (string.Equals(extension, ".bmp", StringComparison.OrdinalIgnoreCase))
+                return TryReadBmpDimensions(stream);
+
+            if (string.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase))
+                return TryReadGifDimensions(stream);
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (int Width, int Height)? TryReadPngDimensions(Stream stream)
+    {
+        if (stream.Length < 24)
+            return null;
+
+        var buffer = new byte[24];
+        if (stream.Read(buffer, 0, buffer.Length) != buffer.Length)
+            return null;
+
+        var isPng = buffer[0] == 0x89 && buffer[1] == 0x50 && buffer[2] == 0x4E && buffer[3] == 0x47;
+        if (!isPng)
+            return null;
+
+        var width = (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19];
+        var height = (buffer[20] << 24) | (buffer[21] << 16) | (buffer[22] << 8) | buffer[23];
+
+        return width > 0 && height > 0 ? (width, height) : null;
+    }
+
+    private static (int Width, int Height)? TryReadJpegDimensions(Stream stream)
+    {
+        if (stream.ReadByte() != 0xFF || stream.ReadByte() != 0xD8)
+            return null;
+
+        while (true)
+        {
+            var markerStart = stream.ReadByte();
+            if (markerStart < 0)
+                return null;
+
+            if (markerStart != 0xFF)
+                continue;
+
+            var marker = stream.ReadByte();
+            if (marker < 0)
+                return null;
+
+            while (marker == 0xFF)
+            {
+                marker = stream.ReadByte();
+                if (marker < 0)
+                    return null;
+            }
+
+            if (marker == 0xD9 || marker == 0xDA)
+                return null;
+
+            var lengthHigh = stream.ReadByte();
+            var lengthLow = stream.ReadByte();
+            if (lengthHigh < 0 || lengthLow < 0)
+                return null;
+
+            var segmentLength = (lengthHigh << 8) + lengthLow;
+            if (segmentLength < 2)
+                return null;
+
+            if (IsJpegStartOfFrame(marker))
+            {
+                _ = stream.ReadByte(); // precision
+                var hHigh = stream.ReadByte();
+                var hLow = stream.ReadByte();
+                var wHigh = stream.ReadByte();
+                var wLow = stream.ReadByte();
+
+                if (hHigh < 0 || hLow < 0 || wHigh < 0 || wLow < 0)
+                    return null;
+
+                var height = (hHigh << 8) + hLow;
+                var width = (wHigh << 8) + wLow;
+                return width > 0 && height > 0 ? (width, height) : null;
+            }
+
+            stream.Seek(segmentLength - 2, SeekOrigin.Current);
+        }
+    }
+
+    private static bool IsJpegStartOfFrame(int marker)
+        => marker is 0xC0 or 0xC1 or 0xC2 or 0xC3
+            or 0xC5 or 0xC6 or 0xC7
+            or 0xC9 or 0xCA or 0xCB
+            or 0xCD or 0xCE or 0xCF;
+
+    private static (int Width, int Height)? TryReadBmpDimensions(Stream stream)
+    {
+        if (stream.Length < 26)
+            return null;
+
+        var buffer = new byte[26];
+        if (stream.Read(buffer, 0, buffer.Length) != buffer.Length)
+            return null;
+
+        if (buffer[0] != (byte)'B' || buffer[1] != (byte)'M')
+            return null;
+
+        var width = BitConverter.ToInt32(buffer, 18);
+        var height = Math.Abs(BitConverter.ToInt32(buffer, 22));
+
+        return width > 0 && height > 0 ? (width, height) : null;
+    }
+
+    private static (int Width, int Height)? TryReadGifDimensions(Stream stream)
+    {
+        if (stream.Length < 10)
+            return null;
+
+        var buffer = new byte[10];
+        if (stream.Read(buffer, 0, buffer.Length) != buffer.Length)
+            return null;
+
+        var isGif = buffer[0] == (byte)'G' && buffer[1] == (byte)'I' && buffer[2] == (byte)'F';
+        if (!isGif)
+            return null;
+
+        var width = buffer[6] | (buffer[7] << 8);
+        var height = buffer[8] | (buffer[9] << 8);
+
+        return width > 0 && height > 0 ? (width, height) : null;
+    }
+
+    private static string BuildBinaryPreviewMessage(
+        string relativePath,
+        PendingBinaryDiffSummaryDto summary,
+        string previewType)
+    {
+        var kind = string.Equals(previewType, "image", StringComparison.OrdinalIgnoreCase)
+            ? "image"
+            : "binary";
+
+        var sizeLabel = $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})";
+
+        var dedupLabel = summary.DedupRatio.HasValue
+            ? $"shared blocks {summary.DedupRatio.Value * 100:F1}%"
+            : "shared blocks n/a";
+
+        var changedLabel = summary.ChangedBlockRatio.HasValue
+            ? $"changed blocks {summary.ChangedBlockRatio.Value * 100:F1}%"
+            : "changed blocks n/a";
+
+        var similarityLabel = summary.ByteSimilarityRatio.HasValue
+            ? $", byte similarity {summary.ByteSimilarityRatio.Value * 100:F1}%"
+            : string.Empty;
+
+        return $"{relativePath}   {kind}   {sizeLabel}   {dedupLabel}, {changedLabel}{similarityLabel}";
+    }
+
+    private static string FormatSignedBytes(long value)
+    {
+        if (value == 0)
+            return "0 B";
+
+        var sign = value > 0 ? "+" : "-";
+        var absolute = value == long.MinValue ? long.MaxValue : Math.Abs(value);
+        return $"{sign}{FormatBytes(absolute)}";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private sealed record CurrentFileDigest(
+        string Sha256,
+        long SizeBytes,
+        IReadOnlyList<string> ChunkHashes);
     private static void TryDelete(string path)
     {
         try
@@ -1492,6 +1922,13 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+
+
+
+
+
+
 
 
 

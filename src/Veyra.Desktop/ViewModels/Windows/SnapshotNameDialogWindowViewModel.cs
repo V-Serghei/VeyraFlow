@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Application.DTOs;
@@ -17,6 +19,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     private Func<SnapshotPendingFileItemViewModel, CancellationToken, Task<PendingFileDiffPreviewDto>>? _previewLoader;
     private CancellationTokenSource? _previewCts;
+    private readonly List<string> _tempPreviewFiles = [];
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -33,12 +36,36 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SelectedChangedFileHint))]
     private SnapshotPendingFileItemViewModel? _selectedChangedFile;
 
-    [ObservableProperty] private bool _isPreviewLoading;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
+    private bool _isPreviewLoading;
 
-    [ObservableProperty] private string _previewSummary = "Select a changed file to inspect the preview.";
+    [ObservableProperty]
+    private string _previewSummary = "Select a changed file to inspect the preview.";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTextPreview))]
+    [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
+    [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
+    private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    private Bitmap? _leftImagePreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    private Bitmap? _rightImagePreview;
+
+    [ObservableProperty] private string _leftImageCaption = "Before";
+    [ObservableProperty] private string _rightImageCaption = "After";
 
     public ObservableCollection<SnapshotPendingFileItemViewModel> ChangedFiles { get; } = [];
     public ObservableCollection<SnapshotDiffRowItemViewModel> PreviewRows { get; } = [];
+    public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
 
     public SnapshotNameDialogWindowViewModel()
         : this($"snimok_{DateTime.Now:yyyyMMdd_HHmmss}")
@@ -53,6 +80,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         ChangedFiles.CollectionChanged += OnChangedFilesCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
+        PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
     }
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
@@ -60,8 +88,18 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasNoChangedFiles => !HasChangedFiles;
     public bool HasSelectedChangedFile => SelectedChangedFile is not null;
     public bool CanSave => !string.IsNullOrWhiteSpace(SnapshotName) && HasChangedFiles;
+
     public bool HasPreviewRows => PreviewRows.Count > 0;
-    public bool HasNoPreviewRows => !HasPreviewRows;
+    public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
+    public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
+    public bool HasNoImagePreviews => !HasImagePreviews;
+
+    public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && HasPreviewRows;
+    public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
+    public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
+
+    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
+
     public string ChangedFilesCountLabel => HasChangedFiles
         ? $"{ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s") }"
         : "No changed files detected";
@@ -100,6 +138,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ChangedFilesCountLabel));
     }
 
+    public void CleanupPreviewResources()
+    {
+        _previewCts?.Cancel();
+        ReleasePreviewResources();
+    }
+
     partial void OnSelectedChangedFileChanged(SnapshotPendingFileItemViewModel? value)
     {
         _ = LoadPreviewForSelectionAsync(value);
@@ -109,6 +153,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void Cancel()
     {
         _previewCts?.Cancel();
+        ReleasePreviewResources();
         RequestClose?.Invoke(false);
     }
 
@@ -136,12 +181,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         SnapshotName = trimmed;
         ErrorMessage = null;
+        ReleasePreviewResources();
         RequestClose?.Invoke(true);
     }
 
     private async Task LoadPreviewForSelectionAsync(SnapshotPendingFileItemViewModel? file)
     {
         _previewCts?.Cancel();
+        ReleasePreviewResources();
 
         if (file is null)
         {
@@ -166,7 +213,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         IsPreviewLoading = true;
         PreviewSummary = "Building preview...";
-        PreviewRows.Clear();
+        PreviewKind = PendingDiffPreviewKind.None;
 
         try
         {
@@ -180,15 +227,45 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 return;
             }
 
-            var rows = BuildPreviewRows(preview.Lines, preview.Hunks);
-            PreviewRows.Clear();
-            foreach (var row in rows)
-                PreviewRows.Add(row);
+            switch (preview.Kind)
+            {
+                case PendingDiffPreviewKind.Text:
+                {
+                    var rows = BuildPreviewRows(preview.Lines, preview.Hunks);
+                    PreviewRows.Clear();
+                    foreach (var row in rows)
+                        PreviewRows.Add(row);
 
-            PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                ? $"{preview.AddedLines} added / {preview.RemovedLines} removed"
-                    + (preview.IsTruncated ? " (preview truncated)" : string.Empty)
-                : preview.Message;
+                    PreviewKind = PendingDiffPreviewKind.Text;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? $"{preview.AddedLines} added / {preview.RemovedLines} removed"
+                            + (preview.IsTruncated ? " (preview truncated)" : string.Empty)
+                        : preview.Message;
+                    break;
+                }
+                case PendingDiffPreviewKind.Binary:
+                {
+                    ApplyBinaryMetrics(preview.BinarySummary, null);
+                    PreviewKind = PendingDiffPreviewKind.Binary;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? "Binary summary is ready."
+                        : preview.Message;
+                    break;
+                }
+                case PendingDiffPreviewKind.Image:
+                {
+                    await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview);
+                    PreviewKind = PendingDiffPreviewKind.Image;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? "Image comparison is ready."
+                        : preview.Message;
+                    break;
+                }
+                default:
+                    ResetPreview("Preview format is not supported.");
+                    break;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -204,11 +281,161 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         }
     }
 
+    private async Task LoadImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
+    {
+        LeftImageCaption = "Before";
+        RightImageCaption = "After";
+
+        if (imagePreview is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath)
+            && File.Exists(imagePreview.BaselineImagePath))
+        {
+            LeftImagePreview = await Task.Run(() => new Bitmap(imagePreview.BaselineImagePath), ct);
+            if (imagePreview.IsBaselineTempFile)
+                _tempPreviewFiles.Add(imagePreview.BaselineImagePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath)
+            && File.Exists(imagePreview.CurrentImagePath))
+        {
+            RightImagePreview = await Task.Run(() => new Bitmap(imagePreview.CurrentImagePath), ct);
+            if (imagePreview.IsCurrentTempFile)
+                _tempPreviewFiles.Add(imagePreview.CurrentImagePath);
+        }
+
+        LeftImageCaption = BuildImageSideCaption("Before", imagePreview.BaselineWidth, imagePreview.BaselineHeight);
+        RightImageCaption = BuildImageSideCaption("After", imagePreview.CurrentWidth, imagePreview.CurrentHeight);
+    }
+
+    private static string BuildImageSideCaption(string prefix, int? width, int? height)
+    {
+        if (width is null || height is null)
+            return prefix;
+
+        return $"{prefix} · {width} x {height}";
+    }
+
+    private void ApplyBinaryMetrics(
+        PendingBinaryDiffSummaryDto? summary,
+        PendingImageDiffPreviewDto? imagePreview)
+    {
+        PreviewMetrics.Clear();
+        if (summary is null)
+            return;
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            "Size",
+            $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})"));
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            "SHA-256",
+            $"before {ShortHash(summary.BaselineHashSha256)} | after {ShortHash(summary.CurrentHashSha256)}"));
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            "Blocks",
+            $"{summary.BaselineBlockCount} -> {summary.CurrentBlockCount}, shared {summary.SharedBlockCount}"));
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            "Dedup / Changed",
+            $"{FormatRatio(summary.DedupRatio)} / {FormatRatio(summary.ChangedBlockRatio)}"));
+
+        if (summary.ByteSimilarityRatio.HasValue)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                "Byte similarity",
+                $"{summary.ByteSimilarityRatio.Value * 100:F1}%"));
+        }
+
+        if (imagePreview is not null)
+        {
+            var before = imagePreview.BaselineWidth is null || imagePreview.BaselineHeight is null
+                ? "n/a"
+                : $"{imagePreview.BaselineWidth} x {imagePreview.BaselineHeight}";
+
+            var after = imagePreview.CurrentWidth is null || imagePreview.CurrentHeight is null
+                ? "n/a"
+                : $"{imagePreview.CurrentWidth} x {imagePreview.CurrentHeight}";
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                "Dimensions",
+                $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? " (changed)" : "")));
+
+            if (imagePreview.SimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    "Image similarity",
+                    $"{imagePreview.SimilarityRatio.Value * 100:F1}% (byte-level)"));
+            }
+        }
+    }
+
+    private static string FormatRatio(double? value)
+        => value.HasValue ? $"{value.Value * 100:F1}%" : "n/a";
+
+    private static string ShortHash(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "n/a";
+
+        return value.Length <= 16 ? value : $"{value[..8]}...{value[^8..]}";
+    }
+
+    private static string FormatSignedBytes(long value)
+    {
+        if (value == 0)
+            return "0 B";
+
+        var sign = value > 0 ? "+" : "-";
+        var abs = value == long.MinValue ? long.MaxValue : Math.Abs(value);
+        return $"{sign}{FormatBytes(abs)}";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
     private void ResetPreview(string message)
     {
+        PreviewKind = PendingDiffPreviewKind.None;
         IsPreviewLoading = false;
         PreviewSummary = message;
         PreviewRows.Clear();
+        PreviewMetrics.Clear();
+    }
+
+    private void ReleasePreviewResources()
+    {
+        PreviewRows.Clear();
+        PreviewMetrics.Clear();
+        PreviewKind = PendingDiffPreviewKind.None;
+
+        LeftImagePreview?.Dispose();
+        RightImagePreview?.Dispose();
+        LeftImagePreview = null;
+        RightImagePreview = null;
+
+        LeftImageCaption = "Before";
+        RightImageCaption = "After";
+
+        foreach (var tempFile in _tempPreviewFiles)
+        {
+            try
+            {
+                if (File.Exists(tempFile))
+                    File.Delete(tempFile);
+            }
+            catch
+            {
+            }
+        }
+
+        _tempPreviewFiles.Clear();
     }
 
     private static IReadOnlyList<SnapshotDiffRowItemViewModel> BuildPreviewRows(
@@ -399,7 +626,16 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void OnPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasPreviewRows));
-        OnPropertyChanged(nameof(HasNoPreviewRows));
+        OnPropertyChanged(nameof(IsTextPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnPreviewMetricsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasPreviewMetrics));
+        OnPropertyChanged(nameof(IsBinaryPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
     }
 }
+
 

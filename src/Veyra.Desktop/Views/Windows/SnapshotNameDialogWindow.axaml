@@ -167,7 +167,7 @@
                         <TextBlock Grid.Column="1" Text="{Binding PreviewSummary}" Classes="muted" TextWrapping="Wrap"/>
                     </Grid>
 
-                    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+                                        <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center" IsVisible="{Binding IsTextPreview}">
                         <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
                             <TextBlock Text="+ Added" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
                         </Border>
@@ -186,9 +186,9 @@
                     </Grid>
 
                     <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="8">
-                        <TextBlock Grid.Row="0" Text="Diff preview" FontWeight="SemiBold" FontSize="16"/>
+                        <TextBlock Grid.Row="0" Text="Preview" FontWeight="SemiBold" FontSize="16"/>
 
-                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding HasPreviewRows}">
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding IsTextPreview}">
                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                 <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
                                     <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
@@ -270,8 +270,70 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding HasNoPreviewRows}">
-                            <TextBlock Text="Select a modified text file to view a side-by-side diff preview."
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding IsBinaryPreview}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                            <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,8">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Label}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#A8D1FF"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Value}"
+                                                           TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Border>
+
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding IsImagePreview}">
+                            <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                                <ItemsControl Grid.Row="0" ItemsSource="{Binding PreviewMetrics}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                            <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Label}"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#A8D1FF"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Value}"
+                                                           TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding HasImagePreviews}">
+                                    <Border Grid.Column="0" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
+                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                            <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
+                                            <Image Grid.Row="1" Source="{Binding LeftImagePreview}" Stretch="Uniform"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Grid.Column="1" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
+                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                            <TextBlock Grid.Row="0" Text="{Binding RightImageCaption}" FontWeight="SemiBold"/>
+                                            <Image Grid.Row="1" Source="{Binding RightImagePreview}" Stretch="Uniform"/>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="Image preview is not available for this pair."
+                                           Classes="muted"
+                                           IsVisible="{Binding HasNoImagePreviews}"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Grid.Row="1" Classes="preview-surface" IsVisible="{Binding HasNoPreviewContent}">
+                            <TextBlock Text="Select a modified file to preview text, binary or image-level changes."
                                        Classes="muted"
                                        TextWrapping="Wrap"/>
                         </Border>
@@ -307,6 +369,8 @@
         </Border>
     </Grid>
 </Window>
+
+
 
 
 

@@ -21,7 +21,10 @@ public partial class SnapshotNameDialogWindow : Window
         Closed += (_, _) =>
         {
             if (DataContext is SnapshotNameDialogWindowViewModel vm)
+            {
                 vm.RequestClose -= OnRequestClose;
+                vm.CleanupPreviewResources();
+            }
         };
     }
 
@@ -37,3 +40,4 @@ public partial class SnapshotNameDialogWindow : Window
         Close();
     }
 }
+
