@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.RepositorySettings"
+             xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              x:Class="Veyra.Desktop.Views.Pages.RepositorySettings.RepositorySettingsView"
              x:Name="Root"
              x:DataType="settings:RepositorySettingsViewModel"
@@ -10,35 +11,35 @@
     <DockPanel Margin="24,20">
         <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Content="? ?????" Command="{Binding BackCommand}" Padding="12,8"/>
-                <TextBlock Text="????????? ???????????" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Button Content="? Back" Command="{Binding BackCommand}" Padding="12,8"/>
+                <TextBlock Text="Repository settings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="#F87171"
-                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-            <Button Content="???????" Command="{Binding DeleteCommand}" Foreground="#F87171"/>
-            <Button Content="?????????" Command="{Binding SaveCommand}"/>
+            <Button Content="Delete" Command="{Binding DeleteCommand}" Foreground="#F87171"/>
+            <Button Content="Save" Command="{Binding SaveCommand}"/>
         </StackPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel MaxWidth="860" Spacing="14">
-                <TextBlock Text="??? ???????????" Opacity="0.8"/>
+                <TextBlock Text="Repository name" Opacity="0.8"/>
                 <TextBox Text="{Binding RepositoryName, Mode=TwoWay}"/>
 
-                <TextBlock Text="????????" Opacity="0.8"/>
+                <TextBlock Text="Description" Opacity="0.8"/>
                 <TextBox Text="{Binding Description, Mode=TwoWay}" Height="90" AcceptsReturn="True"/>
 
-                <TextBlock Text="??????????" Opacity="0.8"/>
+                <TextBlock Text="Directory path" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0" Text="{Binding DirectoryPath, Mode=TwoWay}"/>
-                    <Button Grid.Column="1" Content="?????" Command="{Binding BrowseDirectoryCommand}"/>
+                    <Button Grid.Column="1" Content="Browse" Command="{Binding BrowseDirectoryCommand}"/>
                 </Grid>
 
                 <Border Height="1" Background="#1E1E1E" Margin="0,8"/>
 
-                <TextBlock Text="??????????? ???????" FontSize="14" FontWeight="SemiBold"/>
+                <TextBlock Text="Tracked formats" FontSize="14" FontWeight="SemiBold"/>
                 <ItemsControl ItemsSource="{Binding SelectedFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -50,7 +51,7 @@
                             <Border Background="#1A1A1A" CornerRadius="6" Padding="10,5" Margin="0,0,6,6">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="{Binding .}"/>
-                                    <Button Content="?" Padding="2" FontSize="10"
+                                    <Button Content="x" Padding="2" FontSize="10"
                                             Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).RemoveFormatCommand}"
                                             CommandParameter="{Binding .}"/>
                                 </StackPanel>
@@ -59,7 +60,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="???????? ???????????? ??????" Opacity="0.8"/>
+                <TextBlock Text="Available formats" Opacity="0.8"/>
                 <ItemsControl ItemsSource="{Binding AvailableFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -75,64 +76,64 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="???????? ????? ??????" Opacity="0.8"/>
+                <TextBlock Text="Add custom format" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="???????? .sql"/>
-                    <Button Grid.Column="1" Content="????????" Command="{Binding AddCustomFormatCommand}"/>
+                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="example: .sql"/>
+                    <Button Grid.Column="1" Content="Add" Command="{Binding AddCustomFormatCommand}"/>
                 </Grid>
 
                 <Border Height="1" Background="#1E1E1E" Margin="0,8"/>
 
-                <TextBlock Text="???????? ????????" FontSize="16" FontWeight="SemiBold"/>
-                <CheckBox Content="???????? ???????? ??? ????? ???????????"
+                <TextBlock Text="Retention policy" FontSize="16" FontWeight="SemiBold"/>
+                <CheckBox Content="Enable retention for this repository"
                           IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="????. ??????? ?????? (???)" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="???????? 30"/>
+                        <TextBlock Text="Max age (days)" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="example: 30"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="????. ?????????? ???????" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="???????? 200"/>
+                        <TextBlock Text="Max snapshots" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="example: 200"/>
                     </StackPanel>
                 </Grid>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="????. ????? ??????? (MB)" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="???????? 2048"/>
+                        <TextBlock Text="Max total size (MB)" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="example: 2048"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="???????? ??????? (???)" Opacity="0.8"/>
+                        <TextBlock Text="Run interval (minutes)" Opacity="0.8"/>
                         <TextBox Text="{Binding RetentionRunIntervalMinutes, Mode=TwoWay}"/>
                     </StackPanel>
                 </Grid>
 
-                <TextBlock Text="?????? ????????? (????? ???????)" Opacity="0.8"/>
+                <TextBlock Text="Trigger filter (comma-separated)" Opacity="0.8"/>
                 <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="manual_snapshot, sync_live_watcher"/>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="4">
-                        <TextBlock Text="????????? ??????" Opacity="0.7"/>
+                        <TextBlock Text="Last run" Opacity="0.7"/>
                         <TextBlock Text="{Binding RetentionLastRunText}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="4">
-                        <TextBlock Text="????????? ??????" Opacity="0.7"/>
+                        <TextBlock Text="Last status" Opacity="0.7"/>
                         <TextBlock Text="{Binding RetentionLastStatusText}" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Grid>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Dry run" Command="{Binding RunRetentionDryRunCommand}"/>
-                    <Button Content="????????? ??????" Command="{Binding RunRetentionApplyCommand}"/>
-                    <Button Content="????????" Command="{Binding CancelRetentionCommand}"/>
+                    <Button Content="Apply retention" Command="{Binding RunRetentionApplyCommand}"/>
+                    <Button Content="Cancel" Command="{Binding CancelRetentionCommand}"/>
                 </StackPanel>
 
                 <TextBlock Text="{Binding RetentionProgressText}" Opacity="0.8"
-                           IsVisible="{Binding RetentionProgressText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                           IsVisible="{Binding RetentionProgressText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
                 <TextBlock Text="{Binding RetentionResultText}" Foreground="#93C5FD" TextWrapping="Wrap"
-                           IsVisible="{Binding RetentionResultText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                           IsVisible="{Binding RetentionResultText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

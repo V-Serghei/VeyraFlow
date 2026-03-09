@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Common.Results;
@@ -17,21 +17,24 @@ public sealed class LoginCommandHandler(
 
         try
         {
-            var success = await authService.LoginAsync(request.Username, request.Password, cancellationToken);
+            var session = await authService.LoginAsync(request.Username, request.Password, cancellationToken);
 
-            if (success)
+            if (session is null)
             {
-                logger.LogInformation("User {Username} logged in successfully", request.Username);
-
-                // Save user profile to local SQLite
-                await userProfileRepo.SaveOrUpdateProfileAsync(request.Username, cancellationToken);
-                logger.LogInformation("User profile saved locally for {Username}", request.Username);
-
-                return OperationResult.Ok();
+                logger.LogWarning("Login failed for user {Username}: invalid credentials", request.Username);
+                return OperationResult.Fail("Invalid credentials.");
             }
 
-            logger.LogWarning("Login failed for user {Username}: invalid credentials", request.Username);
-            return OperationResult.Fail("Invalid credentials.");
+            logger.LogInformation("User {Username} logged in successfully", request.Username);
+
+            await userProfileRepo.SaveOrUpdateProfileAsync(
+                session.Username,
+                session.CloudUserId,
+                session.AccessToken,
+                cancellationToken);
+
+            logger.LogInformation("User profile saved locally for {Username}", session.Username);
+            return OperationResult.Ok();
         }
         catch (Exception ex)
         {

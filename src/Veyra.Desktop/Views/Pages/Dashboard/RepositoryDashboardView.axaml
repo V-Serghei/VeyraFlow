@@ -1,7 +1,8 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.Dashboard"
+             xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              x:Class="Veyra.Desktop.Views.Pages.Dashboard.RepositoryDashboardView"
              x:Name="Root"
              x:DataType="vm:RepositoryDashboardViewModel"
@@ -11,14 +12,14 @@
         <Border Grid.Column="0" Background="#0D0D0D" Padding="12,16" BorderBrush="#1A1A1A" BorderThickness="0,0,1,0">
             <DockPanel>
                 <Button DockPanel.Dock="Top"
-                        Content="＋ Создать проект"
+                        Content="+ Create Repository"
                         HorizontalAlignment="Stretch"
                         Padding="12,10"
                         Command="{Binding AddRepositoryCommand}"
                         Margin="0,0,0,16"/>
 
                 <TextBlock DockPanel.Dock="Top"
-                           Text="РАБОЧИЕ ПРОСТРАНСТВА"
+                           Text="REPOSITORIES"
                            FontSize="10" Foreground="#666666"
                            FontWeight="SemiBold"
                            Margin="8,0,0,8"
@@ -40,7 +41,7 @@
                                                            TextTrimming="CharacterEllipsis"/>
                                             </StackPanel>
                                         </Button>
-                                        <Button Grid.Column="1" Content="⚙" Padding="8,4"
+                                        <Button Grid.Column="1" Content="Settings" Padding="8,4"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
                                                 CommandParameter="{Binding .}"/>
                                     </Grid>
@@ -54,12 +55,12 @@
 
         <DockPanel Grid.Column="1" Background="#0D0D0D">
             <Border DockPanel.Dock="Top" Padding="20,14" BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
-                <TextBox Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Поиск по проектам, папкам..."/>
+                <TextBox Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Search by name or path..."/>
             </Border>
 
             <TextBlock DockPanel.Dock="Top" Margin="20,8,20,0"
                        Text="{Binding ErrorMessage}" Foreground="#F87171"
-                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
 
             <ScrollViewer Padding="20,16" VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding Repositories}">
@@ -85,11 +86,11 @@
                                                        TextTrimming="CharacterEllipsis"/>
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <TextBlock Text="{Binding LastActivity}" FontSize="11" Opacity="0.75"/>
-                                                <TextBlock Text="•" Opacity="0.4"/>
+                                                <TextBlock Text="|" Opacity="0.4"/>
                                                 <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.85"/>
                                             </StackPanel>
                                         </StackPanel>
-                                        <Button Grid.Column="1" Content="⚙" Padding="8,4"
+                                        <Button Grid.Column="1" Content="Settings" Padding="8,4"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
                                                 CommandParameter="{Binding .}"/>
                                     </Grid>
@@ -97,15 +98,15 @@
                                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="18" Margin="0,0,0,10">
                                         <StackPanel>
                                             <TextBlock Text="{Binding FileCount}" FontSize="24" Foreground="#8B5CF6" FontWeight="Bold"/>
-                                            <TextBlock Text="Файлов" FontSize="11" Opacity="0.65"/>
+                                            <TextBlock Text="Files" FontSize="11" Opacity="0.65"/>
                                         </StackPanel>
                                         <StackPanel>
                                             <TextBlock Text="{Binding VersionCount}" FontSize="24" Foreground="#3B82F6" FontWeight="Bold"/>
-                                            <TextBlock Text="Версий" FontSize="11" Opacity="0.65"/>
+                                            <TextBlock Text="Versions" FontSize="11" Opacity="0.65"/>
                                         </StackPanel>
                                         <StackPanel>
                                             <TextBlock Text="{Binding SizeDisplay}" FontSize="24" Foreground="#10B981" FontWeight="Bold"/>
-                                            <TextBlock Text="Размер" FontSize="11" Opacity="0.65"/>
+                                            <TextBlock Text="Size" FontSize="11" Opacity="0.65"/>
                                         </StackPanel>
                                     </StackPanel>
 
@@ -125,10 +126,10 @@
                                     </ItemsControl>
 
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8">
-                                        <Button Content="Открыть" Padding="10,6"
+                                        <Button Content="Open" Padding="10,6"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
                                                 CommandParameter="{Binding .}"/>
-                                        <Button Content="Удалить" Padding="10,6" Foreground="#F87171"
+                                        <Button Content="Delete" Padding="10,6" Foreground="#F87171"
                                                 Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).DeleteRepositoryCommand}"
                                                 CommandParameter="{Binding .}"/>
                                     </StackPanel>
@@ -140,9 +141,10 @@
             </ScrollViewer>
 
             <StackPanel IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-                <TextBlock Text="Нет репозиториев" FontSize="18" Opacity="0.7" HorizontalAlignment="Center"/>
-                <TextBlock Text="Создайте первый проект кнопкой слева" Opacity="0.55"/>
+                <TextBlock Text="No repositories yet" FontSize="18" Opacity="0.7" HorizontalAlignment="Center"/>
+                <TextBlock Text="Create your first repository to start tracking versions." Opacity="0.55"/>
             </StackPanel>
         </DockPanel>
     </Grid>
 </UserControl>
+

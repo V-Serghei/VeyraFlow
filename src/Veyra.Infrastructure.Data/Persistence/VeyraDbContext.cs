@@ -325,9 +325,12 @@ public class VeyraDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Username).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.AccessToken).HasMaxLength(4096).IsRequired(false);
+            entity.Property(e => e.CloudUserId).IsRequired(false);
             entity.HasIndex(e => e.Username).IsUnique();
         });
     }
 }
+
 
 

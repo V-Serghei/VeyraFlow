@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
@@ -19,17 +20,20 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
     private readonly INavigationService _nav;
     private readonly IWindowService _windows;
     private readonly IMediator _mediator;
+    private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
 
     public WelcomeWindowViewModel(
         IServiceProvider sp,
         INavigationService nav,
         IWindowService windows,
-        IMediator mediator)
+        IMediator mediator,
+        IRepositoryCloudSyncOrchestrator cloudSync)
     {
         _sp = sp;
         _nav = nav;
         _windows = windows;
         _mediator = mediator;
+        _cloudSync = cloudSync;
         NavigateToIntro();
     }
 
@@ -59,13 +63,28 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
     private void NavigateToLogin()
     {
         var vm = _sp.GetRequiredService<LoginViewModel>();
-        vm.LoginSucceeded += () => _ = ContinueAfterLoginAsync();
+        vm.AuthCompleted += isNewUser => _ = ContinueAfterAuthAsync(isNewUser);
         CurrentPage = vm;
     }
 
-    private async Task ContinueAfterLoginAsync()
+    private async Task ContinueAfterAuthAsync(bool isNewUser)
     {
+        if (isNewUser)
+        {
+            await RunSetupThenMainAsync();
+            return;
+        }
+
         var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+        if (repositories.Count > 0)
+        {
+            _nav.GoToMain();
+            return;
+        }
+
+        await _cloudSync.RestoreRepositoriesFromCloudAsync();
+
+        repositories = await _mediator.Send(new GetAllRepositoriesQuery());
         if (repositories.Count > 0)
         {
             _nav.GoToMain();

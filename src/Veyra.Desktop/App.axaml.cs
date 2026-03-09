@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Infrastructure.Data.Persistence;
@@ -28,6 +29,7 @@ public partial class App : AvaloniaApplication
     private const string TextDiffHunksMigrationId = "20260307193000_AddTextDiffHunks";
     private const string SoftDeleteCascadeMigrationId = "20260309133000_AddSoftDeleteCascadeModel";
     private const string RepositoryRetentionMigrationId = "20260309180000_AddRepositoryRetentionPolicy";
+    private const string UserProfileSessionMigrationId = "20260309193000_AddUserProfileSessionColumns";
     private const string EfProductVersion = "10.0.2";
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -52,6 +54,7 @@ public partial class App : AvaloniaApplication
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
             BackfillSoftDeleteMigrationHistoryIfNeeded(db);
             BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
+            BackfillUserProfileSessionMigrationHistoryIfNeeded(db);
             db.Database.Migrate();
             EnsureRepositorySnapshotTitleColumn(db);
             BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
@@ -60,9 +63,11 @@ public partial class App : AvaloniaApplication
             EnsureTextDiffStorageV2(db);
             EnsureSoftDeleteCascadeColumns(db);
             EnsureRepositoryRetentionColumns(db);
+            EnsureUserProfileSessionColumns(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
             BackfillSoftDeleteMigrationHistoryIfNeeded(db);
             BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
+            BackfillUserProfileSessionMigrationHistoryIfNeeded(db);
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
             db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             var nativeHealth = NativeRuntimeHealth.Probe();
@@ -89,6 +94,29 @@ public partial class App : AvaloniaApplication
             {
                 var dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
                 var exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+
+                if (dirs.Count == 0 || exts.Count == 0)
+                {
+                    var profile = userProfiles.GetActiveProfileAsync().GetAwaiter().GetResult();
+                    if (!string.IsNullOrWhiteSpace(profile?.AccessToken))
+                    {
+                        var sync = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
+                        if (sync is not null)
+                        {
+                            try
+                            {
+                                sync.RestoreRepositoriesFromCloudAsync().GetAwaiter().GetResult();
+                                dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
+                                exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Warning(ex, "Cloud restore at startup failed for user {Username}", activeUsername);
+                            }
+                        }
+                    }
+                }
+
                 shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
             }
         }
@@ -410,6 +438,65 @@ public partial class App : AvaloniaApplication
         }
     }
 
+    private static void BackfillUserProfileSessionMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("UserProfiles", "CloudUserId"),
+                ("UserProfiles", "AccessToken")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, UserProfileSessionMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureUserProfileSessionColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "UserProfiles", "CloudUserId", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "AccessToken", "TEXT NULL");
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
     private static void EnsureRepositoryRetentionColumns(VeyraDbContext db)
     {
         if (!db.Database.IsSqlite())
@@ -749,16 +836,4 @@ WHERE ""StorageFormatVersion"" < 2
         Log.CloseAndFlush();
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
 

@@ -34,7 +34,7 @@ public sealed class RunRepositoryRetentionHandler(
                 "Repository retention cancelled. RepositoryId {RepositoryId}. DryRun {DryRun}",
                 request.RepositoryId,
                 request.DryRun);
-            return OperationResult<RepositoryRetentionRunResultDto>.Fail("???????? ????????.");
+            return OperationResult<RepositoryRetentionRunResultDto>.Fail("Retention operation was cancelled.");
         }
         catch (Exception ex)
         {
@@ -48,3 +48,4 @@ public sealed class RunRepositoryRetentionHandler(
         }
     }
 }
+

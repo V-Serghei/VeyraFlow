@@ -23,15 +23,15 @@ public sealed class UpdateRepositoryConfigurationHandler(
 
             var repo = await repositories.GetRepositoryByIdAsync(request.RepositoryId, ct);
             if (repo is null || repo.IsDeleted)
-                return OperationResult.Fail("??????????? ?? ??????.");
+                return OperationResult.Fail("Repository was not found.");
 
             var normalizedPath = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(normalizedPath) || !Directory.Exists(normalizedPath))
-                return OperationResult.Fail("????????? ?????????? ?? ??????????.");
+                return OperationResult.Fail("Directory path does not exist.");
 
             var normalizedFormats = NormalizeFormats(request.Formats);
             if (normalizedFormats.Count == 0)
-                return OperationResult.Fail("?? ?????? ?? ???? ??????.");
+                return OperationResult.Fail("At least one format is required.");
 
             var safeName = string.IsNullOrWhiteSpace(request.Name)
                 ? repo.Name
@@ -153,3 +153,4 @@ public sealed class UpdateRepositoryConfigurationHandler(
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
 }
+

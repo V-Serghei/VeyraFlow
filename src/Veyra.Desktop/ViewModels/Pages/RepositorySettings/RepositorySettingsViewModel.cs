@@ -44,7 +44,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionMaxTotalSizeMb = string.Empty;
     [ObservableProperty] private string _retentionTriggerFilter = string.Empty;
     [ObservableProperty] private int _retentionRunIntervalMinutes = 60;
-    [ObservableProperty] private string _retentionLastRunText = "???????";
+    [ObservableProperty] private string _retentionLastRunText = "Never";
     [ObservableProperty] private string _retentionLastStatusText = "-";
 
     [ObservableProperty] private bool _isRetentionRunning;
@@ -74,7 +74,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
-                ErrorMessage = "??????????? ?? ??????.";
+                ErrorMessage = "Repository was not found.";
                 return;
             }
 
@@ -101,7 +101,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load repository settings for {RepositoryId}", repositoryId);
-            ErrorMessage = "?? ??????? ????????? ????????? ???????????.";
+            ErrorMessage = "Failed to load repository settings.";
         }
         finally
         {
@@ -119,7 +119,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var res = await owner.StorageProvider.OpenFolderPickerAsync(
             new Avalonia.Platform.Storage.FolderPickerOpenOptions
             {
-                Title = "???????? ?????????? ???????????",
+                Title = "Select repository directory",
                 AllowMultiple = false
             });
 
@@ -190,7 +190,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? "?? ??????? ????????? ????????? ???????????.";
+                ErrorMessage = result.Error ?? "Failed to save repository settings.";
                 return;
             }
 
@@ -200,7 +200,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to save repository settings for {RepositoryId}", RepositoryId);
-            ErrorMessage = "?? ??????? ????????? ?????????.";
+            ErrorMessage = "Failed to save repository settings.";
         }
         finally
         {
@@ -222,7 +222,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to delete repository {RepositoryId}", RepositoryId);
-            ErrorMessage = "?? ??????? ??????? ???????????.";
+            ErrorMessage = "Failed to delete repository.";
         }
         finally
         {
@@ -283,7 +283,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             IsRetentionRunning = true;
             RetentionResultText = string.Empty;
-            RetentionProgressText = "??????...";
+            RetentionProgressText = "Running...";
             ErrorMessage = null;
 
             _retentionCts?.Dispose();
@@ -300,12 +300,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                RetentionResultText = result.Error ?? "?? ??????? ????????? ????????.";
+                RetentionResultText = result.Error ?? "Failed to run retention.";
                 return;
             }
 
             RetentionResultText = result.Value.Summary;
-            RetentionProgressText = "??????.";
+            RetentionProgressText = "Completed.";
 
             if (!dryRun)
             {
@@ -314,13 +314,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            RetentionProgressText = "???????? ????????.";
-            RetentionResultText = "???????? ???????? ?????????????.";
+            RetentionProgressText = "Operation cancelled.";
+            RetentionResultText = "Retention run was cancelled.";
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to run retention for repository {RepositoryId}", RepositoryId);
-            RetentionResultText = "?????? ?????????? ????????.";
+            RetentionResultText = "Retention failed with an exception.";
             RetentionProgressText = string.Empty;
         }
         finally
@@ -344,7 +344,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : string.Join(", ", policy.TriggerFilters);
         RetentionRunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60);
         RetentionLastRunText = policy.LastRunAtUtc is null
-            ? "???????"
+            ? "Never"
             : policy.LastRunAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
         RetentionLastStatusText = string.IsNullOrWhiteSpace(policy.LastStatus)
             ? "-"
@@ -412,4 +412,3 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : null;
     }
 }
-

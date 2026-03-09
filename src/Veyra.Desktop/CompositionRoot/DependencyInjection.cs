@@ -2,8 +2,10 @@ using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Services.Sync;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
@@ -41,6 +43,7 @@ public static class DependencyInjection
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
+        services.AddScoped<IRepositoryCloudSyncOrchestrator, RepositoryCloudSyncOrchestrator>();
         services.AddInfrastructureNative(cfg);
 
         var schedulerOptions = new SnapshotSchedulerOptions
@@ -102,4 +105,3 @@ public static class DependencyInjection
         return services.BuildServiceProvider();
     }
 }
-

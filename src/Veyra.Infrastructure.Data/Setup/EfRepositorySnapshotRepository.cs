@@ -1482,11 +1482,11 @@ public sealed class EfRepositorySnapshotRepository(
 
         var dedupRatio = baselineManagedHashes.Count > 0 && currentBlockCount > 0
             ? (double)sharedBlockCount / currentBlockCount
-            : null;
+            : (double?)null;
 
         var changedBlockRatio = dedupRatio.HasValue
             ? 1d - dedupRatio.Value
-            : null;
+            : (double?)null;
 
         return new PendingBinaryDiffSummaryDto(
             BaselineSizeBytes: baselineSizeBytes,

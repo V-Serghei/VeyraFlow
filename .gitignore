@@ -108,3 +108,5 @@ src/Veyra.Desktop/runtimes/*/native/*.dylib
 *.user
 *.suo
 *.userprefs
+
+*.log

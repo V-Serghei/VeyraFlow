@@ -1,5 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -16,7 +17,29 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
             .FirstOrDefaultAsync(ct);
     }
 
-    public async Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default)
+    public async Task<UserProfileSessionDto?> GetActiveProfileAsync(CancellationToken ct = default)
+    {
+        var profile = await db.Set<UserProfile>()
+            .Where(u => u.IsActive)
+            .OrderByDescending(u => u.LastLoginAt)
+            .Select(u => new UserProfileSessionDto(
+                u.Username,
+                u.CloudUserId,
+                u.AccessToken,
+                u.LastLoginAt))
+            .FirstOrDefaultAsync(ct);
+
+        return profile;
+    }
+
+    public Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default)
+        => SaveOrUpdateProfileAsync(username, null, null, ct);
+
+    public async Task SaveOrUpdateProfileAsync(
+        string username,
+        long? cloudUserId,
+        string? accessToken,
+        CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
 
@@ -34,12 +57,16 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
             existing.LastLoginAt = now;
             existing.IsActive = true;
             existing.UpdatedAt = now;
+            existing.CloudUserId = cloudUserId ?? existing.CloudUserId;
+            existing.AccessToken = accessToken ?? existing.AccessToken;
         }
         else
         {
             db.Add(new UserProfile
             {
                 Username = username,
+                CloudUserId = cloudUserId,
+                AccessToken = accessToken,
                 LastLoginAt = now,
                 IsActive = true,
                 CreatedAt = now,

@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 
@@ -8,6 +9,7 @@ namespace Veyra.Application.Commands.Repository;
 
 public sealed class ScanRepositoryHandler(
     IRepositoryScanner scanner,
+    IRepositoryCloudSyncOrchestrator cloudSync,
     ILogger<ScanRepositoryHandler> log)
     : IRequestHandler<ScanRepositoryCommand, OperationResult<RepositoryScanResultDto>>
 {
@@ -25,6 +27,21 @@ public sealed class ScanRepositoryHandler(
                 result.FileEntries,
                 result.TotalEntries,
                 result.Trigger);
+
+            if (request.Options?.SaveFileVersions == true)
+            {
+                try
+                {
+                    await cloudSync.TryPushLatestSnapshotAsync(request.RepositoryId, ct);
+                }
+                catch (Exception syncEx)
+                {
+                    log.LogWarning(
+                        syncEx,
+                        "Cloud sync after scan failed for repository {RepositoryId}",
+                        request.RepositoryId);
+                }
+            }
 
             return OperationResult<RepositoryScanResultDto>.Ok(result);
         }
