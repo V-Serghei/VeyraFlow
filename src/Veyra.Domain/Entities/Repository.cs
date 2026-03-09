@@ -1,4 +1,4 @@
-﻿namespace Veyra.Domain.Entities;
+namespace Veyra.Domain.Entities;
 
 public class Repository
 {
@@ -13,6 +13,15 @@ public class Repository
     public int VersionCount { get; set; }
     public long TotalSizeBytes { get; set; }
     public DateTime? LastScannedAt { get; set; }
+
+    public bool RetentionEnabled { get; set; }
+    public int? RetentionMaxAgeDays { get; set; }
+    public int? RetentionMaxSnapshots { get; set; }
+    public long? RetentionMaxTotalSizeBytes { get; set; }
+    public string? RetentionTriggerFilter { get; set; }
+    public int RetentionRunIntervalMinutes { get; set; } = 60;
+    public DateTime? RetentionLastRunAt { get; set; }
+    public string? RetentionLastStatus { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

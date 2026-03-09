@@ -112,6 +112,7 @@ public sealed class SnapshotSchedulerService(
 
         var repositories = scope.ServiceProvider.GetRequiredService<IRepositoryRepository>();
         var scanner = scope.ServiceProvider.GetRequiredService<IRepositoryScanner>();
+        var retention = scope.ServiceProvider.GetRequiredService<IRepositoryRetentionService>();
 
         var all = await repositories.GetAllRepositoriesAsync(ct);
         if (all.Count == 0)
@@ -128,6 +129,14 @@ public sealed class SnapshotSchedulerService(
                 continue;
 
             await RunScheduledScanWithRetryAsync(scanner, repo.Id, ct);
+        }
+
+        var retentionRuns = await retention.RunDueRetentionAsync(ct: ct);
+        if (retentionRuns.Count > 0)
+        {
+            log.LogInformation(
+                "Scheduled retention completed for {Count} repositories",
+                retentionRuns.Count);
         }
     }
 
@@ -197,7 +206,3 @@ public sealed class SnapshotSchedulerService(
         return hour >= start || hour < end;
     }
 }
-
-
-
-

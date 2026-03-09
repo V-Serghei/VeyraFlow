@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
@@ -23,24 +23,31 @@ public sealed class UpdateRepositoryConfigurationHandler(
 
             var repo = await repositories.GetRepositoryByIdAsync(request.RepositoryId, ct);
             if (repo is null || repo.IsDeleted)
-                return OperationResult.Fail("Репозиторий не найден.");
+                return OperationResult.Fail("??????????? ?? ??????.");
 
             var normalizedPath = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(normalizedPath) || !Directory.Exists(normalizedPath))
-                return OperationResult.Fail("Указанная директория не существует.");
+                return OperationResult.Fail("????????? ?????????? ?? ??????????.");
 
             var normalizedFormats = NormalizeFormats(request.Formats);
             if (normalizedFormats.Count == 0)
-                return OperationResult.Fail("Не выбран ни один формат.");
+                return OperationResult.Fail("?? ?????? ?? ???? ??????.");
 
             var safeName = string.IsNullOrWhiteSpace(request.Name)
                 ? repo.Name
                 : request.Name.Trim();
 
+            var safeRetentionPolicy = NormalizeRetentionPolicy(request.RetentionPolicy);
+
             if (!PathEquals(repo.DirectoryPath, normalizedPath))
                 await setup.UpdateWatchedDirectoryAsync(repo.DirectoryPath, normalizedPath, ct);
 
-            await repositories.UpdateRepositoryAsync(repo.Id, safeName, request.Description, ct);
+            await repositories.UpdateRepositoryAsync(
+                repo.Id,
+                safeName,
+                request.Description,
+                safeRetentionPolicy,
+                ct);
 
             var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
             var missingGlobal = normalizedFormats
@@ -77,10 +84,11 @@ public sealed class UpdateRepositoryConfigurationHandler(
             await native.ApplySetupAsync(ct);
 
             log.LogInformation(
-                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}",
+                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}. RetentionEnabled {RetentionEnabled}",
                 repo.Id,
                 normalizedPath,
-                normalizedFormats.Count);
+                normalizedFormats.Count,
+                safeRetentionPolicy.Enabled);
 
             return OperationResult.Ok();
         }
@@ -119,4 +127,29 @@ public sealed class UpdateRepositoryConfigurationHandler(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static RepositoryRetentionPolicyDto NormalizeRetentionPolicy(RepositoryRetentionPolicyDto policy)
+    {
+        var filters = policy.TriggerFilters
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return policy with
+        {
+            MaxAgeDays = NormalizePositive(policy.MaxAgeDays),
+            MaxSnapshots = NormalizePositive(policy.MaxSnapshots),
+            MaxTotalSizeBytes = NormalizePositive(policy.MaxTotalSizeBytes),
+            TriggerFilters = filters,
+            RunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60)
+        };
+    }
+
+    private static int? NormalizePositive(int? value)
+        => value is > 0 ? value : null;
+
+    private static long? NormalizePositive(long? value)
+        => value is > 0 ? value : null;
 }

@@ -27,6 +27,7 @@ public partial class App : AvaloniaApplication
     private const string SnapshotTitleEnsureMigrationId = "20260307130000_EnsureRepositorySnapshotTitleColumn";
     private const string TextDiffHunksMigrationId = "20260307193000_AddTextDiffHunks";
     private const string SoftDeleteCascadeMigrationId = "20260309133000_AddSoftDeleteCascadeModel";
+    private const string RepositoryRetentionMigrationId = "20260309180000_AddRepositoryRetentionPolicy";
     private const string EfProductVersion = "10.0.2";
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -50,6 +51,7 @@ public partial class App : AvaloniaApplication
             BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
             BackfillSoftDeleteMigrationHistoryIfNeeded(db);
+            BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
             db.Database.Migrate();
             EnsureRepositorySnapshotTitleColumn(db);
             BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
@@ -57,8 +59,10 @@ public partial class App : AvaloniaApplication
 
             EnsureTextDiffStorageV2(db);
             EnsureSoftDeleteCascadeColumns(db);
+            EnsureRepositoryRetentionColumns(db);
             BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
             BackfillSoftDeleteMigrationHistoryIfNeeded(db);
+            BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
             db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
             db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
             var nativeHealth = NativeRuntimeHealth.Probe();
@@ -356,6 +360,81 @@ public partial class App : AvaloniaApplication
             }
 
             EnsureMigrationHistoryRow(connection, SoftDeleteCascadeMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+    private static void BackfillRepositoryRetentionMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("Repositories", "RetentionEnabled"),
+                ("Repositories", "RetentionMaxAgeDays"),
+                ("Repositories", "RetentionMaxSnapshots"),
+                ("Repositories", "RetentionMaxTotalSizeBytes"),
+                ("Repositories", "RetentionTriggerFilter"),
+                ("Repositories", "RetentionRunIntervalMinutes"),
+                ("Repositories", "RetentionLastRunAt"),
+                ("Repositories", "RetentionLastStatus")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, RepositoryRetentionMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureRepositoryRetentionColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionEnabled", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxAgeDays", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxSnapshots", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxTotalSizeBytes", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionTriggerFilter", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionRunIntervalMinutes", "INTEGER NOT NULL DEFAULT 60");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionLastRunAt", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionLastStatus", "TEXT NULL");
+
+            using var createIdx = connection.CreateCommand();
+            createIdx.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_Repositories_RetentionEnabled_RetentionLastRunAt\" ON \"Repositories\" (\"RetentionEnabled\", \"RetentionLastRunAt\");";
+            createIdx.ExecuteNonQuery();
         }
         finally
         {
@@ -670,6 +749,10 @@ WHERE ""StorageFormatVersion"" < 2
         Log.CloseAndFlush();
     }
 }
+
+
+
+
 
 
 

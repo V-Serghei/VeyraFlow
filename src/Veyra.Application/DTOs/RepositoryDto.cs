@@ -11,4 +11,5 @@ public sealed record RepositoryDto(
     int FileCount,
     int VersionCount,
     long TotalSizeBytes,
-    DateTime? LastScannedAt);
+    DateTime? LastScannedAt,
+    RepositoryRetentionPolicyDto RetentionPolicy);

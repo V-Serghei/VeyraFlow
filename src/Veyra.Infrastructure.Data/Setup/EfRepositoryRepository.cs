@@ -39,6 +39,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             VersionCount = 0,
             TotalSizeBytes = 0,
             LastScannedAt = null,
+            RetentionEnabled = false,
+            RetentionRunIntervalMinutes = 60,
+            RetentionLastRunAt = null,
+            RetentionLastStatus = null,
             CreatedAt = now,
             UpdatedAt = now,
             IsDeleted = false,
@@ -62,6 +66,33 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
         entity.Name = name;
         entity.Description = description;
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+    }
+    public async Task UpdateRepositoryAsync(
+        int id,
+        string name,
+        string? description,
+        RepositoryRetentionPolicyDto retentionPolicy,
+        CancellationToken ct = default)
+    {
+        db.ChangeTracker.Clear();
+
+        var entity = await db.Set<Repository>()
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted, ct);
+
+        if (entity is null)
+            return;
+
+        entity.Name = name;
+        entity.Description = description;
+        entity.RetentionEnabled = retentionPolicy.Enabled;
+        entity.RetentionMaxAgeDays = NormalizePositive(retentionPolicy.MaxAgeDays);
+        entity.RetentionMaxSnapshots = NormalizePositive(retentionPolicy.MaxSnapshots);
+        entity.RetentionMaxTotalSizeBytes = NormalizePositive(retentionPolicy.MaxTotalSizeBytes);
+        entity.RetentionTriggerFilter = SerializeTriggerFilters(retentionPolicy.TriggerFilters);
+        entity.RetentionRunIntervalMinutes = Math.Clamp(retentionPolicy.RunIntervalMinutes, 5, 7 * 24 * 60);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
@@ -295,7 +326,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .Include(r => r.Directory)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
 
-        if (repo is null) return null;
+        if (repo is null)
+            return null;
 
         var formats = await db.Set<WatchedDirectoryFormat>()
             .Where(l => !l.IsDeleted && l.DirectoryId == repo.DirectoryId && !l.Format.IsDeleted)
@@ -314,7 +346,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repo.FileCount,
             repo.VersionCount,
             repo.TotalSizeBytes,
-            repo.LastScannedAt);
+            repo.LastScannedAt,
+            MapRetentionPolicy(repo));
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -347,7 +380,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             r.FileCount,
             r.VersionCount,
             r.TotalSizeBytes,
-            r.LastScannedAt)).ToList();
+            r.LastScannedAt,
+            MapRetentionPolicy(r))).ToList();
     }
 
     public async Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default)
@@ -391,6 +425,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     VersionCount = 0,
                     TotalSizeBytes = 0,
                     LastScannedAt = null,
+                    RetentionEnabled = false,
+                    RetentionRunIntervalMinutes = 60,
+                    RetentionLastRunAt = null,
+                    RetentionLastStatus = null,
                     CreatedAt = now,
                     UpdatedAt = now,
                     IsDeleted = false,
@@ -411,4 +449,51 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
         await db.SaveChangesAsync(ct);
     }
+
+    private static RepositoryRetentionPolicyDto MapRetentionPolicy(Repository repository)
+    {
+        return new RepositoryRetentionPolicyDto(
+            repository.RetentionEnabled,
+            repository.RetentionMaxAgeDays,
+            repository.RetentionMaxSnapshots,
+            repository.RetentionMaxTotalSizeBytes,
+            ParseTriggerFilters(repository.RetentionTriggerFilter),
+            repository.RetentionRunIntervalMinutes,
+            repository.RetentionLastRunAt,
+            repository.RetentionLastStatus);
+    }
+
+    private static IReadOnlyList<string> ParseTriggerFilters(string? csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv))
+            return Array.Empty<string>();
+
+        return csv
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? SerializeTriggerFilters(IReadOnlyList<string> triggerFilters)
+    {
+        if (triggerFilters.Count == 0)
+            return null;
+
+        var normalized = triggerFilters
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return normalized.Count == 0 ? null : string.Join(',', normalized);
+    }
+
+    private static int? NormalizePositive(int? value)
+        => value is > 0 ? value : null;
+
+    private static long? NormalizePositive(long? value)
+        => value is > 0 ? value : null;
 }
+

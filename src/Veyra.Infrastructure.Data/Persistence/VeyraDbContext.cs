@@ -268,6 +268,15 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.FileCount).HasDefaultValue(0);
             entity.Property(e => e.VersionCount).HasDefaultValue(0);
             entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
+            entity.Property(e => e.RetentionEnabled).HasDefaultValue(false);
+            entity.Property(e => e.RetentionMaxAgeDays).IsRequired(false);
+            entity.Property(e => e.RetentionMaxSnapshots).IsRequired(false);
+            entity.Property(e => e.RetentionMaxTotalSizeBytes).IsRequired(false);
+            entity.Property(e => e.RetentionTriggerFilter).HasMaxLength(512);
+            entity.Property(e => e.RetentionRunIntervalMinutes).HasDefaultValue(60);
+            entity.Property(e => e.RetentionLastRunAt).IsRequired(false);
+            entity.Property(e => e.RetentionLastStatus).HasMaxLength(256);
+            entity.HasIndex(e => new { e.RetentionEnabled, e.RetentionLastRunAt });
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });

@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.RepositorySettings"
@@ -10,35 +10,35 @@
     <DockPanel Margin="24,20">
         <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Content="← Назад" Command="{Binding BackCommand}" Padding="12,8"/>
-                <TextBlock Text="Настройки репозитория" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Button Content="? ?????" Command="{Binding BackCommand}" Padding="12,8"/>
+                <TextBlock Text="????????? ???????????" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="#F87171"
                        IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-            <Button Content="Удалить" Command="{Binding DeleteCommand}" Foreground="#F87171"/>
-            <Button Content="Сохранить" Command="{Binding SaveCommand}"/>
+            <Button Content="???????" Command="{Binding DeleteCommand}" Foreground="#F87171"/>
+            <Button Content="?????????" Command="{Binding SaveCommand}"/>
         </StackPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel MaxWidth="760" Spacing="14">
-                <TextBlock Text="Имя репозитория" Opacity="0.8"/>
+            <StackPanel MaxWidth="860" Spacing="14">
+                <TextBlock Text="??? ???????????" Opacity="0.8"/>
                 <TextBox Text="{Binding RepositoryName, Mode=TwoWay}"/>
 
-                <TextBlock Text="Описание" Opacity="0.8"/>
+                <TextBlock Text="????????" Opacity="0.8"/>
                 <TextBox Text="{Binding Description, Mode=TwoWay}" Height="90" AcceptsReturn="True"/>
 
-                <TextBlock Text="Директория" Opacity="0.8"/>
+                <TextBlock Text="??????????" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0" Text="{Binding DirectoryPath, Mode=TwoWay}"/>
-                    <Button Grid.Column="1" Content="Обзор" Command="{Binding BrowseDirectoryCommand}"/>
+                    <Button Grid.Column="1" Content="?????" Command="{Binding BrowseDirectoryCommand}"/>
                 </Grid>
 
                 <Border Height="1" Background="#1E1E1E" Margin="0,8"/>
 
-                <TextBlock Text="Привязанные форматы" FontSize="14" FontWeight="SemiBold"/>
+                <TextBlock Text="??????????? ???????" FontSize="14" FontWeight="SemiBold"/>
                 <ItemsControl ItemsSource="{Binding SelectedFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -50,7 +50,7 @@
                             <Border Background="#1A1A1A" CornerRadius="6" Padding="10,5" Margin="0,0,6,6">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <TextBlock Text="{Binding .}"/>
-                                    <Button Content="✕" Padding="2" FontSize="10"
+                                    <Button Content="?" Padding="2" FontSize="10"
                                             Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).RemoveFormatCommand}"
                                             CommandParameter="{Binding .}"/>
                                 </StackPanel>
@@ -59,7 +59,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="Добавить существующий формат" Opacity="0.8"/>
+                <TextBlock Text="???????? ???????????? ??????" Opacity="0.8"/>
                 <ItemsControl ItemsSource="{Binding AvailableFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -75,11 +75,64 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="Добавить новый формат" Opacity="0.8"/>
+                <TextBlock Text="???????? ????? ??????" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="например .sql"/>
-                    <Button Grid.Column="1" Content="Добавить" Command="{Binding AddCustomFormatCommand}"/>
+                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="???????? .sql"/>
+                    <Button Grid.Column="1" Content="????????" Command="{Binding AddCustomFormatCommand}"/>
                 </Grid>
+
+                <Border Height="1" Background="#1E1E1E" Margin="0,8"/>
+
+                <TextBlock Text="???????? ????????" FontSize="16" FontWeight="SemiBold"/>
+                <CheckBox Content="???????? ???????? ??? ????? ???????????"
+                          IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="????. ??????? ?????? (???)" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="???????? 30"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="????. ?????????? ???????" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="???????? 200"/>
+                    </StackPanel>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="????. ????? ??????? (MB)" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="???????? 2048"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="???????? ??????? (???)" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionRunIntervalMinutes, Mode=TwoWay}"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="?????? ????????? (????? ???????)" Opacity="0.8"/>
+                <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="manual_snapshot, sync_live_watcher"/>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="????????? ??????" Opacity="0.7"/>
+                        <TextBlock Text="{Binding RetentionLastRunText}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="????????? ??????" Opacity="0.7"/>
+                        <TextBlock Text="{Binding RetentionLastStatusText}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Dry run" Command="{Binding RunRetentionDryRunCommand}"/>
+                    <Button Content="????????? ??????" Command="{Binding RunRetentionApplyCommand}"/>
+                    <Button Content="????????" Command="{Binding CancelRetentionCommand}"/>
+                </StackPanel>
+
+                <TextBlock Text="{Binding RetentionProgressText}" Opacity="0.8"
+                           IsVisible="{Binding RetentionProgressText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                <TextBlock Text="{Binding RetentionResultText}" Foreground="#93C5FD" TextWrapping="Wrap"
+                           IsVisible="{Binding RetentionResultText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>

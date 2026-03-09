@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 
 namespace Veyra.Application.Commands.Repository;
 
@@ -21,5 +21,26 @@ public sealed class UpdateRepositoryConfigurationCommandValidator
             .NotEmpty().WithMessage("At least one format is required.")
             .Must(formats => formats.All(f => !string.IsNullOrWhiteSpace(f)))
             .WithMessage("Formats cannot contain empty values.");
+
+        RuleFor(x => x.RetentionPolicy.RunIntervalMinutes)
+            .GreaterThanOrEqualTo(5)
+            .WithMessage("Retention interval must be at least 5 minutes.")
+            .LessThanOrEqualTo(7 * 24 * 60)
+            .WithMessage("Retention interval is too large.");
+
+        RuleFor(x => x.RetentionPolicy.MaxAgeDays)
+            .GreaterThan(0)
+            .When(x => x.RetentionPolicy.MaxAgeDays.HasValue)
+            .WithMessage("Retention max age must be positive.");
+
+        RuleFor(x => x.RetentionPolicy.MaxSnapshots)
+            .GreaterThan(0)
+            .When(x => x.RetentionPolicy.MaxSnapshots.HasValue)
+            .WithMessage("Retention max snapshots must be positive.");
+
+        RuleFor(x => x.RetentionPolicy.MaxTotalSizeBytes)
+            .GreaterThan(0)
+            .When(x => x.RetentionPolicy.MaxTotalSizeBytes.HasValue)
+            .WithMessage("Retention max size must be positive.");
     }
 }
