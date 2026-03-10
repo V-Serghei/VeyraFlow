@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
@@ -18,7 +19,7 @@
         CanResize="True"
         Background="{DynamicResource VeyraCanvasBrush}"
         Foreground="{DynamicResource VeyraTextPrimaryBrush}"
-        Title="Compare Versions">
+        Title="{loc:Tr compare.window_title}">
 
     <Grid RowDefinitions="Auto,*,Auto" Margin="16" RowSpacing="12">
         <Border Grid.Row="0" Classes="dialog-hero">
@@ -38,12 +39,12 @@
             <Grid ColumnDefinitions="320,*" ColumnSpacing="12">
                 <Border Grid.Column="0" Classes="dialog-shell">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
-                        <TextBlock Grid.Row="0" Text="Version history" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Grid.Row="1" Classes="muted" Text="Left click = LEFT side, Right click = RIGHT side"/>
+                        <TextBlock Grid.Row="0" Text="{loc:Tr compare.version_history}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="1" Classes="muted" Text="{loc:Tr compare.selection_instruction}"/>
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
                             <TextBlock Grid.Row="0"
-                                       Text="Loading versions..."
+                                       Text="{loc:Tr explorer.loading_versions}"
                                        Classes="muted"
                                        IsVisible="{Binding IsVersionListLoading}"/>
 
@@ -84,7 +85,7 @@
                             </ListBox>
 
                             <TextBlock Grid.Row="1"
-                                       Text="No versions found for selected file."
+                                       Text="{loc:Tr explorer.no_versions_for_selected_file}"
                                        Classes="muted"
                                        IsVisible="{Binding HasNoVersions}"/>
                         </Grid>
@@ -94,7 +95,7 @@
                 <Border Grid.Column="1" Classes="dialog-shell">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
                         <StackPanel Grid.Row="0" Spacing="4">
-                            <TextBlock Text="Selected pair" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="{loc:Tr compare.selected_pair}" FontSize="18" FontWeight="SemiBold"/>
                             <TextBlock Text="{Binding SelectedPairSummary}" Classes="muted" TextWrapping="Wrap"/>
                         </StackPanel>
 
@@ -108,7 +109,7 @@
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
                             <TextBlock Grid.Row="0"
-                                       Text="Building preview..."
+                                       Text="{loc:Tr compare.building_preview}"
                                        Classes="muted"
                                        IsVisible="{Binding IsPreviewLoading}"/>
 
@@ -117,23 +118,23 @@
                                     <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                         <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
                                             <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="+ Added" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
+                                                <TextBlock Text="{loc:Tr diff.added}" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
                                             </Border>
                                             <Border Grid.Column="1" Background="#4A2530" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="- Removed" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
+                                                <TextBlock Text="{loc:Tr diff.removed}" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
                                             </Border>
                                             <Border Grid.Column="2" Background="#30455F" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="~ Modified" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
+                                                <TextBlock Text="{loc:Tr diff.modified}" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
                                             </Border>
                                             <Border Grid.Column="3" Background="#213B5A" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="= Context" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
+                                                <TextBlock Text="{loc:Tr diff.context}" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
                                             </Border>
                                         </Grid>
 
                                         <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="8">
                                             <Grid Grid.Row="0" ColumnDefinitions="*,8,*">
                                                 <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                                    <TextBlock Text="Before" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
                                                 </Border>
                                                 <GridSplitter Grid.Column="1"
                                                               Width="8"
@@ -143,7 +144,7 @@
                                                               HorizontalAlignment="Stretch"
                                                               VerticalAlignment="Stretch"/>
                                                 <Border Grid.Column="2" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                                    <TextBlock Text="After" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
                                                 </Border>
                                             </Grid>
 
@@ -248,7 +249,7 @@
                                     <Grid RowDefinitions="Auto,*" RowSpacing="10">
                                         <Grid Grid.Row="0" ColumnDefinitions="*,8,*" ColumnSpacing="0">
                                             <Border Grid.Column="0" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="10,6">
-                                                <TextBlock Text="Before version" FontWeight="SemiBold" Foreground="#1F2937"/>
+                                                <TextBlock Text="{loc:Tr compare.before_version}" FontWeight="SemiBold" Foreground="#1F2937"/>
                                             </Border>
                                             <GridSplitter Grid.Column="1"
                                                           Width="8"
@@ -258,7 +259,7 @@
                                                           HorizontalAlignment="Stretch"
                                                           VerticalAlignment="Stretch"/>
                                             <Border Grid.Column="2" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="10,6">
-                                                <TextBlock Text="After version" FontWeight="SemiBold" Foreground="#1F2937"/>
+                                                <TextBlock Text="{loc:Tr compare.after_version}" FontWeight="SemiBold" Foreground="#1F2937"/>
                                             </Border>
                                         </Grid>
 
@@ -490,7 +491,7 @@
                                         </Grid>
 
                                         <TextBlock Grid.Row="1"
-                                                   Text="Image preview is not available for this pair."
+                                                   Text="{loc:Tr compare.image_preview_unavailable}"
                                                    Classes="muted"
                                                    IsVisible="{Binding HasNoImagePreviews}"/>
                                     </Grid>
@@ -502,12 +503,12 @@
                                            IsVisible="{Binding ShowNoDiffPreviewMessage}"
                                            TextWrapping="Wrap"/>
                                 <TextBlock Grid.Row="2"
-                                           Text="No full-file preview data available for this version pair."
+                                           Text="{loc:Tr compare.no_full_preview}"
                                            Classes="muted"
                                            IsVisible="{Binding ShowNoFullFilePreviewMessage}"
                                            TextWrapping="Wrap"/>
                                 <TextBlock Grid.Row="3"
-                                           Text="For the most accurate DOC/DOCX comparison (layout, tables, images, and styles), use Open Word compare in Microsoft Word Desktop (2016/2019/2021/Microsoft 365)."
+                                           Text="{loc:Tr compare.word_hint}"
                                            Classes="muted"
                                            FontSize="11"
                                            Opacity="0.82"
@@ -531,41 +532,44 @@
                     <TextBlock Text="{Binding PreviewSummary}" Classes="muted" TextWrapping="Wrap" Opacity="0.86"/>
                 </StackPanel>
 
-                <WrapPanel Grid.Column="1" Orientation="Horizontal" ItemHeight="34" ItemWidth="140">
-                    <Button Content="{Binding WrapToggleLabel}" ToolTip.Tip="Toggle line wrapping in text preview" Classes="subtle" Command="{Binding ToggleWrapModeCommand}" IsVisible="{Binding IsTextPreview}"/>
-                    <Button Content="{Binding FullPreviewToggleLabel}"
-                            Classes="subtle"
-                            ToolTip.Tip="Switch between changes-only and full-file text view"
-                            Command="{Binding ToggleFullFilePreviewCommand}"
-                            IsEnabled="{Binding CanToggleFullFilePreview}"
-                            IsVisible="{Binding CanToggleFullFilePreview}"/>
-                    <Button Content="Open Word compare"
-                            ToolTip.Tip="{Binding NativeWordCompareHint}"
-                            Classes="subtle"
-                            Command="{Binding OpenNativeWordCompareCommand}"
-                            IsVisible="{Binding IsWordDocument}"
-                            IsEnabled="{Binding CanOpenNativeWordCompare}"/>
-                    <Button Content="Word compare + styles"
-                            ToolTip.Tip="{Binding NativeWordCompareFormattingHint}"
-                            Classes="subtle"
-                            Command="{Binding OpenNativeWordCompareWithFormattingCommand}"
-                            IsVisible="{Binding IsWordDocument}"
-                            IsEnabled="{Binding CanOpenNativeWordCompare}"/>
-                    <Button Content="Open file"
-                            ToolTip.Tip="Open current file from repository folder"
-                            Classes="subtle"
-                            Command="{Binding OpenSourceFileCommand}"
-                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"/>
-                    <Button Content="Show in Explorer"
-                            ToolTip.Tip="Reveal current file in Windows Explorer"
-                            Classes="subtle"
-                            Command="{Binding OpenSourceFileInExplorerCommand}"
-                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"/>
-                    <Button Content="Close" ToolTip.Tip="Close compare window" Classes="primary" Command="{Binding CloseCommand}"/>
-                </WrapPanel>
+                <ScrollViewer Grid.Column="1"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Content="{Binding WrapToggleLabel}" ToolTip.Tip="{loc:Tr compare.tooltip_toggle_wrap}" Classes="subtle" Command="{Binding ToggleWrapModeCommand}" IsVisible="{Binding IsTextPreview}"/>
+                        <Button Content="{Binding FullPreviewToggleLabel}"
+                                Classes="subtle"
+                                ToolTip.Tip="{loc:Tr compare.tooltip_toggle_full_preview}"
+                                Command="{Binding ToggleFullFilePreviewCommand}"
+                                IsEnabled="{Binding CanToggleFullFilePreview}"
+                                IsVisible="{Binding CanToggleFullFilePreview}"/>
+                        <Button Content="{loc:Tr compare.open_word_compare}"
+                                ToolTip.Tip="{Binding NativeWordCompareHint}"
+                                Classes="subtle"
+                                Command="{Binding OpenNativeWordCompareCommand}"
+                                IsVisible="{Binding IsWordDocument}"
+                                IsEnabled="{Binding CanOpenNativeWordCompare}"/>
+                        <Button Content="{loc:Tr compare.word_compare_styles}"
+                                ToolTip.Tip="{Binding NativeWordCompareFormattingHint}"
+                                Classes="subtle"
+                                Command="{Binding OpenNativeWordCompareWithFormattingCommand}"
+                                IsVisible="{Binding IsWordDocument}"
+                                IsEnabled="{Binding CanOpenNativeWordCompare}"/>
+                        <Button Content="{loc:Tr compare.open_file}"
+                                ToolTip.Tip="{loc:Tr compare.tooltip_open_file}"
+                                Classes="subtle"
+                                Command="{Binding OpenSourceFileCommand}"
+                                IsEnabled="{Binding CanOpenSourceFileOnDisk}"/>
+                        <Button Content="{loc:Tr compare.show_in_explorer}"
+                                ToolTip.Tip="{loc:Tr compare.tooltip_show_in_explorer}"
+                                Classes="subtle"
+                                Command="{Binding OpenSourceFileInExplorerCommand}"
+                                IsEnabled="{Binding CanOpenSourceFileOnDisk}"/>
+                        <Button Content="{loc:Tr common.close}" ToolTip.Tip="{loc:Tr compare.tooltip_close_window}" Classes="primary" Command="{Binding CloseCommand}"/>
+                    </StackPanel>
+                </ScrollViewer>
             </Grid>
         </Border>
     </Grid>
 </Window>
-
 

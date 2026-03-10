@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -12,6 +12,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 
 namespace Veyra.Desktop.ViewModels.Windows;
@@ -64,7 +65,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     [ObservableProperty] private string _customFormat = string.Empty;
 
     [ObservableProperty] private int _progressPercent;
-    [ObservableProperty] private string _progressMessage = "Ожидание запуска";
+    [ObservableProperty] private string _progressMessage = Loc.T("create_repo.waiting_start");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
@@ -102,18 +103,25 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         BrowseDirectoryCommand = new AsyncRelayCommand(BrowseDirectoryAsync, () => !IsBusy);
         AddCustomFormatCommand = new RelayCommand(AddCustomFormat, () => !IsBusy);
 
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(nameof(StepInfo));
+            OnPropertyChanged(nameof(NextButtonText));
+        };
+
         AddDefaultFormats();
         SetStep(0);
     }
 
     public string Title => _stepIndex switch
     {
-        0 => "Новый репозиторий",
-        1 => "Форматы отслеживания",
-        _ => "Сканирование и сохранение"
+        0 => Loc.T("create_repo.title_step_repository"),
+        1 => Loc.T("create_repo.title_step_formats"),
+        _ => Loc.T("create_repo.title_step_scan")
     };
 
-    public string StepInfo => $"Шаг {_stepIndex + 1} из 3";
+    public string StepInfo => Loc.F("create_repo.step_info", _stepIndex + 1, 3);
 
     public bool IsStepRepository => _stepIndex == 0;
     public bool IsStepFormats => _stepIndex == 1;
@@ -124,9 +132,9 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         get
         {
             if (IsStepScan)
-                return IsCompleted ? "Готово" : "Выполняется...";
+                return IsCompleted ? Loc.T("create_repo.done") : Loc.T("create_repo.in_progress");
 
-            return "Далее";
+            return Loc.T("setup_wizard.next");
         }
     }
 
@@ -202,7 +210,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             return;
 
         IReadOnlyList<IStorageFolder> res = await owner.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions { Title = "Выберите директорию", AllowMultiple = false });
+            new FolderPickerOpenOptions { Title = Loc.T("create_repo.select_directory_title"), AllowMultiple = false });
 
         var local = res.FirstOrDefault()?.Path.LocalPath;
         if (!string.IsNullOrWhiteSpace(local) && Directory.Exists(local))
@@ -251,7 +259,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             IsCompleted = false;
             ErrorMessage = null;
             ProgressPercent = 0;
-            ProgressMessage = "Запуск процесса";
+            ProgressMessage = Loc.T("create_repo.progress_start");
             FilesProcessed = 0;
             FilesTotal = 0;
             IsProgressIndeterminate = true;
@@ -279,14 +287,14 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? "Не удалось создать репозиторий.";
-                ProgressMessage = "Ошибка создания";
+                ErrorMessage = result.Error ?? Loc.T("create_repo.error_create_failed");
+                ProgressMessage = Loc.T("create_repo.error_progress_label");
                 IsProgressIndeterminate = false;
                 return;
             }
 
             ProgressPercent = 100;
-            ProgressMessage = "Репозиторий успешно создан";
+            ProgressMessage = Loc.T("create_repo.success_progress_label");
             IsProgressIndeterminate = false;
             IsCompleted = true;
             RefreshCommands();
@@ -294,8 +302,8 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to create repository in wizard");
-            ErrorMessage = "Не удалось завершить создание репозитория.";
-            ProgressMessage = "Ошибка создания";
+            ErrorMessage = Loc.T("create_repo.error_unhandled");
+            ProgressMessage = Loc.T("create_repo.error_progress_label");
             IsProgressIndeterminate = false;
         }
         finally
@@ -351,4 +359,3 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
     }
 }
-

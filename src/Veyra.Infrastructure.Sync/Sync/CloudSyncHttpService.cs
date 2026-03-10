@@ -10,6 +10,10 @@ namespace Veyra.Infrastructure.Sync.Sync;
 
 public sealed class CloudSyncHttpService : ICloudSyncService
 {
+    private const string SyncProtocolHeader = "X-Veyra-Sync-Protocol";
+    private const string SyncProtocolVersion = "1";
+    private const string IdempotencyKeyHeader = "X-Idempotency-Key";
+
     private readonly HttpClient _http;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -118,6 +122,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         string accessToken,
         int repositoryId,
         CloudSnapshotPackageDto package,
+        string? idempotencyKey = null,
         CancellationToken ct = default)
     {
         var requestPayload = new PushSnapshotRequest
@@ -169,7 +174,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             }).ToList()
         };
 
-        using var req = BuildRequest(HttpMethod.Post, $"/api/sync/repositories/{repositoryId}/snapshots", accessToken);
+        using var req = BuildRequest(HttpMethod.Post, $"/api/sync/repositories/{repositoryId}/snapshots", accessToken, idempotencyKey);
         req.Content = JsonContent.Create(requestPayload);
 
         using var resp = await _http.SendAsync(req, ct);
@@ -219,10 +224,15 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         return await resp.Content.ReadAsByteArrayAsync(ct);
     }
 
-    private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken)
+    private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken, string? idempotencyKey = null)
     {
         var request = new HttpRequestMessage(method, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation(SyncProtocolHeader, SyncProtocolVersion);
+
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            request.Headers.TryAddWithoutValidation(IdempotencyKeyHeader, idempotencyKey.Trim());
+
         return request;
     }
 
@@ -319,3 +329,5 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         public long StoredSizeBytes { get; init; }
     }
 }
+
+

@@ -63,6 +63,23 @@ CREATE TABLE IF NOT EXISTS cloud_blocks (
     created_at   timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS sync_idempotency_keys (
+    id                     bigserial PRIMARY KEY,
+    user_id                bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    external_repository_id integer NOT NULL,
+    idempotency_key        text NOT NULL,
+    request_sha256         text NOT NULL,
+    state                  text NOT NULL DEFAULT 'in_progress',
+    status_code            integer NULL,
+    response_json          jsonb NULL,
+    created_at             timestamptz NOT NULL DEFAULT now(),
+    updated_at             timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(user_id, external_repository_id, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS ix_sync_idempotency_created
+    ON sync_idempotency_keys(created_at DESC);
+
 ALTER TABLE repositories
     ADD COLUMN IF NOT EXISTS description text NULL;
 

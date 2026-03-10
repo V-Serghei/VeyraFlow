@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"veyraflow/server/cloud-api/internal/handlers"
@@ -16,6 +18,7 @@ func main() {
 	dsn := getenv("DB_DSN", "postgres://veyra:veyra_pass_Dev@localhost:5432/veyraflow?sslmode=disable")
 	tokenSecret := getenv("AUTH_TOKEN_SECRET", "veyra-dev-secret-change-me")
 	blockStoreDir := getenv("BLOCK_STORE_DIR", "./data/blocks")
+	tokenLifetimeMinutes := getenvInt("AUTH_TOKEN_LIFETIME_MINUTES", 1440, 5, 30*24*60)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -36,7 +39,7 @@ func main() {
 		}
 	}
 
-	h := handlers.New(pool, tokenSecret, blockStoreDir)
+	h := handlers.New(pool, tokenSecret, blockStoreDir, time.Duration(tokenLifetimeMinutes)*time.Minute)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.Health)
@@ -68,4 +71,24 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func getenvInt(k string, def, min, max int) int {
+	v := strings.TrimSpace(os.Getenv(k))
+	if v == "" {
+		return def
+	}
+
+	parsed, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+
+	if parsed < min {
+		return min
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
 }

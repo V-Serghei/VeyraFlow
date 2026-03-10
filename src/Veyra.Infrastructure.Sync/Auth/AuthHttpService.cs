@@ -17,6 +17,7 @@ public sealed class AuthHttpService : IAuthService
         string Username,
         string AccessToken,
         bool IsNewUser,
+        DateTime? ExpiresAtUtc,
         string? Message);
 
     public AuthHttpService(HttpClient http) => _http = http;
@@ -51,6 +52,7 @@ public sealed class AuthHttpService : IAuthService
             payload.UserId,
             payload.Username,
             payload.AccessToken,
-            payload.IsNewUser);
+            payload.IsNewUser,
+            payload.ExpiresAtUtc);
     }
 }

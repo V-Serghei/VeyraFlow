@@ -1,11 +1,21 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
 public sealed class RepositoryNameViewModel : INotifyPropertyChanged
 {
+    public RepositoryNameViewModel()
+    {
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(Title));
+            OnPropertyChanged(nameof(Subtitle));
+        };
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? p = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(p));
@@ -28,6 +38,6 @@ public sealed class RepositoryNameViewModel : INotifyPropertyChanged
 
     public bool HasAny => !string.IsNullOrWhiteSpace(RepositoryName);
 
-    public string Title => "Имя репозитория";
-    public string Subtitle => "Введите имя для вашего репозитория. Если директорий несколько — каждая получит имя по названию папки, а здесь задаётся имя первого.";
+    public string Title => Loc.T("setup.repository_name");
+    public string Subtitle => Loc.T("setup.repository_name_subtitle");
 }

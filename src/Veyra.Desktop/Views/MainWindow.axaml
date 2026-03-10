@@ -1,5 +1,6 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
@@ -7,7 +8,7 @@
         x:Class="Veyra.Desktop.Views.MainWindow"
         x:DataType="windows:MainWindowViewModel"
         Icon="/Assets/avalonia-logo.ico"
-        Title="VeyraFlow — Версионный Проводник"
+        Title="{loc:Tr main.window_title}"
         Width="1280" Height="820"
         MinWidth="980" MinHeight="640"
         Background="#0D0D0D" Foreground="#EEEEEE"
@@ -18,11 +19,11 @@
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
                     <TextBlock Text="◈" FontSize="18" Foreground="#3B82F6" VerticalAlignment="Center"/>
-                    <TextBlock Text="Версионный Проводник" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock Text="{loc:Tr main.product_name}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <TextBlock Grid.Column="1" VerticalAlignment="Center" Opacity="0.6"
-                           Text="VeyraFlow Desktop" HorizontalAlignment="Center"/>
+                           Text="{loc:Tr main.product_subtitle}" HorizontalAlignment="Center"/>
 
                 <Button Grid.Column="2" Content="⚙" Width="38" Height="34"
                         Command="{Binding OpenGlobalSettingsCommand}"/>

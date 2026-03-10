@@ -1,5 +1,6 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
              x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SelectDirectoriesPage"
@@ -8,12 +9,12 @@
              x:DataType="vm:SelectDirectoriesViewModel">
   <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
     <StackPanel Spacing="8">
-      <TextBlock FontSize="22" FontWeight="SemiBold" Text="Выбор директорий"/>
-      <TextBlock Opacity="0.8" Text="Укажи папки для отслеживания версий"/>
+      <TextBlock FontSize="22" FontWeight="SemiBold" Text="{loc:Tr setup.select_directories}"/>
+      <TextBlock Opacity="0.8" Text="{loc:Tr setup.select_directories_subtitle}"/>
       <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,8,0,0">
-        <TextBox Grid.Column="0" Text="{Binding InputPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Watermark="Путь к папке"/>
-        <Button Grid.Column="1" Content="Обзор" Width="100" Command="{Binding BrowseCommand}"/>
-        <Button Grid.Column="2" Content="Добавить" Width="100" Command="{Binding AddCommand}"/>
+        <TextBox Grid.Column="0" Text="{Binding InputPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Watermark="{loc:Tr setup.folder_path_placeholder}"/>
+        <Button Grid.Column="1" Content="{loc:Tr common.browse}" Width="100" Command="{Binding BrowseCommand}"/>
+        <Button Grid.Column="2" Content="{loc:Tr common.add}" Width="100" Command="{Binding AddCommand}"/>
       </Grid>
     </StackPanel>
 
@@ -24,7 +25,7 @@
             <DataTemplate x:DataType="x:String">
               <Border Background="#101010" CornerRadius="8" Padding="10" Margin="0,0,0,6">
                 <DockPanel>
-                  <Button Content="Удалить" DockPanel.Dock="Right" Margin="8,0,0,0"
+                  <Button Content="{loc:Tr common.remove}" DockPanel.Dock="Right" Margin="8,0,0,0"
                           Command="{Binding DataContext.RemoveCommand, ElementName=Root}"
                           CommandParameter="{Binding .}" />
                   <TextBlock Text="{Binding .}" TextTrimming="CharacterEllipsis"/>

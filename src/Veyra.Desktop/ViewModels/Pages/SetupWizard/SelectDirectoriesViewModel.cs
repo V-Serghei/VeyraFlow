@@ -9,6 +9,7 @@ using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using Microsoft.Extensions.Logging;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;
 using Veyra.Desktop.Services.Navigation;
 
@@ -28,7 +29,10 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
     public ICommand AddCommand { get; }
     public ICommand RemoveCommand { get; }
 
-    public string FooterText => Directories.Count == 0 ? "Папки не выбраны" : $"{Directories.Count} выбрано папок";
+    public string FooterText => Directories.Count == 0
+        ? Loc.T("setup.directories_none_selected")
+        : Loc.P("setup.directories_selected", Directories.Count, Directories.Count);
+
     public bool HasAny => Directories.Count > 0;
     public string? InputPath { get; set; }
 
@@ -44,8 +48,13 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
             SelectionChanged?.Invoke(this, EventArgs.Empty);
         };
 
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(FooterText));
+        };
+
         BrowseCommand = new RelayCommand(async _ => await BrowseAsync());
-        AddCommand    = new RelayCommand(_ => Add(), _ => !string.IsNullOrWhiteSpace(InputPath));
+        AddCommand = new RelayCommand(_ => Add(), _ => !string.IsNullOrWhiteSpace(InputPath));
         RemoveCommand = new RelayCommand(p => Remove(p as string));
     }
 
@@ -55,7 +64,7 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
         if (owner is null) return;
 
         IReadOnlyList<IStorageFolder> res = await owner.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions { Title = "Выберите папку", AllowMultiple = false });
+            new FolderPickerOpenOptions { Title = Loc.T("setup.select_folder_title"), AllowMultiple = false });
 
         IStorageFolder? folder = res.FirstOrDefault();
         string? local = folder?.Path.LocalPath;
@@ -89,9 +98,6 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
     private static bool IsRootDrive(string p)
         => Path.GetPathRoot(p)?.TrimEnd('\\').Equals(p.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) == true;
 
-    /// <summary>
-    /// Validates selection. Does NOT save to DB — that happens in SetupWizardViewModel at the end.
-    /// </summary>
     public Task<bool> CommitAsync()
     {
         if (Directories.Count == 0)
@@ -99,9 +105,9 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
             _log.LogWarning("No directories selected");
             return Task.FromResult(false);
         }
+
         return Task.FromResult(true);
     }
 
-    /// <summary>Returns collected directories for final save.</summary>
     public IReadOnlyCollection<string> GetSelectedDirectories() => Directories.ToList();
 }

@@ -20,6 +20,8 @@ public static class DependencyInjection
                       ?? Environment.GetEnvironmentVariable("VEYRA_CLOUDAPI_URL")
                       ?? "http://localhost:8080";
 
+        services.AddSingleton<IAccessTokenPolicyService, AccessTokenPolicyService>();
+
         services.AddHttpClient<IAuthService, AuthHttpService>(c =>
             {
                 c.BaseAddress = new Uri(baseUrl);
@@ -45,4 +47,3 @@ public static class DependencyInjection
         return services;
     }
 }
-

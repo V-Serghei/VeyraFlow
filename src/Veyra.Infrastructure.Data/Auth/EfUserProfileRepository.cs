@@ -19,7 +19,7 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
 
     public async Task<UserProfileSessionDto?> GetActiveProfileAsync(CancellationToken ct = default)
     {
-        var profile = await db.Set<UserProfile>()
+        return await db.Set<UserProfile>()
             .Where(u => u.IsActive)
             .OrderByDescending(u => u.LastLoginAt)
             .Select(u => new UserProfileSessionDto(
@@ -28,8 +28,19 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
                 u.AccessToken,
                 u.LastLoginAt))
             .FirstOrDefaultAsync(ct);
+    }
 
-        return profile;
+    public async Task<IReadOnlyList<UserProfileSessionDto>> GetProfilesAsync(CancellationToken ct = default)
+    {
+        return await db.Set<UserProfile>()
+            .OrderByDescending(u => u.IsActive)
+            .ThenByDescending(u => u.LastLoginAt)
+            .Select(u => new UserProfileSessionDto(
+                u.Username,
+                u.CloudUserId,
+                u.AccessToken,
+                u.LastLoginAt))
+            .ToListAsync(ct);
     }
 
     public Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default)
@@ -41,6 +52,10 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
         string? accessToken,
         CancellationToken ct = default)
     {
+        var normalizedUsername = (username ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUsername))
+            return;
+
         var now = DateTime.UtcNow;
 
         await db.Set<UserProfile>()
@@ -50,7 +65,7 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
                 .SetProperty(u => u.UpdatedAt, now), ct);
 
         var existing = await db.Set<UserProfile>()
-            .FirstOrDefaultAsync(u => u.Username == username, ct);
+            .FirstOrDefaultAsync(u => u.Username == normalizedUsername, ct);
 
         if (existing is not null)
         {
@@ -64,7 +79,7 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
         {
             db.Add(new UserProfile
             {
-                Username = username,
+                Username = normalizedUsername,
                 CloudUserId = cloudUserId,
                 AccessToken = accessToken,
                 LastLoginAt = now,
@@ -75,5 +90,45 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> SetActiveProfileAsync(string username, CancellationToken ct = default)
+    {
+        var normalizedUsername = (username ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedUsername))
+            return false;
+
+        var target = await db.Set<UserProfile>()
+            .FirstOrDefaultAsync(u => u.Username == normalizedUsername, ct);
+
+        if (target is null)
+            return false;
+
+        var now = DateTime.UtcNow;
+
+        await db.Set<UserProfile>()
+            .Where(u => u.IsActive)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.IsActive, false)
+                .SetProperty(u => u.UpdatedAt, now), ct);
+
+        target.IsActive = true;
+        target.LastLoginAt = now;
+        target.UpdatedAt = now;
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task SignOutActiveAsync(CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+
+        await db.Set<UserProfile>()
+            .Where(u => u.IsActive)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.IsActive, false)
+                .SetProperty(u => u.AccessToken, (string?)null)
+                .SetProperty(u => u.UpdatedAt, now), ct);
     }
 }

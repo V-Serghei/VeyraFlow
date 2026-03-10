@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -44,8 +44,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenGlobalSettings()
+    private async Task OpenGlobalSettingsAsync()
     {
+        await AppSettings.LoadAsync();
         CurrentPage = AppSettings;
     }
 

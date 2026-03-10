@@ -30,6 +30,8 @@ services:
       HTTP_PORT: ${HTTP_PORT:-8080}
       DB_DSN: postgres://${POSTGRES_USER:-veyra}:${POSTGRES_PASSWORD:-veyra_dev_password}@db:5432/${POSTGRES_DB:-veyraflow}?sslmode=disable
       BLOCK_STORE_DIR: ${BLOCK_STORE_DIR:-/var/lib/veyra/blocks}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-veyra-dev-secret-change-me}
+      AUTH_TOKEN_LIFETIME_MINUTES: ${AUTH_TOKEN_LIFETIME_MINUTES:-1440}
     ports:
       - "8080:8080"
     volumes:
@@ -50,4 +52,3 @@ volumes:
   pgdata:
   cloud-blocks:
   seq-data:
-

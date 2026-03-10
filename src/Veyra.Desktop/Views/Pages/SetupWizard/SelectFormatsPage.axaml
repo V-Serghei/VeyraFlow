@@ -1,5 +1,6 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
              xmlns:setupWizard="clr-namespace:Veyra.Desktop.Models.Pages.SetupWizard"
@@ -8,8 +9,8 @@
              x:DataType="vm:SelectFormatsViewModel">
     <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
         <StackPanel Spacing="8">
-            <TextBlock FontSize="22" FontWeight="SemiBold" Text="Выбор форматов"/>
-            <TextBlock Opacity="0.8" Text="Отметь расширения, которые будут участвовать в сканировании"/>
+            <TextBlock FontSize="22" FontWeight="SemiBold" Text="{loc:Tr setup.select_formats}"/>
+            <TextBlock Opacity="0.8" Text="{loc:Tr setup.select_formats_subtitle}"/>
         </StackPanel>
 
         <Border Grid.Row="1" Background="#171717" CornerRadius="10" Padding="10" BorderBrush="#262626" BorderThickness="1">
@@ -32,8 +33,8 @@
         </Border>
 
         <Grid Grid.Row="2" ColumnDefinitions="240,Auto,*" ColumnSpacing="8">
-            <TextBox Grid.Column="0" Text="{Binding CustomExt, Mode=TwoWay}" Watermark="добавить формат"/>
-            <Button Grid.Column="1" Content="Добавить" Width="100" Command="{Binding AddCustomCommand}"/>
+            <TextBox Grid.Column="0" Text="{Binding CustomExt, Mode=TwoWay}" Watermark="{loc:Tr setup.add_format_placeholder}"/>
+            <Button Grid.Column="1" Content="{loc:Tr common.add}" Width="100" Command="{Binding AddCustomCommand}"/>
             <TextBlock Grid.Column="2" VerticalAlignment="Center" Opacity="0.7" Text="{Binding FooterText}"/>
         </Grid>
     </Grid>

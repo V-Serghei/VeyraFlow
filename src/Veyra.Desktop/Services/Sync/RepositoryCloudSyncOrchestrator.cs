@@ -25,6 +25,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
     VeyraDbContext db,
     ICloudSyncService cloudSync,
     IUserProfileRepository userProfiles,
+    IAccessTokenPolicyService tokenPolicy,
     IRepositoryRepository repositories,
     IFileContentStore fileContentStore,
     IMediator mediator,
@@ -40,8 +41,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     public async Task TryPushLatestSnapshotAsync(int repositoryId, CancellationToken ct = default)
     {
-        var profile = await userProfiles.GetActiveProfileAsync(ct);
-        if (profile is null || string.IsNullOrWhiteSpace(profile.AccessToken))
+        var accessToken = await TryGetSyncAccessTokenAsync("push latest snapshot", ct);
+        if (string.IsNullOrWhiteSpace(accessToken))
             return;
 
         var repository = await db.Repositories
@@ -74,8 +75,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     public async Task ProcessPendingQueueAsync(CancellationToken ct = default)
     {
-        var profile = await userProfiles.GetActiveProfileAsync(ct);
-        if (profile is null || string.IsNullOrWhiteSpace(profile.AccessToken))
+        var accessToken = await TryGetSyncAccessTokenAsync("process sync queue", ct);
+        if (string.IsNullOrWhiteSpace(accessToken))
             return;
 
         await _queueGate.WaitAsync(ct);
@@ -89,7 +90,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 if (next is null)
                     break;
 
-                await ProcessQueueItemAsync(profile.AccessToken, next.Id, ct);
+                await ProcessQueueItemAsync(accessToken, next.Id, ct);
             }
         }
         finally
@@ -101,10 +102,14 @@ public sealed class RepositoryCloudSyncOrchestrator(
     public async Task<int> RestoreRepositoriesFromCloudAsync(CancellationToken ct = default)
     {
         var profile = await userProfiles.GetActiveProfileAsync(ct);
-        if (profile is null || string.IsNullOrWhiteSpace(profile.AccessToken))
+        if (profile is null)
             return 0;
 
-        var remoteRepositories = await cloudSync.GetRepositoriesAsync(profile.AccessToken, ct);
+        var accessToken = await TryGetSyncAccessTokenAsync("restore repositories from cloud", ct, profile);
+        if (string.IsNullOrWhiteSpace(accessToken))
+            return 0;
+
+        var remoteRepositories = await cloudSync.GetRepositoriesAsync(accessToken, ct);
         if (remoteRepositories.Count == 0)
             return 0;
 
@@ -123,14 +128,14 @@ public sealed class RepositoryCloudSyncOrchestrator(
             if (localNames.Contains(remote.Name))
                 continue;
 
-            var package = await cloudSync.GetLatestSnapshotAsync(profile.AccessToken, remote.RepositoryId, ct);
+            var package = await cloudSync.GetLatestSnapshotAsync(accessToken, remote.RepositoryId, ct);
             if (package is null)
                 continue;
 
             var restorePath = BuildRestorePath(profile.Username, remote.Name);
             Directory.CreateDirectory(restorePath);
 
-            await RestoreFilesFromPackageAsync(profile.AccessToken, package, restorePath, ct);
+            await RestoreFilesFromPackageAsync(accessToken, package, restorePath, ct);
 
             var formats = package.Entries
                 .Where(e => !e.IsDirectory)
@@ -177,6 +182,39 @@ public sealed class RepositoryCloudSyncOrchestrator(
         }
 
         return restoredCount;
+    }
+
+    private async Task<string?> TryGetSyncAccessTokenAsync(
+        string operationName,
+        CancellationToken ct,
+        UserProfileSessionDto? profile = null)
+    {
+        var activeProfile = profile ?? await userProfiles.GetActiveProfileAsync(ct);
+        if (activeProfile is null)
+            return null;
+
+        var tokenState = tokenPolicy.Evaluate(activeProfile.AccessToken);
+        if (!tokenState.CanUseForSync)
+        {
+            log.LogWarning(
+                "Skipping cloud sync operation '{Operation}'. User {Username}. TokenState {TokenState}. Reason {Reason}",
+                operationName,
+                activeProfile.Username,
+                tokenState.State,
+                tokenState.Description);
+            return null;
+        }
+
+        if (tokenState.State == AccessTokenValidityState.ExpiringSoon)
+        {
+            log.LogInformation(
+                "Cloud sync operation '{Operation}' for user {Username} uses token that is expiring soon. {Reason}",
+                operationName,
+                activeProfile.Username,
+                tokenState.Description);
+        }
+
+        return activeProfile.AccessToken;
     }
 
     private async Task EnqueueSnapshotPushAsync(
@@ -250,7 +288,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             .Where(q => !q.Repository.IsDeleted)
             .Where(q =>
                 (q.Status == RepositorySyncQueueItem.StatusPending && q.NextAttemptAtUtc <= now)
-                || (q.Status == RepositorySyncQueueItem.StatusFailed && q.AttemptCount < q.MaxAttempts && q.NextAttemptAtUtc <= now)
+                || (q.Status == RepositorySyncQueueItem.StatusRetry && q.AttemptCount < q.MaxAttempts && q.NextAttemptAtUtc <= now)
                 || (q.Status == RepositorySyncQueueItem.StatusConflict
                     && RepositorySyncConflictStrategies.Normalize(q.Repository.SyncConflictStrategy)
                     != RepositorySyncConflictStrategies.ManualMerge))
@@ -340,7 +378,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 return;
             }
 
-            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, ct);
+            var initialIdempotencyKey = BuildPushIdempotencyKey(repository.Id, queueItem.SnapshotId, queueItem.RemoteSnapshotId, package.Snapshot.PayloadSha256, phase: 0);
+            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, initialIdempotencyKey, ct);
             if (pushResult is null)
                 throw new InvalidOperationException("Cloud rejected snapshot push (unauthorized or invalid session).");
 
@@ -355,7 +394,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
                 if (uploaded > 0)
                 {
-                    var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, ct);
+                    var confirmIdempotencyKey = BuildPushIdempotencyKey(repository.Id, queueItem.SnapshotId, queueItem.RemoteSnapshotId, package.Snapshot.PayloadSha256, phase: 1);
+                    var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, ct);
                     if (confirm is null)
                         throw new InvalidOperationException("Cloud rejected follow-up snapshot push after block upload.");
                 }
@@ -413,15 +453,17 @@ public sealed class RepositoryCloudSyncOrchestrator(
         var hasAttemptsLeft = queueItem.AttemptCount < maxAttempts;
         if (retryable && hasAttemptsLeft)
         {
-            queueItem.Status = RepositorySyncQueueItem.StatusPending;
+            queueItem.Status = RepositorySyncQueueItem.StatusRetry;
             queueItem.NextAttemptAtUtc = DateTime.UtcNow + ComputeRetryDelay(repository, queueItem.AttemptCount);
             repository.CloudSyncLastStatus = connectivityFailure ? "offline_retry" : "retrying";
         }
         else
         {
-            queueItem.Status = RepositorySyncQueueItem.StatusFailed;
+            queueItem.Status = authFailure
+                ? RepositorySyncQueueItem.StatusFailed
+                : RepositorySyncQueueItem.StatusDeadLetter;
             queueItem.NextAttemptAtUtc = DateTime.UtcNow;
-            repository.CloudSyncLastStatus = authFailure ? "auth_required" : "failed";
+            repository.CloudSyncLastStatus = authFailure ? "auth_required" : "dead_letter";
         }
 
         queueItem.LastError = message;
@@ -739,6 +781,19 @@ public sealed class RepositoryCloudSyncOrchestrator(
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         var raw = BitConverter.ToInt64(hash, 0) & long.MaxValue;
         return raw == 0 ? Math.Max(1, baseRemoteSnapshotId) : raw;
+    }
+
+    private static string BuildPushIdempotencyKey(
+        int repositoryId,
+        long localSnapshotId,
+        long remoteSnapshotId,
+        string? payloadSha,
+        int phase)
+    {
+        var payload = $"push|{repositoryId}|{localSnapshotId}|{remoteSnapshotId}|{payloadSha ?? "none"}|{phase}";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        var compact = Convert.ToHexString(digest).ToLowerInvariant();
+        return $"push-{repositoryId}-{localSnapshotId}-p{phase}-{compact[..24]}";
     }
 
     private static string BuildPayloadSha(RepositorySnapshot snapshot, int entries, int fileVersions, long remoteSnapshotId)

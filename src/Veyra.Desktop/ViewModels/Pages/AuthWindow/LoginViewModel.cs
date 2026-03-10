@@ -1,9 +1,10 @@
-using System.Linq;
+﻿using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Veyra.Application.Commands.Auth;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.AuthWindow;
 
@@ -24,11 +25,11 @@ public partial class LoginViewModel : ObservableObject
     public IAsyncRelayCommand RegisterCommand { get; }
     public IRelayCommand ToggleModeCommand { get; }
 
-    public string ActionTitle => IsRegisterMode ? "Create account" : "Sign in";
-    public string SubmitLabel => IsRegisterMode ? "Register" : "Sign in";
+    public string ActionTitle => IsRegisterMode ? Loc.T("login.action_title_register") : Loc.T("login.action_title_sign_in");
+    public string SubmitLabel => IsRegisterMode ? Loc.T("auth.register") : Loc.T("auth.sign_in");
     public string ToggleLabel => IsRegisterMode
-        ? "Already have an account? Sign in"
-        : "New here? Create an account";
+        ? Loc.T("login.toggle_to_sign_in")
+        : Loc.T("login.toggle_to_register");
 
     public LoginViewModel(IMediator mediator)
     {
@@ -36,6 +37,13 @@ public partial class LoginViewModel : ObservableObject
         LoginCommand = new AsyncRelayCommand(DoLoginAsync);
         RegisterCommand = new AsyncRelayCommand(DoRegisterAsync);
         ToggleModeCommand = new RelayCommand(ToggleMode);
+
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ActionTitle));
+            OnPropertyChanged(nameof(SubmitLabel));
+            OnPropertyChanged(nameof(ToggleLabel));
+        };
     }
 
     partial void OnIsRegisterModeChanged(bool value)
@@ -61,7 +69,7 @@ public partial class LoginViewModel : ObservableObject
             var result = await _mediator.Send(new LoginCommand(Username, Password));
             if (!result.Success)
             {
-                Error = result.Error ?? "Sign in failed.";
+                Error = result.Error ?? Loc.T("login.error_sign_in_failed");
                 return;
             }
 
@@ -86,14 +94,14 @@ public partial class LoginViewModel : ObservableObject
 
             if (Password != ConfirmPassword)
             {
-                Error = "Passwords do not match.";
+                Error = Loc.T("login.error_passwords_mismatch");
                 return;
             }
 
             var result = await _mediator.Send(new RegisterCommand(Username, Password));
             if (!result.Success)
             {
-                Error = result.Error ?? "Registration failed.";
+                Error = result.Error ?? Loc.T("login.error_registration_failed");
                 return;
             }
 

@@ -32,6 +32,20 @@ function Assert-True {
     }
 }
 
+function Invoke-WebRequestCompat {
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][hashtable]$Headers
+    )
+
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        return Invoke-WebRequest -Method $Method -Uri $Uri -Headers $Headers
+    }
+
+    return Invoke-WebRequest -Method $Method -UseBasicParsing -Uri $Uri -Headers $Headers
+}
+
 $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $username = "smoke_$timestamp"
 $password = "SmokeTest#12345"
@@ -44,12 +58,14 @@ $registerBody = @{
 $register = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/register" -ContentType "application/json" -Body $registerBody
 Assert-True ($register.ok -eq $true) "register response was not ok"
 Assert-True (-not [string]::IsNullOrWhiteSpace($register.accessToken)) "register did not return access token"
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$register.expiresAtUtc)) "register did not return expiresAtUtc"
 
 $login = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/login" -ContentType "application/json" -Body $registerBody
 Assert-True ($login.ok -eq $true) "login response was not ok"
 Assert-True (-not [string]::IsNullOrWhiteSpace($login.accessToken)) "login did not return access token"
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$login.expiresAtUtc)) "login did not return expiresAtUtc"
 
-$headers = @{ Authorization = "Bearer $($login.accessToken)" }
+$headers = @{ Authorization = "Bearer $($login.accessToken)"; "X-Veyra-Sync-Protocol" = "1" }
 $listBefore = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/sync/repositories" -Headers $headers
 
 $contentText = "Hello cloud snapshot $(Get-Date -Format o)"
@@ -109,21 +125,29 @@ $pushPayload = @{
     )
 } | ConvertTo-Json -Depth 20
 
-$pushBeforeBlock = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/sync/repositories/$RepositoryId/snapshots" -Headers $headers -ContentType "application/json" -Body $pushPayload
+$pushHeadersPhase1 = @{}
+$headers.GetEnumerator() | ForEach-Object { $pushHeadersPhase1[$_.Key] = $_.Value }
+$pushHeadersPhase1["X-Idempotency-Key"] = "smoke-$snapshotId-phase1"
+
+$pushBeforeBlock = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/sync/repositories/$RepositoryId/snapshots" -Headers $pushHeadersPhase1 -ContentType "application/json" -Body $pushPayload
 Assert-True ($pushBeforeBlock.ok -eq $true) "first snapshot push failed"
 Assert-True ((@($pushBeforeBlock.missingBlockHashes).Count -ge 1)) "first push should report missing block hashes"
 
 $putBlock = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/sync/blocks/$blockHash" -Headers $headers -ContentType "application/octet-stream" -Body $contentBytes
 Assert-True ($putBlock.ok -eq $true) "block upload failed"
 
-$pushAfterBlock = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/sync/repositories/$RepositoryId/snapshots" -Headers $headers -ContentType "application/json" -Body $pushPayload
+$pushHeadersPhase2 = @{}
+$headers.GetEnumerator() | ForEach-Object { $pushHeadersPhase2[$_.Key] = $_.Value }
+$pushHeadersPhase2["X-Idempotency-Key"] = "smoke-$snapshotId-phase2"
+
+$pushAfterBlock = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/sync/repositories/$RepositoryId/snapshots" -Headers $pushHeadersPhase2 -ContentType "application/json" -Body $pushPayload
 Assert-True ($pushAfterBlock.ok -eq $true) "second snapshot push failed"
 Assert-True ((@($pushAfterBlock.missingBlockHashes).Count -eq 0)) "second push should have zero missing block hashes"
 
-$headBlock = Invoke-WebRequest -Method Head -UseBasicParsing -Uri "$BaseUrl/api/sync/blocks/$blockHash" -Headers $headers
+$headBlock = Invoke-WebRequestCompat -Method "Head" -Uri "$BaseUrl/api/sync/blocks/$blockHash" -Headers $headers
 Assert-True ($headBlock.StatusCode -eq 200) "HEAD /blocks did not return 200"
 
-$getBlock = Invoke-WebRequest -Method Get -UseBasicParsing -Uri "$BaseUrl/api/sync/blocks/$blockHash" -Headers $headers
+$getBlock = Invoke-WebRequestCompat -Method "Get" -Uri "$BaseUrl/api/sync/blocks/$blockHash" -Headers $headers
 Assert-True ($getBlock.StatusCode -eq 200) "GET /blocks did not return 200"
 Assert-True ($getBlock.RawContentLength -eq $contentBytes.Length) "GET /blocks returned unexpected size"
 

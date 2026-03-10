@@ -15,6 +15,7 @@ public interface ICloudSyncService
         string accessToken,
         int repositoryId,
         CloudSnapshotPackageDto package,
+        string? idempotencyKey = null,
         CancellationToken ct = default);
 
     Task<bool> BlockExistsAsync(string accessToken, string blockHash, CancellationToken ct = default);
@@ -27,3 +28,5 @@ public interface ICloudSyncService
 
     Task<byte[]?> DownloadBlockAsync(string accessToken, string blockHash, CancellationToken ct = default);
 }
+
+

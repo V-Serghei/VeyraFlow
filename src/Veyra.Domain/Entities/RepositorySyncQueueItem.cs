@@ -7,8 +7,10 @@ public class RepositorySyncQueueItem
     public const string StatusPending = "pending";
     public const string StatusRunning = "running";
     public const string StatusConflict = "conflict";
+    public const string StatusRetry = "retry";
     public const string StatusCompleted = "completed";
     public const string StatusFailed = "failed";
+    public const string StatusDeadLetter = "dead_letter";
 
     public long Id { get; set; }
 
@@ -32,3 +34,5 @@ public class RepositorySyncQueueItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+

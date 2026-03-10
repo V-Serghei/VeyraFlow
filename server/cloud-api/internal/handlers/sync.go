@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -95,7 +97,22 @@ type latestSnapshotResponse struct {
 	FileVersions []syncFileVersion   `json:"fileVersions"`
 }
 
+const (
+	syncProtocolHeader    = "X-Veyra-Sync-Protocol"
+	supportedSyncProtocol = "1"
+	idempotencyKeyHeader  = "X-Idempotency-Key"
+	maxPushPayloadBytes   = 64 * 1024 * 1024
+)
+
+type syncIdempotencyReplay struct {
+	StatusCode int
+	Payload    []byte
+}
 func (h *Handler) ListRepositories(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	auth, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
@@ -166,6 +183,10 @@ ORDER BY r.updated_at DESC, r.id DESC;
 }
 
 func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	auth, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
@@ -178,8 +199,24 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	idempotencyKey := normalizeIdempotencyKey(r.Header.Get(idempotencyKeyHeader))
+	if idempotencyKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "missing idempotency key"})
+		return
+	}
+
+	reader := http.MaxBytesReader(w, r.Body, maxPushPayloadBytes)
+	rawBody, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read request body"})
+		return
+	}
+
+	requestDigest := sha256.Sum256(rawBody)
+	requestSHA := strings.ToLower(hex.EncodeToString(requestDigest[:]))
+
 	var req pushSnapshotRequest
-	if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err = json.Unmarshal(rawBody, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
 		return
 	}
@@ -209,6 +246,20 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	idempotencyID, replay, claimErr := claimSyncIdempotencyKey(r.Context(), tx, auth.UserID, repositoryID, idempotencyKey, requestSHA)
+	if claimErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "idempotency check failed"})
+		return
+	}
+	if replay != nil {
+		if commitErr := tx.Commit(r.Context()); commitErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "idempotency replay commit failed"})
+			return
+		}
+		writeJSONBytes(w, replay.StatusCode, replay.Payload)
+		return
+	}
 
 	var cloudRepoID int64
 	err = tx.QueryRow(r.Context(), `
@@ -405,18 +456,42 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb);
 		sort.Strings(missing)
 	}
 
+	response := pushSnapshotResponse{
+		Ok:                true,
+		MissingBlockHashes: missing,
+	}
+
+	responsePayload, marshalErr := json.Marshal(response)
+	if marshalErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "response serialization failed"})
+		return
+	}
+
+	if _, err = tx.Exec(r.Context(), `
+UPDATE sync_idempotency_keys
+SET state = 'completed',
+    status_code = $2,
+    response_json = $3::jsonb,
+    updated_at = now()
+WHERE id = $1;
+`, idempotencyID, http.StatusOK, string(responsePayload)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "idempotency state update failed"})
+		return
+	}
+
 	if err = tx.Commit(r.Context()); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "transaction commit failed"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, pushSnapshotResponse{
-		Ok:                true,
-		MissingBlockHashes: missing,
-	})
+	writeJSONBytes(w, http.StatusOK, responsePayload)
 }
 
 func (h *Handler) GetLatestRepositorySnapshot(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	auth, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
@@ -581,6 +656,10 @@ ORDER BY relative_path, file_version_id;
 }
 
 func (h *Handler) HeadBlock(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	_, ok := getAuthUser(r)
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -607,6 +686,10 @@ func (h *Handler) HeadBlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	_, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
@@ -661,6 +744,10 @@ DO UPDATE SET length_bytes = EXCLUDED.length_bytes;
 }
 
 func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
 	_, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
@@ -690,6 +777,120 @@ func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
+func ensureSyncProtocol(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set(syncProtocolHeader, supportedSyncProtocol)
+
+	clientVersion := strings.TrimSpace(r.Header.Get(syncProtocolHeader))
+	if clientVersion == supportedSyncProtocol {
+		return true
+	}
+
+	w.Header().Set("X-Veyra-Sync-Protocol-Supported", supportedSyncProtocol)
+	writeJSON(w, http.StatusPreconditionFailed, map[string]any{
+		"ok":                false,
+		"message":           "sync protocol mismatch",
+		"requiredProtocol":  supportedSyncProtocol,
+		"providedProtocol":  clientVersion,
+	})
+	return false
+}
+
+func normalizeIdempotencyKey(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	if len(trimmed) > 120 {
+		return ""
+	}
+
+	for _, ch := range trimmed {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '-', '_', '.', ':':
+			continue
+		default:
+			return ""
+		}
+	}
+
+	return trimmed
+}
+
+func claimSyncIdempotencyKey(
+	ctx context.Context,
+	tx pgx.Tx,
+	userID int64,
+	externalRepositoryID int,
+	idempotencyKey string,
+	requestSHA string,
+) (int64, *syncIdempotencyReplay, error) {
+	var keyID int64
+	err := tx.QueryRow(ctx, `
+INSERT INTO sync_idempotency_keys(
+    user_id,
+    external_repository_id,
+    idempotency_key,
+    request_sha256,
+    state,
+    created_at,
+    updated_at)
+VALUES($1, $2, $3, $4, 'in_progress', now(), now())
+ON CONFLICT (user_id, external_repository_id, idempotency_key)
+DO NOTHING
+RETURNING id;
+`, userID, externalRepositoryID, idempotencyKey, requestSHA).Scan(&keyID)
+	if err == nil {
+		return keyID, nil, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil, err
+	}
+
+	var storedSHA string
+	var state string
+	var statusCode sql.NullInt32
+	var responseJSON []byte
+
+	err = tx.QueryRow(ctx, `
+SELECT id, request_sha256, state, status_code, response_json
+FROM sync_idempotency_keys
+WHERE user_id = $1
+  AND external_repository_id = $2
+  AND idempotency_key = $3
+FOR UPDATE;
+`, userID, externalRepositoryID, idempotencyKey).Scan(&keyID, &storedSHA, &state, &statusCode, &responseJSON)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	if !strings.EqualFold(storedSHA, requestSHA) {
+		payload, _ := json.Marshal(map[string]any{
+			"ok":      false,
+			"message": "idempotency key was already used with a different payload",
+		})
+		return 0, &syncIdempotencyReplay{StatusCode: http.StatusConflict, Payload: payload}, nil
+	}
+
+	if state == "completed" && statusCode.Valid && len(responseJSON) > 0 {
+		return 0, &syncIdempotencyReplay{StatusCode: int(statusCode.Int32), Payload: responseJSON}, nil
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"ok":      false,
+		"message": "request with the same idempotency key is already in progress",
+	})
+	return 0, &syncIdempotencyReplay{StatusCode: http.StatusConflict, Payload: payload}, nil
+}
+
+func writeJSONBytes(w http.ResponseWriter, code int, payload []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = w.Write(payload)
+}
 func (h *Handler) blockPath(hash string) string {
 	safe := strings.ToLower(strings.TrimSpace(hash))
 	safe = strings.ReplaceAll(safe, "/", "_")

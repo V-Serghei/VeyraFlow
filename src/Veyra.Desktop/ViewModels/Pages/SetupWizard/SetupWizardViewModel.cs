@@ -1,9 +1,10 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Setup;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
@@ -46,7 +47,6 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
         _formatsVm = formatsVm;
         _repoNameVm = new RepositoryNameViewModel();
 
-        // 3 шага: директории → форматы → имя репозитория
         _steps = new object[] { _dirsVm, _formatsVm, _repoNameVm };
         _index = 0;
 
@@ -56,9 +56,14 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
         _dirsVm.SelectionChanged += (_, _) => RefreshCommands();
         _formatsVm.SelectionChanged += (_, _) => RefreshCommands();
         _repoNameVm.SelectionChanged += (_, _) => RefreshCommands();
+
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(NextButtonText));
+            OnPropertyChanged(nameof(StepInfo));
+        };
     }
 
-    /// <summary>Current step ViewModel</summary>
     public object CurrentStep => _steps[_index];
 
     public bool CanGoNext =>
@@ -67,9 +72,9 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
         (CurrentStep is RepositoryNameViewModel r && r.HasAny);
 
     public bool IsLastStep => _index == _steps.Length - 1;
-    public string NextButtonText => IsLastStep ? "Завершить" : "Далее";
+    public string NextButtonText => IsLastStep ? Loc.T("setup_wizard.finish") : Loc.T("setup_wizard.next");
 
-    public string StepInfo => $"Шаг {_index + 1} из {_steps.Length}";
+    public string StepInfo => Loc.F("setup_wizard.step_info", _index + 1, _steps.Length);
 
     private void RefreshCommands()
     {
@@ -94,7 +99,6 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
     {
         ErrorMessage = null;
 
-        // Step 1: Validate directories
         if (CurrentStep is SelectDirectoriesViewModel)
         {
             if (!await _dirsVm.CommitAsync()) return;
@@ -102,7 +106,6 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
             return;
         }
 
-        // Step 2: Validate formats
         if (CurrentStep is SelectFormatsViewModel)
         {
             if (!await _formatsVm.CommitAsync()) return;
@@ -110,11 +113,8 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
             return;
         }
 
-        // Step 3 (last): Save everything to DB in one shot
         if (CurrentStep is RepositoryNameViewModel)
-        {
             await FinalSaveAsync();
-        }
     }
 
     private void GoForward()
@@ -140,7 +140,7 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? "Не удалось сохранить настройки.";
+                ErrorMessage = result.Error ?? Loc.T("setup_wizard.save_failed");
                 _log.LogError("Initial setup failed: {Error}", result.Error);
                 return;
             }
@@ -153,7 +153,7 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
         catch (System.Exception ex)
         {
             _log.LogError(ex, "Failed to save initial setup");
-            ErrorMessage = $"Ошибка: {ex.Message}";
+            ErrorMessage = Loc.F("setup_wizard.error_with_message", ex.Message);
         }
     }
 }

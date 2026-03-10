@@ -24,7 +24,7 @@ type Handler struct {
 	blockStoreDir string
 }
 
-func New(db *pgxpool.Pool, tokenSecret string, blockStoreDir string) *Handler {
+func New(db *pgxpool.Pool, tokenSecret string, blockStoreDir string, tokenLifetime time.Duration) *Handler {
 	if strings.TrimSpace(tokenSecret) == "" {
 		tokenSecret = "veyra-dev-secret-change-me"
 	}
@@ -32,10 +32,14 @@ func New(db *pgxpool.Pool, tokenSecret string, blockStoreDir string) *Handler {
 		blockStoreDir = "./data/blocks"
 	}
 
+	if tokenLifetime <= 0 {
+		tokenLifetime = 24 * time.Hour
+	}
+
 	return &Handler{
 		db:            db,
 		tokenSecret:   []byte(tokenSecret),
-		tokenLifetime: 24 * time.Hour,
+		tokenLifetime: tokenLifetime,
 		blockStoreDir: blockStoreDir,
 	}
 }
@@ -50,12 +54,13 @@ type authReq struct {
 }
 
 type authResp struct {
-	Ok          bool   `json:"ok"`
-	Message     string `json:"message,omitempty"`
-	UserID      int64  `json:"userId,omitempty"`
-	Username    string `json:"username,omitempty"`
-	AccessToken string `json:"accessToken,omitempty"`
-	IsNewUser   bool   `json:"isNewUser,omitempty"`
+	Ok           bool      `json:"ok"`
+	Message      string    `json:"message,omitempty"`
+	UserID       int64     `json:"userId,omitempty"`
+	Username     string    `json:"username,omitempty"`
+	AccessToken  string    `json:"accessToken,omitempty"`
+	IsNewUser    bool      `json:"isNewUser,omitempty"`
+	ExpiresAtUtc time.Time `json:"expiresAtUtc,omitempty"`
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -99,18 +104,19 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.makeToken(userID, req.Username)
+	token, expiresAtUtc, err := h.makeToken(userID, req.Username)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, authResp{Ok: false, Message: "failed to create token"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, authResp{
-		Ok:          true,
-		UserID:      userID,
-		Username:    req.Username,
-		AccessToken: token,
-		IsNewUser:   true,
+		Ok:           true,
+		UserID:       userID,
+		Username:     req.Username,
+		AccessToken:  token,
+		IsNewUser:    true,
+		ExpiresAtUtc: expiresAtUtc,
 	})
 }
 
@@ -142,18 +148,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.makeToken(userID, req.Username)
+	token, expiresAtUtc, err := h.makeToken(userID, req.Username)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, authResp{Ok: false, Message: "failed to create token"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, authResp{
-		Ok:          true,
-		UserID:      userID,
-		Username:    req.Username,
-		AccessToken: token,
-		IsNewUser:   false,
+		Ok:           true,
+		UserID:       userID,
+		Username:     req.Username,
+		AccessToken:  token,
+		IsNewUser:    false,
+		ExpiresAtUtc: expiresAtUtc,
 	})
 }
 
@@ -163,15 +170,16 @@ type tokenPayload struct {
 	EXP int64  `json:"exp"`
 }
 
-func (h *Handler) makeToken(userID int64, username string) (string, error) {
+func (h *Handler) makeToken(userID int64, username string) (string, time.Time, error) {
 	headerJSON := []byte(`{"alg":"HS256","typ":"JWT"}`)
+	expiresAtUtc := time.Now().UTC().Add(h.tokenLifetime)
 	payloadJSON, err := json.Marshal(tokenPayload{
 		UID: userID,
 		USR: username,
-		EXP: time.Now().Add(h.tokenLifetime).Unix(),
+		EXP: expiresAtUtc.Unix(),
 	})
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 
 	header := base64.RawURLEncoding.EncodeToString(headerJSON)
@@ -182,7 +190,7 @@ func (h *Handler) makeToken(userID int64, username string) (string, error) {
 	_, _ = mac.Write([]byte(signingInput))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
-	return signingInput + "." + sig, nil
+	return signingInput + "." + sig, expiresAtUtc, nil
 }
 
 func (h *Handler) parseToken(token string) (tokenPayload, error) {
@@ -291,5 +299,3 @@ func writeJSON(w http.ResponseWriter, code int, payload any) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(payload)
 }
-
-

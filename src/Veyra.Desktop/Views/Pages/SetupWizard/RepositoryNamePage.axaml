@@ -1,5 +1,6 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
              x:Class="Veyra.Desktop.Views.Pages.SetupWizard.RepositoryNamePage"
@@ -12,9 +13,9 @@
 
         <Border Padding="16" Background="#171717" CornerRadius="10" BorderBrush="#262626" BorderThickness="1" Margin="0,6,0,0">
             <StackPanel Spacing="8">
-                <TextBlock Text="Имя репозитория" Opacity="0.85"/>
+                <TextBlock Text="{loc:Tr setup.repository_name}" Opacity="0.85"/>
                 <TextBox Text="{Binding RepositoryName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Например диплом-проект"
+                         Watermark="{loc:Tr setup.repository_name_example}"
                          Width="460" HorizontalAlignment="Left"/>
             </StackPanel>
         </Border>

@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
@@ -17,23 +18,23 @@
         CanResize="True"
         Background="{DynamicResource VeyraCanvasBrush}"
         Foreground="{DynamicResource VeyraTextPrimaryBrush}"
-        Title="Create Snapshot">
+        Title="{loc:Tr snapshot_dialog.window_title}">
 
     <Grid RowDefinitions="Auto,*,Auto" Margin="16" RowSpacing="12">
         <Border Grid.Row="0" Classes="dialog-hero">
             <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
                 <StackPanel Grid.Row="0" Spacing="4">
-                    <TextBlock Text="Create snapshot" FontSize="30" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr snapshot_dialog.title}" FontSize="30" FontWeight="SemiBold"/>
                     <TextBlock Classes="muted"
-                               Text="Review changed files, set commit name and inspect side-by-side diff before saving."
+                               Text="{loc:Tr snapshot_dialog.subtitle}"
                                TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <Grid Grid.Row="1" ColumnDefinitions="130,*" ColumnSpacing="10" VerticalAlignment="Center">
-                    <TextBlock Grid.Column="0" Text="Snapshot name" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Column="0" Text="{loc:Tr snapshot_dialog.snapshot_name}" VerticalAlignment="Center" FontWeight="SemiBold"/>
                     <TextBox Grid.Column="1"
                              Text="{Binding SnapshotName, Mode=TwoWay}"
-                             Watermark="snimok_yyyyMMdd_HHmmss"/>
+                             Watermark="{loc:Tr snapshot_dialog.snapshot_name_placeholder}"/>
                 </Grid>
 
                 <TextBlock Grid.Row="2"
@@ -51,12 +52,12 @@
             <Grid ColumnDefinitions="360,*" ColumnSpacing="12">
                 <Border Grid.Column="0" Classes="dialog-shell">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
-                        <TextBlock Grid.Row="0" Text="Changed files" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="0" Text="{loc:Tr snapshot_dialog.changed_files}" FontSize="18" FontWeight="SemiBold"/>
                         <TextBlock Grid.Row="1" Classes="muted" Text="{Binding ChangedFilesCountLabel}"/>
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
                             <TextBlock Grid.Row="0"
-                                       Text="No changed files detected."
+                                       Text="{loc:Tr snapshot_dialog.no_changed_files}"
                                        Classes="muted"
                                        IsVisible="{Binding HasNoChangedFiles}"/>
 
@@ -91,7 +92,7 @@
                     <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                             <StackPanel Spacing="4">
-                                <TextBlock Text="Selected file" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr explorer.selected_file}" FontSize="18" FontWeight="SemiBold"/>
                                 <TextBlock Text="{Binding SelectedChangedFileTitle}" FontSize="16" FontWeight="SemiBold"/>
                                 <TextBlock Text="{Binding SelectedChangedFilePath}" Classes="muted" TextWrapping="Wrap"/>
                             </StackPanel>
@@ -102,25 +103,25 @@
                         </Grid>
 
                         <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
-                            <TextBlock Grid.Column="0" Text="Diff summary" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="0" Text="{loc:Tr snapshot_dialog.diff_summary}" FontWeight="SemiBold"/>
                             <TextBlock Grid.Column="1" Text="{Binding PreviewSummary}" Classes="muted" TextWrapping="Wrap"/>
                         </Grid>
 
                         <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" IsVisible="{Binding IsTextPreview}">
                             <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="+ Added" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
+                                <TextBlock Text="{loc:Tr diff.added}" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Border Grid.Column="1" Background="#4A2530" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="- Removed" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
+                                <TextBlock Text="{loc:Tr diff.removed}" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Border Grid.Column="2" Background="#30455F" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="~ Modified" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
+                                <TextBlock Text="{loc:Tr diff.modified}" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Border Grid.Column="3" Background="#213B5A" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="= Context" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
+                                <TextBlock Text="{loc:Tr diff.context}" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Border Grid.Column="4" Background="#2A4665" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="Scroll: synced" Foreground="#C7E1FF" FontWeight="SemiBold" FontSize="11"/>
+                                <TextBlock Text="{loc:Tr snapshot_dialog.scroll_synced}" Foreground="#C7E1FF" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Button Grid.Column="6"
                                     Content="{Binding WrapToggleLabel}"
@@ -129,16 +130,16 @@
                         </Grid>
 
                         <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="8">
-                            <TextBlock Grid.Row="0" Text="Preview" FontWeight="SemiBold" FontSize="16"/>
+                            <TextBlock Grid.Row="0" Text="{loc:Tr common.preview}" FontWeight="SemiBold" FontSize="16"/>
 
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsTextPreview}">
                                 <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
                                     <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
                                         <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                            <TextBlock Text="Before" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
                                         </Border>
                                         <Border Grid.Column="1" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                            <TextBlock Text="After" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
                                         </Border>
                                     </Grid>
 
@@ -155,8 +156,7 @@
                                                    FontSize="12"
                                                    Foreground="#BBD9FF"/>
                                     </Border>
-
-                                                                        <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
                                         <ScrollViewer x:Name="LeftDiffScrollViewer"
                                                       Grid.Column="0"
                                                       VerticalScrollBarVisibility="Auto"
@@ -180,7 +180,7 @@
                                                                                FontWeight="SemiBold"
                                                                                Foreground="#A8D1FF"/>
                                                                     <Button Grid.Column="1"
-                                                                            Content="Pin"
+                                                                            Content="{loc:Tr snapshot_dialog.pin}"
                                                                             Classes="subtle"
                                                                             Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).PinHunkHeaderCommand}"
                                                                             CommandParameter="{Binding}"/>
@@ -359,7 +359,7 @@
                                     </Grid>
 
                                     <TextBlock Grid.Row="1"
-                                               Text="Image preview is not available for this pair."
+                                               Text="{loc:Tr compare.image_preview_unavailable}"
                                                Classes="muted"
                                                IsVisible="{Binding HasNoImagePreviews}"
                                                TextWrapping="Wrap"/>
@@ -367,7 +367,7 @@
                             </Border>
 
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding HasNoPreviewContent}">
-                                <TextBlock Text="Select a modified file to preview text, binary or image-level changes."
+                                <TextBlock Text="{loc:Tr snapshot_dialog.select_file_for_preview}"
                                            Classes="muted"
                                            TextWrapping="Wrap"/>
                             </Border>
@@ -392,8 +392,8 @@
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             Spacing="8">
-                    <Button Content="Cancel" Width="132" Classes="subtle" Command="{Binding CancelCommand}"/>
-                    <Button Content="Save snapshot"
+                    <Button Content="{loc:Tr common.cancel}" Width="132" Classes="subtle" Command="{Binding CancelCommand}"/>
+                    <Button Content="{loc:Tr snapshot_dialog.save_snapshot}"
                             Width="164"
                             Classes="primary"
                             Command="{Binding SaveCommand}"
@@ -403,3 +403,4 @@
         </Border>
     </Grid>
 </Window>
+

@@ -1,34 +1,44 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.Settings"
+             xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              x:Class="Veyra.Desktop.Views.Pages.Settings.AppSettingsView"
              x:Name="Root"
              x:DataType="settings:AppSettingsViewModel"
-             Background="#0D0D0D">
+             Background="{DynamicResource VeyraCanvasBrush}">
 
     <DockPanel Margin="24,18">
-        <Border DockPanel.Dock="Top" Background="#121212" CornerRadius="10" Padding="16" Margin="0,0,0,12">
+        <Border DockPanel.Dock="Top" Classes="card" Padding="16" Margin="0,0,0,12">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                <Button Grid.Column="0" Content="← Назад" Command="{Binding BackCommand}" Padding="12,8"/>
-                <StackPanel Grid.Column="1" Spacing="4">
-                    <TextBlock Text="Настройки приложения" FontSize="22" FontWeight="SemiBold"/>
-                    <TextBlock Text="Дизайн и структура модулей конфигурации" Opacity="0.7"/>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <Button Content="{loc:Tr common.back}" Command="{Binding BackCommand}" Classes="subtle"/>
+                    <Button Content="{loc:Tr common.refresh}" Command="{Binding RefreshCommand}" Classes="subtle"/>
                 </StackPanel>
-                <Border Grid.Column="2" Background="#173B2D" CornerRadius="8" Padding="10,6" VerticalAlignment="Center">
-                    <TextBlock Text="Draft UI" Foreground="#6EE7B7" FontWeight="SemiBold"/>
+
+                <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock Text="{loc:Tr app_settings.title}" FontSize="22" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr app_settings.subtitle}"
+                               Opacity="0.75"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Border Grid.Column="2" Background="#18324B" CornerRadius="8" Padding="10,6" VerticalAlignment="Center">
+                    <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="#9AD0FF"/>
                 </Border>
             </Grid>
         </Border>
 
         <Grid ColumnDefinitions="300,*" ColumnSpacing="12">
-            <Border Grid.Column="0" Background="#121212" CornerRadius="10" Padding="10">
+            <Border Grid.Column="0" Classes="card" Padding="10">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Tabs}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="settings:AppSettingsTabViewModel">
-                                <Button Background="#171717" BorderBrush="#242424" BorderThickness="1" CornerRadius="8"
-                                        Margin="0,0,0,8" Padding="12,10"
+                                <Button Margin="0,0,0,8"
+                                        Padding="12,10"
+                                        Classes="subtle"
                                         Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).SelectTabCommand}"
                                         CommandParameter="{Binding .}">
                                     <StackPanel Spacing="2" HorizontalAlignment="Left">
@@ -42,51 +52,216 @@
                 </ScrollViewer>
             </Border>
 
-            <Border Grid.Column="1" Background="#121212" CornerRadius="10" Padding="16">
+            <Border Grid.Column="1" Classes="card" Padding="16">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Spacing="16">
+                    <StackPanel Spacing="14">
                         <TextBlock Text="{Binding SelectedTab.Title}" FontSize="20" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding SelectedTab.Subtitle}" Opacity="0.75"/>
 
-                        <Border Background="#171717" CornerRadius="10" Padding="14" BorderBrush="#242424" BorderThickness="1">
-                            <StackPanel Spacing="10">
-                                <TextBlock Text="Параметры" FontWeight="SemiBold"/>
-                                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="Основной параметр" Opacity="0.8"/>
-                                        <TextBox Watermark="Значение"/>
-                                    </StackPanel>
-                                    <StackPanel Spacing="6">
-                                        <TextBlock Text="Режим" Opacity="0.8"/>
-                                        <ComboBox SelectedIndex="0">
-                                            <ComboBoxItem Content="Стандартный"/>
-                                            <ComboBoxItem Content="Расширенный"/>
-                                            <ComboBoxItem Content="Тестовый"/>
-                                        </ComboBox>
-                                    </StackPanel>
+                        <Border Classes="card" Padding="12" IsVisible="{Binding IsUserTabSelected}">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{loc:Tr app_settings.current_session}" FontSize="16" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.active_username}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding ActiveUsername}" FontWeight="SemiBold"/>
                                 </Grid>
-                                <CheckBox Content="Включить параметр" IsChecked="True"/>
-                            </StackPanel>
-                        </Border>
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_user_id}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding ActiveCloudUserText}"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.token_state}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding ActiveSessionTokenState}" TextWrapping="Wrap"/>
+                                </Grid>
 
-                        <Border Background="#171717" CornerRadius="10" Padding="14" BorderBrush="#242424" BorderThickness="1">
-                            <StackPanel Spacing="10">
-                                <TextBlock Text="Правила" FontWeight="SemiBold"/>
-                                <ItemsControl>
-                                    <ItemsControl.Items>
-                                        <TextBlock Text="• Политика хранится локально в SQLite"/>
-                                        <TextBlock Text="• Будет синхронизироваться после включения облака"/>
-                                        <TextBlock Text="• Изменения применяются к новым операциям"/>
-                                    </ItemsControl.Items>
+                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="{loc:Tr app_settings.sign_out}" Command="{Binding SignOutCommand}" Classes="subtle"/>
+                                </StackPanel>
+
+                                <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}"/>
+
+                                <TextBlock Text="{loc:Tr app_settings.known_profiles}" FontWeight="SemiBold"/>
+                                <ItemsControl ItemsSource="{Binding Profiles}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="settings:AppUserProfileItemViewModel">
+                                            <Border Classes="card" Padding="10" Margin="0,0,0,8">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock Text="{Binding Username}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding LastLoginText}" Opacity="0.75"/>
+                                                        <TextBlock Text="{Binding CloudUserLabel}" Opacity="0.75"/>
+                                                        <TextBlock Text="{Binding TokenStateText}" Opacity="0.75" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{loc:Tr app_settings.token_available}"
+                                                                   Foreground="#86EFAC"
+                                                                   IsVisible="{Binding HasAccessToken}"/>
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right">
+                                                        <TextBlock Text="{loc:Tr app_settings.active}"
+                                                                   IsVisible="{Binding IsActive}"
+                                                                   Foreground="#9AD0FF"
+                                                                   HorizontalAlignment="Right"/>
+                                                        <Button Content="{loc:Tr app_settings.activate}"
+                                                                Classes="subtle"
+                                                                Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ActivateProfileCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <TextBox AcceptsReturn="True" Height="90" Watermark="Дополнительные правила"/>
+
+                                <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}"/>
+
+                                <TextBlock Text="{loc:Tr app_settings.authentication}" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <TextBox Grid.Column="0" Text="{Binding UsernameInput, Mode=TwoWay}" Watermark="{loc:Tr auth.username}"/>
+                                    <Button Grid.Column="1" Content="{Binding ToggleAuthLabel}" Command="{Binding ToggleAuthModeCommand}" Classes="subtle"/>
+                                </Grid>
+
+                                <TextBox Text="{Binding PasswordInput, Mode=TwoWay}" PasswordChar="*" Watermark="{loc:Tr auth.password}"/>
+                                <TextBox Text="{Binding ConfirmPasswordInput, Mode=TwoWay}"
+                                             PasswordChar="*"
+                                             Watermark="{loc:Tr auth.confirm_password}"
+                                             IsVisible="{Binding IsConfirmPasswordVisible}"/>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="{Binding SubmitAuthLabel}"
+                                            Command="{Binding SubmitAuthCommand}"
+                                            IsEnabled="{Binding CanSubmitAuth}"
+                                            Classes="primary"/>
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding AuthMessage}"
+                                           IsVisible="{Binding AuthMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                                           Foreground="#9AD0FF"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                            <Button Content="Сбросить" Padding="12,8"/>
-                            <Button Content="Сохранить" Padding="12,8"/>
-                        </StackPanel>
+                        <Border Classes="card" Padding="12" IsVisible="{Binding IsSyncTabSelected}">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{loc:Tr app_settings.pseudo_cloud_sync}" FontSize="16" FontWeight="SemiBold"/>
+
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_api}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding CloudApiBaseUrl}" TextWrapping="Wrap"/>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.local_repositories}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding LocalRepositoryCount}"/>
+                                </Grid>
+
+                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="{loc:Tr app_settings.restore_from_cloud}"
+                                            Command="{Binding RestoreFromCloudCommand}"
+                                            IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                            Classes="subtle"/>
+                                    <Button Content="{loc:Tr app_settings.push_all_latest}"
+                                            Command="{Binding PushAllRepositoriesCommand}"
+                                            IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                            Classes="subtle"/>
+                                    <Button Content="{loc:Tr app_settings.process_queue}"
+                                            Command="{Binding ProcessQueueCommand}"
+                                            IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                            Classes="subtle"/>
+                                </StackPanel>
+
+                                <TextBlock Text="{loc:Tr common.running}"
+                                           IsVisible="{Binding IsSyncBusy}"/>
+
+                                <TextBlock Text="{Binding SyncMessage}"
+                                           IsVisible="{Binding SyncMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                                           Foreground="#9AD0FF"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card" Padding="12" IsVisible="{Binding IsGeneralTabSelected}">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="{loc:Tr app_settings.general_title}" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr app_settings.general_subtitle}" Opacity="0.75" TextWrapping="Wrap"/>
+
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.language_label}" Opacity="0.8"/>
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding Languages}"
+                                              SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppLanguageOptionItemViewModel">
+                                                <TextBlock Text="{Binding DisplayName}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </Grid>
+
+                                <TextBlock Text="{loc:Tr app_settings.language_hint}" Opacity="0.72" TextWrapping="Wrap"/>
+
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{loc:Tr app_settings.localization_diagnostics_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.localization_diagnostics_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <Grid ColumnDefinitions="190,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.localization_files_count_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LocalizationResourceFilesCount}"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="190,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.localization_total_keys_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LocalizationTotalKeysCount}"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="190,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.localization_missing_keys_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LocalizationMissingKeysCount}"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="190,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.localization_duplicate_keys_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LocalizationDuplicateKeysCount}"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="190,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.localization_extra_keys_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding LocalizationExtraKeysCount}"/>
+                                        </Grid>
+
+                                        <TextBlock Text="{Binding LocalizationHealthText}"
+                                                   Foreground="#86EFAC"
+                                                   IsVisible="{Binding HasLocalizationIssues, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                        <TextBlock Text="{Binding LocalizationHealthText}"
+                                                   Foreground="#F59E0B"
+                                                   IsVisible="{Binding HasLocalizationIssues}"/>
+
+                                        <TextBlock Text="{loc:Tr app_settings.localization_sample_missing_label}"
+                                                   FontWeight="SemiBold"
+                                                   IsVisible="{Binding HasLocalizationMissingSample}"/>
+                                        <TextBlock Text="{Binding LocalizationMissingSample}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasLocalizationMissingSample}"/>
+
+                                        <TextBlock Text="{loc:Tr app_settings.localization_sample_duplicate_label}"
+                                                   FontWeight="SemiBold"
+                                                   IsVisible="{Binding HasLocalizationDuplicateSample}"/>
+                                        <TextBlock Text="{Binding LocalizationDuplicateSample}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasLocalizationDuplicateSample}"/>
+
+                                        <TextBlock Text="{loc:Tr app_settings.localization_sample_extra_label}"
+                                                   FontWeight="SemiBold"
+                                                   IsVisible="{Binding HasLocalizationExtraSample}"/>
+                                        <TextBlock Text="{Binding LocalizationExtraSample}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasLocalizationExtraSample}"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

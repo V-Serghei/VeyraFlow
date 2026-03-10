@@ -360,8 +360,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             {
                 Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
                     || q.Status == RepositorySyncQueueItem.StatusRunning
-                    || q.Status == RepositorySyncQueueItem.StatusFailed),
-                Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict)
+                    || q.Status == RepositorySyncQueueItem.StatusRetry),
+                Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict
+                    || q.Status == RepositorySyncQueueItem.StatusFailed
+                    || q.Status == RepositorySyncQueueItem.StatusDeadLetter)
             })
             .FirstOrDefaultAsync(ct);
 
@@ -411,8 +413,10 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     RepositoryId = g.Key,
                     Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
                         || q.Status == RepositorySyncQueueItem.StatusRunning
-                        || q.Status == RepositorySyncQueueItem.StatusFailed),
-                    Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict)
+                        || q.Status == RepositorySyncQueueItem.StatusRetry),
+                    Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict
+                        || q.Status == RepositorySyncQueueItem.StatusFailed
+                        || q.Status == RepositorySyncQueueItem.StatusDeadLetter)
                 })
                 .ToDictionaryAsync(x => x.RepositoryId, x => (x.Pending, x.Conflict), ct);
 
@@ -585,3 +589,4 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
 }
+

@@ -1,5 +1,6 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeTipsOptInView"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
@@ -8,15 +9,15 @@
     <Grid Margin="24" ColumnDefinitions="*,420" ColumnSpacing="16">
         <Border Grid.Column="0" Background="#111821" CornerRadius="14" Padding="24">
             <StackPanel Spacing="10">
-                <TextBlock Text="Интерактивный режим" FontSize="28" FontWeight="SemiBold"/>
-                <TextBlock Text="Подсказки помогут быстрее пройти путь от создания репозитория до истории версий" Opacity="0.8" TextWrapping="Wrap"/>
+                <TextBlock Text="{loc:Tr welcome.tips_title}" FontSize="28" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr welcome.tips_subtitle}" Opacity="0.8" TextWrapping="Wrap"/>
 
                 <Border Background="#152638" CornerRadius="10" Padding="14" Margin="0,6,0,0">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="Подсказки включают" FontWeight="SemiBold"/>
-                        <TextBlock Text="• Контекстные рекомендации по форматам"/>
-                        <TextBlock Text="• Подсветку ошибок конфигурации"/>
-                        <TextBlock Text="• Быстрые действия для сканирования и обновления"/>
+                        <TextBlock Text="{loc:Tr welcome.tips_include}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_context}"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_errors}"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_actions}"/>
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -24,15 +25,15 @@
 
         <Border Grid.Column="1" Background="#131313" CornerRadius="14" Padding="24">
             <StackPanel Spacing="14" VerticalAlignment="Center">
-                <TextBlock Text="Режим обучения" FontSize="24" FontWeight="SemiBold"/>
-                <TextBlock Text="Можно отключить позже в настройках приложения" Opacity="0.75"/>
+                <TextBlock Text="{loc:Tr welcome.learning_mode}" FontSize="24" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr welcome.learning_mode_hint}" Opacity="0.75"/>
 
                 <Grid ColumnDefinitions="*,Auto" Margin="0,8,0,0">
-                    <TextBlock Grid.Column="0" Text="Включить подсказки" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="0" Text="{loc:Tr welcome.enable_tips}" VerticalAlignment="Center"/>
                     <CheckBox Grid.Column="1" IsChecked="{Binding EnableTips, Mode=TwoWay}"/>
                 </Grid>
 
-                <Button Content="Продолжить" Height="40" Command="{Binding ContinueCommand}"/>
+                <Button Content="{loc:Tr common.continue}" Height="40" Command="{Binding ContinueCommand}"/>
             </StackPanel>
         </Border>
     </Grid>

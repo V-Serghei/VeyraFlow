@@ -1,5 +1,6 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.RepositorySettings"
              xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
@@ -11,35 +12,35 @@
     <DockPanel Margin="24,20">
         <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Content="Back" Command="{Binding BackCommand}" Padding="12,8" Classes="subtle"/>
-                <TextBlock Text="Repository settings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <Button Content="{loc:Tr common.back}" Command="{Binding BackCommand}" Padding="12,8" Classes="subtle"/>
+                <TextBlock Text="{loc:Tr repo_settings.title}" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource VeyraDangerBrush}"
                        IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-            <Button Content="Delete" Command="{Binding DeleteCommand}" Foreground="{DynamicResource VeyraDangerBrush}" Classes="subtle"/>
-            <Button Content="Save" Command="{Binding SaveCommand}" Classes="primary"/>
+            <Button Content="{loc:Tr common.delete}" Command="{Binding DeleteCommand}" Foreground="{DynamicResource VeyraDangerBrush}" Classes="subtle"/>
+            <Button Content="{loc:Tr common.save}" Command="{Binding SaveCommand}" Classes="primary"/>
         </StackPanel>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel MaxWidth="900" Spacing="14">
-                <TextBlock Text="Repository name" Opacity="0.8"/>
+                <TextBlock Text="{loc:Tr repo_settings.repository_name}" Opacity="0.8"/>
                 <TextBox Text="{Binding RepositoryName, Mode=TwoWay}"/>
 
-                <TextBlock Text="Description" Opacity="0.8"/>
+                <TextBlock Text="{loc:Tr repo_settings.description}" Opacity="0.8"/>
                 <TextBox Text="{Binding Description, Mode=TwoWay}" Height="90" AcceptsReturn="True"/>
 
-                <TextBlock Text="Directory path" Opacity="0.8"/>
+                <TextBlock Text="{loc:Tr repo_settings.directory_path}" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0" Text="{Binding DirectoryPath, Mode=TwoWay}"/>
-                    <Button Grid.Column="1" Content="Browse" Command="{Binding BrowseDirectoryCommand}"/>
+                    <Button Grid.Column="1" Content="{loc:Tr common.browse}" Command="{Binding BrowseDirectoryCommand}"/>
                 </Grid>
 
                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
 
-                <TextBlock Text="Tracked formats" FontSize="14" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr repo_settings.tracked_formats}" FontSize="14" FontWeight="SemiBold"/>
                 <ItemsControl ItemsSource="{Binding SelectedFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -60,7 +61,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="Available formats" Opacity="0.8"/>
+                <TextBlock Text="{loc:Tr repo_settings.available_formats}" Opacity="0.8"/>
                 <ItemsControl ItemsSource="{Binding AvailableFormats}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -76,19 +77,19 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Text="Add custom format" Opacity="0.8"/>
+                <TextBlock Text="{loc:Tr repo_settings.add_custom_format}" Opacity="0.8"/>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="example: .sql"/>
-                    <Button Grid.Column="1" Content="Add" Command="{Binding AddCustomFormatCommand}"/>
+                    <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_sql}"/>
+                    <Button Grid.Column="1" Content="{loc:Tr common.add}" Command="{Binding AddCustomFormatCommand}"/>
                 </Grid>
 
                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
 
-                <TextBlock Text="Cloud sync" FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr dashboard.cloud_sync}" FontSize="16" FontWeight="SemiBold"/>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="Conflict strategy" Opacity="0.8"/>
+                        <TextBlock Text="{loc:Tr repo_settings.conflict_strategy}" Opacity="0.8"/>
                         <ComboBox ItemsSource="{Binding SyncConflictStrategies}"
                                   SelectedItem="{Binding SyncConflictStrategy, Mode=TwoWay}">
                             <ComboBox.ItemTemplate>
@@ -100,29 +101,29 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="Sync status" Opacity="0.8"/>
+                        <TextBlock Text="{loc:Tr repo_settings.sync_status}" Opacity="0.8"/>
                         <TextBlock Text="{Binding CloudSyncStatusText}" FontWeight="SemiBold"/>
                     </StackPanel>
                 </Grid>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="Retry max attempts" Opacity="0.8"/>
+                        <TextBlock Text="{loc:Tr repo_settings.retry_max_attempts}" Opacity="0.8"/>
                         <TextBox Text="{Binding SyncRetryMaxAttempts, Mode=TwoWay}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="Retry base delay (sec)" Opacity="0.8"/>
+                        <TextBlock Text="{loc:Tr repo_settings.retry_base_delay_sec}" Opacity="0.8"/>
                         <TextBox Text="{Binding SyncRetryBaseDelaySeconds, Mode=TwoWay}"/>
                     </StackPanel>
                 </Grid>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="4">
-                        <TextBlock Text="Last successful sync" Opacity="0.7"/>
+                        <TextBlock Text="{loc:Tr repo_settings.last_successful_sync}" Opacity="0.7"/>
                         <TextBlock Text="{Binding CloudSyncLastSyncText}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="4">
-                        <TextBlock Text="Queue" Opacity="0.7"/>
+                        <TextBlock Text="{loc:Tr repo_settings.queue}" Opacity="0.7"/>
                         <TextBlock Text="{Binding CloudSyncQueueText}"/>
                     </StackPanel>
                 </Grid>
@@ -131,31 +132,31 @@
                            IsVisible="{Binding CloudSyncErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Sync now"
+                    <Button Content="{loc:Tr repo_settings.sync_now}"
                             Command="{Binding SyncNowCommand}"
                             IsEnabled="{Binding IsSyncNowRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                             Classes="primary"/>
-                    <TextBlock Text="Running..." VerticalAlignment="Center"
+                    <TextBlock Text="{loc:Tr common.running}" VerticalAlignment="Center"
                                IsVisible="{Binding IsSyncNowRunning}"/>
                 </StackPanel>
 
                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
 
-                <TextBlock Text="Repository bundle" FontSize="16" FontWeight="SemiBold"/>
-                <TextBlock Text="Export current repository data or import a bundle into another folder."
+                <TextBlock Text="{loc:Tr repo_settings.bundle_title}" FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr repo_settings.bundle_hint}"
                            Opacity="0.8"
                            TextWrapping="Wrap"/>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Export bundle"
+                    <Button Content="{loc:Tr repo_settings.export_bundle}"
                             Command="{Binding ExportBundleCommand}"
                             IsEnabled="{Binding CanRunBundleOperations}"
                             Classes="subtle"/>
-                    <Button Content="Import bundle"
+                    <Button Content="{loc:Tr repo_settings.import_bundle}"
                             Command="{Binding ImportBundleCommand}"
                             IsEnabled="{Binding CanRunBundleOperations}"
                             Classes="subtle"/>
-                    <TextBlock Text="Working..." VerticalAlignment="Center"
+                    <TextBlock Text="{loc:Tr common.working}" VerticalAlignment="Center"
                                IsVisible="{Binding IsBundleOperationRunning}"/>
                 </StackPanel>
 
@@ -165,50 +166,50 @@
                            IsVisible="{Binding HasBundleOperationMessage}"/>
 
                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
-                <TextBlock Text="Retention policy" FontSize="16" FontWeight="SemiBold"/>
-                <CheckBox Content="Enable retention for this repository"
+                <TextBlock Text="{loc:Tr repo_settings.retention_policy}" FontSize="16" FontWeight="SemiBold"/>
+                <CheckBox Content="{loc:Tr repo_settings.enable_retention}"
                           IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="Max age (days)" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="example: 30"/>
+                        <TextBlock Text="{loc:Tr repo_settings.max_age_days}" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_30}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="Max snapshots" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="example: 200"/>
+                        <TextBlock Text="{loc:Tr repo_settings.max_snapshots}" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_200}"/>
                     </StackPanel>
                 </Grid>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="6">
-                        <TextBlock Text="Max total size (MB)" Opacity="0.8"/>
-                        <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="example: 2048"/>
+                        <TextBlock Text="{loc:Tr repo_settings.max_total_size_mb}" Opacity="0.8"/>
+                        <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_2048}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="6">
-                        <TextBlock Text="Run interval (minutes)" Opacity="0.8"/>
+                        <TextBlock Text="{loc:Tr repo_settings.run_interval_minutes}" Opacity="0.8"/>
                         <TextBox Text="{Binding RetentionRunIntervalMinutes, Mode=TwoWay}"/>
                     </StackPanel>
                 </Grid>
 
-                <TextBlock Text="Trigger filter (comma-separated)" Opacity="0.8"/>
-                <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="manual_snapshot, sync_live_watcher"/>
+                <TextBlock Text="{loc:Tr repo_settings.trigger_filter}" Opacity="0.8"/>
+                <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.trigger_placeholder}"/>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                     <StackPanel Grid.Column="0" Spacing="4">
-                        <TextBlock Text="Last run" Opacity="0.7"/>
+                        <TextBlock Text="{loc:Tr repo_settings.last_run}" Opacity="0.7"/>
                         <TextBlock Text="{Binding RetentionLastRunText}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Spacing="4">
-                        <TextBlock Text="Last status" Opacity="0.7"/>
+                        <TextBlock Text="{loc:Tr repo_settings.last_status}" Opacity="0.7"/>
                         <TextBlock Text="{Binding RetentionLastStatusText}" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Grid>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Dry run" Command="{Binding RunRetentionDryRunCommand}"/>
-                    <Button Content="Apply retention" Command="{Binding RunRetentionApplyCommand}"/>
-                    <Button Content="Cancel" Command="{Binding CancelRetentionCommand}"/>
+                    <Button Content="{loc:Tr repo_settings.dry_run}" Command="{Binding RunRetentionDryRunCommand}"/>
+                    <Button Content="{loc:Tr repo_settings.apply_retention}" Command="{Binding RunRetentionApplyCommand}"/>
+                    <Button Content="{loc:Tr common.cancel}" Command="{Binding CancelRetentionCommand}"/>
                 </StackPanel>
 
                 <TextBlock Text="{Binding RetentionProgressText}" Opacity="0.8"
@@ -219,4 +220,6 @@
         </ScrollViewer>
     </DockPanel>
 </UserControl>
+
+
 

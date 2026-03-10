@@ -1,5 +1,6 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         x:Class="Veyra.Desktop.Views.Windows.WelcomeWindow"
@@ -7,7 +8,7 @@
         CanResize="False"
         WindowStartupLocation="CenterScreen"
         Background="#0B0F14"
-        Title="VeyraFlow — Welcome"
+        Title="{loc:Tr welcome.window_title}"
         d:DataContext="{d:DesignInstance vm:WelcomeWindowViewModel, IsDesignTimeCreatable=True}"
         x:DataType="vm:WelcomeWindowViewModel">
 
@@ -17,3 +18,5 @@
         </Border>
     </Border>
 </Window>
+
+

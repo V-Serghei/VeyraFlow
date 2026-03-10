@@ -2,6 +2,7 @@
     x:Class="Veyra.Desktop.Views.Pages.AuthWindow.LoginView"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.AuthWindow"
     xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
@@ -14,32 +15,32 @@
                 BorderBrush="#272727" BorderThickness="1"
                 HorizontalAlignment="Center" VerticalAlignment="Center">
             <StackPanel Spacing="14">
-                <TextBlock Text="VeyraFlow" FontSize="28" FontWeight="SemiBold"/>
+                <TextBlock Text="{loc:Tr app.brand}" FontSize="28" FontWeight="SemiBold"/>
                 <TextBlock Text="{Binding ActionTitle}" FontSize="20"/>
-                <TextBlock Text="Secure cloud account and sync access" Opacity="0.75"/>
+                <TextBlock Text="{loc:Tr auth.subtitle}" Opacity="0.75"/>
 
                 <StackPanel Spacing="6" Margin="0,8,0,0">
-                    <TextBlock Text="Username" Opacity="0.8"/>
-                    <TextBox Text="{Binding Username}" Watermark="Enter username"/>
+                    <TextBlock Text="{loc:Tr auth.username}" Opacity="0.8"/>
+                    <TextBox Text="{Binding Username}" Watermark="{loc:Tr auth.username_placeholder}"/>
                 </StackPanel>
 
                 <StackPanel Spacing="6">
-                    <TextBlock Text="Password" Opacity="0.8"/>
-                    <TextBox PasswordChar="*" Text="{Binding Password}" Watermark="Enter password"/>
+                    <TextBlock Text="{loc:Tr auth.password}" Opacity="0.8"/>
+                    <TextBox Text="{Binding Password, Mode=TwoWay}" PasswordChar="*" Watermark="{loc:Tr auth.password_placeholder}"/>
                 </StackPanel>
 
                 <StackPanel Spacing="6" IsVisible="{Binding IsRegisterMode}">
-                    <TextBlock Text="Confirm password" Opacity="0.8"/>
-                    <TextBox PasswordChar="*" Text="{Binding ConfirmPassword}" Watermark="Repeat password"/>
+                    <TextBlock Text="{loc:Tr auth.confirm_password}" Opacity="0.8"/>
+                    <TextBox Text="{Binding ConfirmPassword, Mode=TwoWay}" PasswordChar="*" Watermark="{loc:Tr auth.confirm_password_placeholder}"/>
                 </StackPanel>
 
-                <Button Content="Sign in"
+                <Button Content="{loc:Tr auth.sign_in}"
                         Command="{Binding LoginCommand}"
                         IsVisible="{Binding IsRegisterMode, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                         IsEnabled="{Binding IsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                         Height="38"/>
 
-                <Button Content="Register"
+                <Button Content="{loc:Tr auth.register}"
                         Command="{Binding RegisterCommand}"
                         IsVisible="{Binding IsRegisterMode}"
                         IsEnabled="{Binding IsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
@@ -57,3 +58,5 @@
         </Border>
     </Grid>
 </UserControl>
+
+

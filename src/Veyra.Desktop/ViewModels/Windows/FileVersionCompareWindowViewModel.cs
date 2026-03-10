@@ -154,11 +154,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
     public bool HasFullFilePreviewContent
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
-    public bool ShowDiffRowsPanel => HasPreviewRows && !IsWordRichPreview;
+    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
     public bool ShowWordDiffRowsPanel => !IsFullFilePreviewMode && IsWordRichPreview && HasWordPreviewRows;
-    public bool ShowNoDiffPreviewMessage => !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
-    public bool ShowFullFilePreviewPanel => false;
-    public bool ShowNoFullFilePreviewMessage => false;
+    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
+    public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode && !IsWordRichPreview;
+    public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
     public bool CanToggleFullFilePreview
         => !IsPreviewLoading
            && PreviewKind == PendingDiffPreviewKind.Text
@@ -607,57 +607,63 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (_leftVersion is null || _rightVersion is null)
             return;
 
-        const int fullFilePreviewMaxLines = 200_000;
-
         IsFullFilePreviewMode = true;
         IsPreviewLoading = true;
         IsFullFilePreviewLoading = true;
         FullPreviewBeforeText = string.Empty;
         FullPreviewAfterText = string.Empty;
         FullPreviewSummary = string.Empty;
-        PreviewSummary = $"Loading full diff for {_leftVersion.VersionName} -> {_rightVersion.VersionName}...";
+        PreviewSummary = $"Loading full file content for {_leftVersion.VersionName} -> {_rightVersion.VersionName}...";
         ErrorMessage = null;
 
         try
         {
-            var result = await _mediator.Send(
-                new GetFileVersionDiffPreviewQuery(_leftVersion.FileVersionId, _rightVersion.FileVersionId, fullFilePreviewMaxLines));
+            var beforeTask = _mediator.Send(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000));
+            var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000));
 
-            if (!result.Success || result.Value is null)
+            await Task.WhenAll(beforeTask, afterTask);
+
+            var before = beforeTask.Result;
+            var after = afterTask.Result;
+            var summaryParts = new List<string>(2);
+
+            if (before.Success && before.Value is not null)
             {
-                ResetPreview(result.Error ?? "Unable to build full-file diff preview.");
-                IsFullFilePreviewMode = true;
-                return;
+                FullPreviewBeforeText = before.Value.Content;
+                summaryParts.Add($"Before: {FormatBytes(before.Value.SizeBytes)}{(before.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+            }
+            else
+            {
+                FullPreviewBeforeText = $"Unable to load before version.{Environment.NewLine}{Environment.NewLine}{before.Error}";
+                summaryParts.Add("Before unavailable");
             }
 
-            var preview = result.Value;
-            if (!preview.IsAvailable || preview.Kind != PendingDiffPreviewKind.Text)
+            if (after.Success && after.Value is not null)
             {
-                ResetPreview(preview.Message);
-                IsFullFilePreviewMode = true;
-                return;
+                FullPreviewAfterText = after.Value.Content;
+                summaryParts.Add($"After: {FormatBytes(after.Value.SizeBytes)}{(after.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+            }
+            else
+            {
+                FullPreviewAfterText = $"Unable to load after version.{Environment.NewLine}{Environment.NewLine}{after.Error}";
+                summaryParts.Add("After unavailable");
             }
 
-            PreviewRows.Clear();
-            WordPreviewRows.Clear();
-            _isWordSemanticPreview = false;
-
-            foreach (var row in BuildDiffPreviewRows(preview.Lines, []))
-                PreviewRows.Add(row);
-
+            FullPreviewSummary = string.Join(" | ", summaryParts);
             PreviewKind = PendingDiffPreviewKind.Text;
-            PreviewSummary = preview.IsTruncated
-                ? $"Full-file mode loaded with limit {fullFilePreviewMaxLines:N0} lines (truncated)."
-                : $"Full-file mode: {preview.AddedLines} added / {preview.RemovedLines} removed.";
+            PreviewSummary = "Full-file preview mode is ready.";
         }
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "Failed to load full-file diff preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                "Failed to load full-file preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 _leftVersion.FileVersionId,
                 _rightVersion.FileVersionId);
-            ResetPreview("Unable to load full-file diff preview.");
-            IsFullFilePreviewMode = true;
+
+            FullPreviewBeforeText = string.Empty;
+            FullPreviewAfterText = string.Empty;
+            FullPreviewSummary = "Failed to load full file preview.";
+            PreviewSummary = "Unable to load full file preview.";
         }
         finally
         {
@@ -741,9 +747,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             "Blocks",
             $"{summary.BaselineBlockCount} -> {summary.CurrentBlockCount}, shared {summary.SharedBlockCount}"));
 
+        var dedupRatio = summary.DedupRatio ?? ComputeDedupRatio(summary);
+        var changedRatio = summary.ChangedBlockRatio ?? ComputeChangedBlockRatio(summary, dedupRatio);
+
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
             "Dedup / Changed",
-            $"{FormatRatio(summary.DedupRatio)} / {FormatRatio(summary.ChangedBlockRatio)}"));
+            $"{FormatRatio(dedupRatio)} / {FormatRatio(changedRatio)}"));
 
         if (summary.ByteSimilarityRatio.HasValue)
         {
@@ -1040,6 +1049,31 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private static string FormatRatio(double? value)
         => value.HasValue ? $"{value.Value * 100:F1}%" : "n/a";
 
+    private static double? ComputeDedupRatio(PendingBinaryDiffSummaryDto summary)
+    {
+        var denominator = summary.CurrentBlockCount > 0
+            ? summary.CurrentBlockCount
+            : summary.BaselineBlockCount;
+
+        if (denominator <= 0)
+            return null;
+
+        var shared = System.Math.Clamp(summary.SharedBlockCount, 0, denominator);
+        return (double)shared / denominator;
+    }
+
+    private static double? ComputeChangedBlockRatio(PendingBinaryDiffSummaryDto summary, double? dedupRatio)
+    {
+        if (summary.CurrentBlockCount <= 0)
+            return null;
+
+        if (dedupRatio.HasValue)
+            return System.Math.Clamp(1d - dedupRatio.Value, 0d, 1d);
+
+        var unchanged = System.Math.Clamp(summary.SharedBlockCount, 0, summary.CurrentBlockCount);
+        return (double)(summary.CurrentBlockCount - unchanged) / summary.CurrentBlockCount;
+    }
+
     private static string FormatSignedBytes(long value)
     {
         if (value == 0)
@@ -1107,9 +1141,4 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoPreviewContent));
     }
 }
-
-
-
-
-
 

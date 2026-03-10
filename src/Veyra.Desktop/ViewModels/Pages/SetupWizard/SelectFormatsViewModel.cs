@@ -1,11 +1,12 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Microsoft.Extensions.Logging;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.Pages.SetupWizard;
 using Veyra.Desktop.Native;
 
@@ -29,18 +30,23 @@ public sealed class SelectFormatsViewModel : INotifyPropertyChanged
         _log = log;
 
         foreach (string e in new[]
-        {
-            ".docx",".pdf",".txt",".rtf",".odt",".xlsx",
-            ".png",".jpg",".jpeg",".gif",".svg",
-            ".json",".xml",".cs",".js",".ts",".java",".py",".md"
-        })
+                 {
+                     ".docx", ".pdf", ".txt", ".rtf", ".odt", ".xlsx",
+                     ".png", ".jpg", ".jpeg", ".gif", ".svg",
+                     ".json", ".xml", ".cs", ".js", ".ts", ".java", ".py", ".md"
+                 })
             AddItem(e);
+
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(FooterText));
+        };
 
         AddCustomCommand = new RelayCommand(_ => AddCustom());
     }
 
     public bool HasAny => AllExtensions.Any(x => x.IsSelected);
-    public string FooterText => $"{AllExtensions.Count(x => x.IsSelected)} формат(ов) выбрано";
+    public string FooterText => Loc.P("setup.formats_selected", AllExtensions.Count(x => x.IsSelected), AllExtensions.Count(x => x.IsSelected));
 
     private void AddItem(string name)
     {
@@ -61,7 +67,7 @@ public sealed class SelectFormatsViewModel : INotifyPropertyChanged
     {
         string e = (CustomExt ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(e)) return;
-        if (!e.StartsWith(".")) e = "." + e;
+        if (!e.StartsWith('.')) e = "." + e;
         if (AllExtensions.Any(x => x.Name.Equals(e, StringComparison.OrdinalIgnoreCase))) return;
 
         var item = new FileExtensionOption(e) { IsSelected = true };
@@ -77,9 +83,6 @@ public sealed class SelectFormatsViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(FooterText));
     }
 
-    /// <summary>
-    /// Validates selection. Does NOT save to DB — that happens in SetupWizardViewModel at the end.
-    /// </summary>
     public Task<bool> CommitAsync()
     {
         var selected = AllExtensions.Where(x => x.IsSelected).ToList();
@@ -88,10 +91,10 @@ public sealed class SelectFormatsViewModel : INotifyPropertyChanged
             _log.LogWarning("No formats selected");
             return Task.FromResult(false);
         }
+
         return Task.FromResult(true);
     }
 
-    /// <summary>Returns collected extensions for final save.</summary>
     public IReadOnlyCollection<string> GetSelectedExtensions()
         => AllExtensions.Where(x => x.IsSelected).Select(x => x.Name).ToList();
 }

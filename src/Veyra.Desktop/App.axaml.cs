@@ -60,6 +60,7 @@ public partial class App : AvaloniaApplication
             }
 
             var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
+            var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
             var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
 
             var activeUsername = userProfiles.GetActiveUsernameAsync().GetAwaiter().GetResult();
@@ -69,35 +70,47 @@ public partial class App : AvaloniaApplication
                 var dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
                 var exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
 
-                if (dirs.Count == 0 || exts.Count == 0)
+                var profile = userProfiles.GetActiveProfileAsync().GetAwaiter().GetResult();
+                var tokenState = tokenPolicy.Evaluate(profile?.AccessToken);
+                var canUseCloudSync = tokenState.CanUseForSync;
+
+                if (!canUseCloudSync)
                 {
-                    var profile = userProfiles.GetActiveProfileAsync().GetAwaiter().GetResult();
-                    if (!string.IsNullOrWhiteSpace(profile?.AccessToken))
+                    Log.Information(
+                        "Skipping cloud startup sync for user {Username}. TokenState {TokenState}. Reason {Reason}",
+                        activeUsername,
+                        tokenState.State,
+                        tokenState.Description);
+                }
+
+                if (canUseCloudSync && (dirs.Count == 0 || exts.Count == 0))
+                {
+                    var sync = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
+                    if (sync is not null)
                     {
-                        var sync = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
-                        if (sync is not null)
+                        try
                         {
-                            try
-                            {
-                                sync.RestoreRepositoriesFromCloudAsync().GetAwaiter().GetResult();
-                                dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
-                                exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Warning(ex, "Cloud restore at startup failed for user {Username}", activeUsername);
-                            }
+                            sync.RestoreRepositoriesFromCloudAsync().GetAwaiter().GetResult();
+                            dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
+                            exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warning(ex, "Cloud restore at startup failed for user {Username}", activeUsername);
                         }
                     }
                 }
 
-                try
+                if (canUseCloudSync)
                 {
-                    syncOrchestrator?.ProcessPendingQueueAsync().GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Cloud pending queue resume failed at startup for user {Username}", activeUsername);
+                    try
+                    {
+                        syncOrchestrator?.ProcessPendingQueueAsync().GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Cloud pending queue resume failed at startup for user {Username}", activeUsername);
+                    }
                 }
 
                 shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
@@ -159,4 +172,3 @@ public partial class App : AvaloniaApplication
         Log.CloseAndFlush();
     }
 }
-

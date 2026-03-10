@@ -1,6 +1,7 @@
 
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:explorer="clr-namespace:Veyra.Desktop.ViewModels.Pages.Explorer"
              x:Class="Veyra.Desktop.Views.Pages.Explorer.RepositoryExplorerView"
@@ -11,32 +12,32 @@
     <Grid RowDefinitions="Auto,Auto,*" Margin="18,14,18,18" RowSpacing="10">
         <Border Grid.Row="0" Classes="hero">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" VerticalAlignment="Center">
-                <Button Grid.Column="0" Content="Back" Command="{Binding BackCommand}" Classes="subtle"/>
+                <Button Grid.Column="0" Content="{loc:Tr common.back}" Command="{Binding BackCommand}" Classes="subtle"/>
 
                 <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="{Binding RepositoryName}" FontSize="22" FontWeight="SemiBold"/>
                     <TextBlock Classes="muted" Text="{Binding RepositoryPath}" FontSize="12" TextTrimming="CharacterEllipsis"/>
                     <TextBlock Classes="muted"
-                               Text="Live sync enabled"
+                               Text="{loc:Tr explorer.live_sync}"
                                FontSize="11"
                                IsVisible="{Binding IsLiveSyncActive}"/>
                 </StackPanel>
 
                 <WrapPanel Grid.Column="2" Orientation="Horizontal" ItemHeight="34" ItemWidth="150" Margin="0,2,0,0">
-                    <Button Content="Rescan files"
-                            ToolTip.Tip="Scan repository folder and refresh index"
+                    <Button Content="{loc:Tr explorer.rescan_files}"
+                            ToolTip.Tip="{loc:Tr explorer.tooltip_rescan}"
                             Command="{Binding RescanCommand}"
                             Classes="subtle"
                             IsEnabled="{Binding CanRunScanActions}"/>
-                    <Button Content="Create snapshot"
+                    <Button Content="{loc:Tr explorer.create_snapshot}"
                             Command="{Binding CreateSnapshotCommand}"
                             Classes="primary"
                             IsEnabled="{Binding CanCreateSnapshot}"/>
-                    <Button Content="Snapshot history"
+                    <Button Content="{loc:Tr explorer.snapshot_history}"
                             Command="{Binding ShowSnapshotHistoryCommand}"
                             Classes="subtle"
                             IsEnabled="{Binding CanRunScanActions}"/>
-                    <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Classes="subtle"/>
+                    <Button Content="{loc:Tr common.settings}" Command="{Binding OpenSettingsCommand}" Classes="subtle"/>
                 </WrapPanel>
             </Grid>
         </Border>
@@ -69,7 +70,7 @@
             <Grid ColumnDefinitions="270,*,390" ColumnSpacing="12">
                 <Border Grid.Column="0" Classes="panel">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="Folders" Classes="section-title" Margin="0,0,0,8"/>
+                        <TextBlock DockPanel.Dock="Top" Text="{loc:Tr explorer.folders}" Classes="section-title" Margin="0,0,0,8"/>
                         <TreeView ItemsSource="{Binding TreeNodes}"
                                   SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
                             <TreeView.DataTemplates>
@@ -85,14 +86,14 @@
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
                         <TextBox Grid.Row="0"
                                  Text="{Binding SearchQuery, Mode=TwoWay}"
-                                 Watermark="Search in current folder"/>
+                                 Watermark="{loc:Tr explorer.search_current_folder}"/>
 
                         <Grid Grid.Row="1" ColumnDefinitions="40,*,120,110,120,110" Margin="0,4,0,2" ColumnSpacing="6">
-                            <TextBlock Grid.Column="1" Text="Name" FontWeight="SemiBold" Opacity="0.82"/>
-                            <TextBlock Grid.Column="2" Text="Type" FontWeight="SemiBold" Opacity="0.82"/>
-                            <TextBlock Grid.Column="3" Text="Size" FontWeight="SemiBold" Opacity="0.82"/>
-                            <TextBlock Grid.Column="4" Text="Modified" FontWeight="SemiBold" Opacity="0.82"/>
-                            <TextBlock Grid.Column="5" Text="Action" FontWeight="SemiBold" Opacity="0.82"/>
+                            <TextBlock Grid.Column="1" Text="{loc:Tr common.name}" FontWeight="SemiBold" Opacity="0.82"/>
+                            <TextBlock Grid.Column="2" Text="{loc:Tr common.type}" FontWeight="SemiBold" Opacity="0.82"/>
+                            <TextBlock Grid.Column="3" Text="{loc:Tr common.size}" FontWeight="SemiBold" Opacity="0.82"/>
+                            <TextBlock Grid.Column="4" Text="{loc:Tr common.modified}" FontWeight="SemiBold" Opacity="0.82"/>
+                            <TextBlock Grid.Column="5" Text="{loc:Tr common.action}" FontWeight="SemiBold" Opacity="0.82"/>
                         </Grid>
 
                         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
@@ -114,7 +115,7 @@
                                                 <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.85"/>
 
                                                 <Button Grid.Column="5"
-                                                        Content="Open"
+                                                        Content="{loc:Tr common.open}"
                                                         Classes="subtle"
                                                         IsVisible="{Binding CanOpenDirectory}"
                                                         Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemCommand}"
@@ -131,7 +132,7 @@
                 <Border Grid.Column="2" Classes="panel">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Spacing="10">
-                            <TextBlock Text="Pending changes" Classes="section-title"/>
+                            <TextBlock Text="{loc:Tr explorer.pending_changes}" Classes="section-title"/>
                             <TextBlock Classes="muted" Text="{Binding LastSnapshotLabel}"/>
                             <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.88" TextWrapping="Wrap"/>
                             <ListBox Classes="clean-list"
@@ -159,9 +160,9 @@
                                 </ListBox.ItemTemplate>
                             </ListBox>
 
-                            <TextBlock Text="No pending changes" Opacity="0.72" IsVisible="{Binding HasNoPendingChanges}"/>
+                            <TextBlock Text="{loc:Tr explorer.no_pending_changes}" Opacity="0.72" IsVisible="{Binding HasNoPendingChanges}"/>
 
-                            <Button Content="Open snapshot history"
+                            <Button Content="{loc:Tr explorer.open_snapshot_history}"
                                     Command="{Binding ShowSnapshotHistoryCommand}"
                                     Classes="subtle"
                                     HorizontalAlignment="Stretch"
@@ -169,18 +170,18 @@
 
                             <Border Classes="panel" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="Repository tools" FontWeight="SemiBold"/>
-                                    <TextBlock Classes="muted" Text="Maintenance actions for damaged or out-of-sync data." FontSize="11" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
+                                    <TextBlock Classes="muted" Text="{loc:Tr explorer.repository_tools_hint}" FontSize="11" TextWrapping="Wrap"/>
                                     <WrapPanel Orientation="Horizontal" ItemWidth="170" ItemHeight="34">
-                                        <Button Content="Fix missing data" ToolTip.Tip="Verify blocks and repair missing artifacts (including cloud restore if configured)" AutomationProperties.Name="Repair repository data"
+                                        <Button Content="{loc:Tr explorer.fix_missing_data}" ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}" AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
                                                 Command="{Binding RepairRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
-                                        <Button Content="Rebuild index" ToolTip.Tip="Rescan all files and rebuild repository index and snapshots" AutomationProperties.Name="Reindex repository data"
+                                        <Button Content="{loc:Tr explorer.rebuild_index}" ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}" AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
                                                 Command="{Binding ReindexRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
-                                        <Button Content="Repair links" ToolTip.Tip="Rebuild snapshot-to-file version links without rescanning file content" AutomationProperties.Name="Relink repository graph"
+                                        <Button Content="{loc:Tr explorer.repair_links}" ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}" AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
                                                 Command="{Binding RelinkRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
@@ -190,7 +191,7 @@
 
                             <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
 
-                            <TextBlock Text="Selected file" Classes="section-title"/>
+                            <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
 
                             <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
                                 <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
@@ -201,13 +202,13 @@
 
                                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
 
-                                <TextBlock Text="File versions" FontWeight="SemiBold"/>
-                                <TextBlock Text="Loading versions..." Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
+                                <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
                                 <TextBlock Text="{Binding VersionPanelError}"
                                            Foreground="{DynamicResource VeyraDangerBrush}"
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding HasVersionPanelError}"/>
-                                <TextBlock Text="No versions found for selected file." Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
+                                <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}" Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
 
                                 <ListBox Classes="clean-list"
                                          ItemsSource="{Binding VisibleFileVersions}"
@@ -231,35 +232,35 @@
 
                                 <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
                                     <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Path" Opacity="0.7"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Opacity="0.7"/>
                                         <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Opacity="0.7"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Opacity="0.7"/>
                                         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Size" Opacity="0.7"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Opacity="0.7"/>
                                         <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Date" Opacity="0.7"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Opacity="0.7"/>
                                         <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
                                     </Grid>
                                 </Border>
 
-                                <TextBlock Text="No content blocks for selected version. Restore and diff are unavailable."
+                                <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
                                            Foreground="{DynamicResource VeyraWarningBrush}"
                                            TextWrapping="Wrap"
                                            IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Restore as copy"
+                                    <Button Content="{loc:Tr explorer.restore_as_copy}"
                                             Command="{Binding RestoreVersionAsCopyCommand}"
                                             IsEnabled="{Binding CanRestoreSelectedVersion}"
                                             Classes="subtle"/>
-                                    <Button Content="Restore overwrite"
+                                    <Button Content="{loc:Tr explorer.restore_overwrite}"
                                             Command="{Binding RestoreVersionOverwriteCommand}"
                                             IsEnabled="{Binding CanRestoreSelectedVersion}"/>
                                 </StackPanel>
 
                                 <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                                     <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="Left version" Opacity="0.8" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr explorer.left_version}" Opacity="0.8" FontSize="11"/>
                                         <ComboBox ItemsSource="{Binding FileVersions}"
                                                   SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
                                             <ComboBox.ItemTemplate>
@@ -271,7 +272,7 @@
                                     </StackPanel>
 
                                     <StackPanel Grid.Column="1" Spacing="4">
-                                        <TextBlock Text="Right version" Opacity="0.8" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr explorer.right_version}" Opacity="0.8" FontSize="11"/>
                                         <ComboBox ItemsSource="{Binding FileVersions}"
                                                   SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
                                             <ComboBox.ItemTemplate>
@@ -286,7 +287,7 @@
                                 <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Compare in window"
+                                    <Button Content="{loc:Tr explorer.compare_in_window}"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
                                             Classes="primary"/>
@@ -298,7 +299,7 @@
                                            IsVisible="{Binding HasVersionActionMessage}"/>
                             </StackPanel>
 
-                            <TextBlock Text="Select a file from index or snapshot history."
+                            <TextBlock Text="{loc:Tr explorer.select_file_from_index}"
                                        Opacity="0.72"
                                        IsVisible="{Binding HasNoSelectedItem}"
                                        TextWrapping="Wrap"/>
@@ -314,13 +315,13 @@
                     <Grid RowDefinitions="Auto,*" RowSpacing="12">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Snapshot history" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr explorer.snapshot_history}" FontSize="20" FontWeight="SemiBold"/>
                                 <TextBlock Classes="muted"
-                                           Text="Browse commits, inspect changed files and manage file versions."
+                                           Text="{loc:Tr explorer.snapshot_history_hint}"
                                            FontSize="12"/>
                             </StackPanel>
                             <Button Grid.Column="1"
-                                    Content="Close"
+                                    Content="{loc:Tr common.close}"
                                     Command="{Binding CloseSnapshotHistoryMenuCommand}"
                                     Classes="subtle"/>
                         </Grid>
@@ -328,8 +329,8 @@
                         <Grid Grid.Row="1" ColumnDefinitions="330,370,*" ColumnSpacing="12">
                             <Border Grid.Column="0" Classes="panel">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="Commits" Classes="section-title"/>
-                                    <TextBlock Text="Loading commits..." Opacity="0.72" IsVisible="{Binding IsSnapshotHistoryLoading}"/>
+                                    <TextBlock Text="{loc:Tr explorer.commits}" Classes="section-title"/>
+                                    <TextBlock Text="{loc:Tr explorer.loading_commits}" Opacity="0.72" IsVisible="{Binding IsSnapshotHistoryLoading}"/>
 
                                     <ListBox Classes="clean-list"
                                              ItemsSource="{Binding SnapshotHistory}"
@@ -348,15 +349,15 @@
                                         </ListBox.ItemTemplate>
                                     </ListBox>
 
-                                    <TextBlock Text="No commits yet" Opacity="0.72" IsVisible="{Binding HasNoSnapshotHistory}"/>
+                                    <TextBlock Text="{loc:Tr explorer.no_commits}" Opacity="0.72" IsVisible="{Binding HasNoSnapshotHistory}"/>
                                 </StackPanel>
                             </Border>
 
                             <Border Grid.Column="1" Classes="panel">
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="Files in selected commit" Classes="section-title"/>
-                                    <TextBlock Text="Select a commit to see changed files" Opacity="0.72" IsVisible="{Binding HasNoSelectedSnapshot}"/>
-                                    <TextBlock Text="Loading changed files..." Opacity="0.72" IsVisible="{Binding IsSnapshotFilesLoading}"/>
+                                    <TextBlock Text="{loc:Tr explorer.files_in_selected_commit}" Classes="section-title"/>
+                                    <TextBlock Text="{loc:Tr explorer.select_commit_for_changes}" Opacity="0.72" IsVisible="{Binding HasNoSelectedSnapshot}"/>
+                                    <TextBlock Text="{loc:Tr explorer.loading_changed_files}" Opacity="0.72" IsVisible="{Binding IsSnapshotFilesLoading}"/>
 
                                     <ListBox Classes="clean-list"
                                              ItemsSource="{Binding SnapshotFiles}"
@@ -380,14 +381,14 @@
                                         </ListBox.ItemTemplate>
                                     </ListBox>
 
-                                    <TextBlock Text="No changed files in this commit" Opacity="0.72" IsVisible="{Binding HasNoSnapshotFiles}"/>
+                                    <TextBlock Text="{loc:Tr explorer.no_changed_files_in_commit}" Opacity="0.72" IsVisible="{Binding HasNoSnapshotFiles}"/>
                                 </StackPanel>
                             </Border>
 
                             <Border Grid.Column="2" Classes="panel">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <StackPanel Spacing="10">
-                                        <TextBlock Text="Version controls" Classes="section-title"/>
+                                        <TextBlock Text="{loc:Tr explorer.version_controls}" Classes="section-title"/>
 
                                         <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
                                             <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
@@ -399,13 +400,13 @@
 
                                             <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
 
-                                            <TextBlock Text="File versions" FontWeight="SemiBold"/>
-                                            <TextBlock Text="Loading versions..." Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
+                                            <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
                                             <TextBlock Text="{Binding VersionPanelError}"
                                                        Foreground="{DynamicResource VeyraDangerBrush}"
                                                        TextWrapping="Wrap"
                                                        IsVisible="{Binding HasVersionPanelError}"/>
-                                            <TextBlock Text="No versions found for selected file." Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
+                                            <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}" Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
 
                                             <ListBox Classes="clean-list"
                                                      ItemsSource="{Binding VisibleFileVersions}"
@@ -429,35 +430,35 @@
 
                                             <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
                                                 <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
-                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Path" Opacity="0.7"/>
+                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
-                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Opacity="0.7"/>
+                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}"/>
-                                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Size" Opacity="0.7"/>
+                                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
-                                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Date" Opacity="0.7"/>
+                                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
                                                 </Grid>
                                             </Border>
 
-                                            <TextBlock Text="No content blocks for selected version. Restore and diff are unavailable."
+                                            <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
                                                        Foreground="{DynamicResource VeyraWarningBrush}"
                                                        TextWrapping="Wrap"
                                                        IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
 
                                             <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <Button Content="Restore as copy"
+                                                <Button Content="{loc:Tr explorer.restore_as_copy}"
                                                         Command="{Binding RestoreVersionAsCopyCommand}"
                                                         IsEnabled="{Binding CanRestoreSelectedVersion}"
                                                         Classes="subtle"/>
-                                                <Button Content="Restore overwrite"
+                                                <Button Content="{loc:Tr explorer.restore_overwrite}"
                                                         Command="{Binding RestoreVersionOverwriteCommand}"
                                                         IsEnabled="{Binding CanRestoreSelectedVersion}"/>
                                             </StackPanel>
 
                                             <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                                     <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="Left version" Opacity="0.8" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr explorer.left_version}" Opacity="0.8" FontSize="11"/>
                                         <ComboBox ItemsSource="{Binding FileVersions}"
                                                   SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
                                             <ComboBox.ItemTemplate>
@@ -469,7 +470,7 @@
                                     </StackPanel>
 
                                     <StackPanel Grid.Column="1" Spacing="4">
-                                        <TextBlock Text="Right version" Opacity="0.8" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr explorer.right_version}" Opacity="0.8" FontSize="11"/>
                                         <ComboBox ItemsSource="{Binding FileVersions}"
                                                   SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
                                             <ComboBox.ItemTemplate>
@@ -484,7 +485,7 @@
                                 <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Compare in window"
+                                    <Button Content="{loc:Tr explorer.compare_in_window}"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
                                             Classes="primary"/>
@@ -496,7 +497,7 @@
                                                        IsVisible="{Binding HasVersionActionMessage}"/>
                                         </StackPanel>
 
-                                        <TextBlock Text="Select a file in commit list to open version controls."
+                                        <TextBlock Text="{loc:Tr explorer.select_file_for_version_controls}"
                                                    Opacity="0.75"
                                                    IsVisible="{Binding HasNoSelectedItem}"
                                                    TextWrapping="Wrap"/>
@@ -515,11 +516,11 @@
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                             <StackPanel Spacing="2">
-                                <TextBlock Text="Diff preview" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr explorer.diff_preview}" FontSize="20" FontWeight="SemiBold"/>
                                 <TextBlock Classes="muted" Text="{Binding DiffPreviewTitle}" TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                             <Button Grid.Column="1"
-                                    Content="Close"
+                                    Content="{loc:Tr common.close}"
                                     Command="{Binding CloseDiffPreviewMenuCommand}"
                                     Classes="subtle"/>
                         </Grid>
@@ -528,7 +529,7 @@
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
                             <TextBlock Grid.Row="0"
-                                       Text="Building preview..."
+                                       Text="{loc:Tr compare.building_preview}"
                                        Opacity="0.75"
                                        IsVisible="{Binding IsDiffPreviewLoading}"/>
 
@@ -538,13 +539,13 @@
                                   IsVisible="{Binding HasDiffPreviewRows}">
                                 <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
                                     <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
-                                        <TextBlock Text="+ Added" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr diff.added}" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
                                     </Border>
                                     <Border Grid.Column="1" Background="#4A2530" CornerRadius="8" Padding="8,4">
-                                        <TextBlock Text="- Removed" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr diff.removed}" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
                                     </Border>
                                     <Border Grid.Column="2" Background="#213B5A" CornerRadius="8" Padding="8,4">
-                                        <TextBlock Text="= Context" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
+                                        <TextBlock Text="{loc:Tr diff.context}" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
                                     </Border>
                                 </Grid>
 
@@ -552,10 +553,10 @@
                                     <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                         <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
                                             <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="Before" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
                                             </Border>
                                             <Border Grid.Column="1" Background="#1E3858" CornerRadius="8" Padding="8,4">
-                                                <TextBlock Text="After" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
                                             </Border>
                                         </Grid>
 
@@ -632,7 +633,7 @@
                             </Grid>
 
                             <TextBlock Grid.Row="1"
-                                       Text="Diff data is unavailable for this file/version pair."
+                                       Text="{loc:Tr explorer.diff_data_unavailable}"
                                        Opacity="0.75"
                                        IsVisible="{Binding HasNoDiffPreviewRows}"/>
                         </Grid>
@@ -642,3 +643,7 @@
         </Grid>
     </Grid>
 </UserControl>
+
+
+
+

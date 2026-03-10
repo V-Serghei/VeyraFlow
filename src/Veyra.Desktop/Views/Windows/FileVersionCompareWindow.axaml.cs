@@ -1,8 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Platform;
 using Avalonia.Threading;
+using Veyra.Desktop.Views;
 using Veyra.Desktop.ViewModels.Windows;
 
 namespace Veyra.Desktop.Views.Windows;
@@ -21,8 +21,25 @@ public partial class FileVersionCompareWindow : Window
 
         Opened += (_, _) =>
         {
-            FitToWorkingArea();
-            Dispatcher.UIThread.Post(FitToWorkingArea, DispatcherPriority.Background);
+            var ownerWindow = Owner as Window;
+
+            WindowLayoutHelper.FitToWorkingArea(
+                this,
+                ownerWindow,
+                maximizeToWorkingArea: false,
+                frameMarginDip: 24d,
+                minWidthDip: 640d,
+                minHeightDip: 480d);
+
+            Dispatcher.UIThread.Post(() =>
+                WindowLayoutHelper.FitToWorkingArea(
+                    this,
+                    ownerWindow,
+                    maximizeToWorkingArea: false,
+                    frameMarginDip: 24d,
+                    minWidthDip: 640d,
+                    minHeightDip: 480d),
+                DispatcherPriority.Background);
 
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
@@ -123,79 +140,4 @@ public partial class FileVersionCompareWindow : Window
 
     private static bool AreClose(double left, double right)
         => System.Math.Abs(left - right) < 0.5d;
-
-    private void FitToWorkingArea()
-    {
-        var screen = ResolveTargetScreen();
-        if (screen is null)
-            return;
-
-        var workingArea = screen.WorkingArea;
-        var scaling = screen.Scaling > 0 ? screen.Scaling : 1d;
-        const double frameMargin = 24d;
-
-        var availableWidth = System.Math.Max(640d, (workingArea.Width / scaling) - frameMargin);
-        var availableHeight = System.Math.Max(480d, (workingArea.Height / scaling) - frameMargin);
-
-        if (MinWidth > availableWidth)
-            MinWidth = availableWidth;
-
-        if (MinHeight > availableHeight)
-            MinHeight = availableHeight;
-
-        var requestedWidth = Width > 0 ? Width : availableWidth;
-        var requestedHeight = Height > 0 ? Height : availableHeight;
-
-        var targetWidth = System.Math.Max(MinWidth, System.Math.Min(requestedWidth, availableWidth));
-        var targetHeight = System.Math.Max(MinHeight, System.Math.Min(requestedHeight, availableHeight));
-
-        Width = targetWidth;
-        Height = targetHeight;
-        MaxWidth = double.PositiveInfinity;
-        MaxHeight = double.PositiveInfinity;
-
-        var targetWidthPx = System.Math.Max(1, (int)System.Math.Round(targetWidth * scaling));
-        var targetHeightPx = System.Math.Max(1, (int)System.Math.Round(targetHeight * scaling));
-
-        var desiredX = workingArea.X + (workingArea.Width - targetWidthPx) / 2;
-        var desiredY = workingArea.Y + (workingArea.Height - targetHeightPx) / 2;
-
-        if (Owner is Window owner)
-        {
-            var ownerWidthDip = owner.Bounds.Width > 0 ? owner.Bounds.Width : owner.Width;
-            var ownerHeightDip = owner.Bounds.Height > 0 ? owner.Bounds.Height : owner.Height;
-
-            var ownerWidthPx = System.Math.Max(1, (int)System.Math.Round(ownerWidthDip * scaling));
-            var ownerHeightPx = System.Math.Max(1, (int)System.Math.Round(ownerHeightDip * scaling));
-
-            desiredX = owner.Position.X + (ownerWidthPx - targetWidthPx) / 2;
-            desiredY = owner.Position.Y + (ownerHeightPx - targetHeightPx) / 2;
-        }
-
-        var minX = workingArea.X;
-        var minY = workingArea.Y;
-        var maxX = workingArea.X + System.Math.Max(0, workingArea.Width - targetWidthPx);
-        var maxY = workingArea.Y + System.Math.Max(0, workingArea.Height - targetHeightPx);
-
-        Position = new PixelPoint(Clamp(desiredX, minX, maxX), Clamp(desiredY, minY, maxY));
-    }
-
-    private Screen? ResolveTargetScreen()
-    {
-        if (Owner is Window owner)
-            return Screens.ScreenFromVisual(owner) ?? Screens.ScreenFromVisual(this) ?? Screens.Primary;
-
-        return Screens.ScreenFromVisual(this) ?? Screens.Primary;
-    }
-
-    private static int Clamp(int value, int min, int max)
-    {
-        if (value < min)
-            return min;
-
-        if (value > max)
-            return max;
-
-        return value;
-    }
 }

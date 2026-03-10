@@ -4,4 +4,5 @@ public sealed record AuthSessionDto(
     long CloudUserId,
     string Username,
     string AccessToken,
-    bool IsNewUser);
+    bool IsNewUser,
+    DateTime? AccessTokenExpiresAtUtc = null);
