@@ -23,7 +23,8 @@
                 </StackPanel>
 
                 <WrapPanel Grid.Column="2" Orientation="Horizontal" ItemHeight="34" ItemWidth="150" Margin="0,2,0,0">
-                    <Button Content="Sync index"
+                    <Button Content="Rescan files"
+                            ToolTip.Tip="Scan repository folder and refresh index"
                             Command="{Binding RescanCommand}"
                             Classes="subtle"
                             IsEnabled="{Binding CanRunScanActions}"/>
@@ -169,16 +170,17 @@
                             <Border Classes="panel" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="Repository tools" FontWeight="SemiBold"/>
+                                    <TextBlock Classes="muted" Text="Maintenance actions for damaged or out-of-sync data." FontSize="11" TextWrapping="Wrap"/>
                                     <WrapPanel Orientation="Horizontal" ItemWidth="170" ItemHeight="34">
-                                        <Button Content="Repair data" AutomationProperties.Name="Repair repository data"
+                                        <Button Content="Fix missing data" ToolTip.Tip="Verify blocks and repair missing artifacts (including cloud restore if configured)" AutomationProperties.Name="Repair repository data"
                                                 Command="{Binding RepairRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
-                                        <Button Content="Reindex data" AutomationProperties.Name="Reindex repository data"
+                                        <Button Content="Rebuild index" ToolTip.Tip="Rescan all files and rebuild repository index and snapshots" AutomationProperties.Name="Reindex repository data"
                                                 Command="{Binding ReindexRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
-                                        <Button Content="Relink graph" AutomationProperties.Name="Relink repository graph"
+                                        <Button Content="Repair links" ToolTip.Tip="Rebuild snapshot-to-file version links without rescanning file content" AutomationProperties.Name="Relink repository graph"
                                                 Command="{Binding RelinkRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
                                                 Classes="subtle"/>
@@ -284,10 +286,6 @@
                                 <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Compare with previous"
-                                            Command="{Binding CompareSelectedWithPreviousCommand}"
-                                            IsEnabled="{Binding CanRunDiffForSelectedVersion}"
-                                            Classes="subtle"/>
                                     <Button Content="Compare in window"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
@@ -486,10 +484,6 @@
                                 <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Compare with previous"
-                                            Command="{Binding CompareSelectedWithPreviousCommand}"
-                                            IsEnabled="{Binding CanRunDiffForSelectedVersion}"
-                                            Classes="subtle"/>
                                     <Button Content="Compare in window"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
@@ -648,4 +642,3 @@
         </Grid>
     </Grid>
 </UserControl>
-

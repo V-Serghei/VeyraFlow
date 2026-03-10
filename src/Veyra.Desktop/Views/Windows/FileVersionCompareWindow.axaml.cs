@@ -17,6 +17,7 @@ public partial class FileVersionCompareWindow : Window
 
         Opened += (_, _) =>
         {
+            FitToWorkingArea();
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
 
@@ -97,4 +98,44 @@ public partial class FileVersionCompareWindow : Window
 
     private static bool AreClose(double left, double right)
         => System.Math.Abs(left - right) < 0.5d;
+
+    private void FitToWorkingArea()
+    {
+        var screen = Screens.ScreenFromVisual(this) ?? Screens.Primary;
+        if (screen is null)
+            return;
+
+        var workingArea = screen.WorkingArea;
+        const double frameMargin = 32d;
+
+        var availableWidth = System.Math.Max(640d, workingArea.Width - frameMargin);
+        var availableHeight = System.Math.Max(480d, workingArea.Height - frameMargin);
+
+        if (MinWidth > availableWidth)
+            MinWidth = availableWidth;
+
+        if (MinHeight > availableHeight)
+            MinHeight = availableHeight;
+
+        var requestedWidth = Width > 0 ? Width : availableWidth;
+        var requestedHeight = Height > 0 ? Height : availableHeight;
+
+        var targetWidth = System.Math.Min(requestedWidth, availableWidth);
+        var targetHeight = System.Math.Min(requestedHeight, availableHeight);
+
+        if (targetWidth < MinWidth)
+            targetWidth = availableWidth;
+
+        if (targetHeight < MinHeight)
+            targetHeight = availableHeight;
+
+        Width = targetWidth;
+        Height = targetHeight;
+        MaxWidth = availableWidth;
+        MaxHeight = availableHeight;
+
+        var x = workingArea.X + System.Math.Max(0, (int)System.Math.Round((workingArea.Width - targetWidth) / 2d));
+        var y = workingArea.Y + System.Math.Max(0, (int)System.Math.Round((workingArea.Height - targetHeight) / 2d));
+        Position = new PixelPoint(x, y);
+    }
 }

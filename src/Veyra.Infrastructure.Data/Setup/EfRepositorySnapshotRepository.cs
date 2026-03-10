@@ -909,7 +909,7 @@ public sealed class EfRepositorySnapshotRepository(
                                               || baselineSize.Value.Height != currentSize.Value.Height),
                     SimilarityRatio: byteSimilarity);
 
-                var imageMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "image");
+                var imageMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "image", extension);
                 imageTempToCleanup = null;
                 return PendingFileDiffPreviewDto.FromImage(
                     relativePath: normalizedPath,
@@ -918,7 +918,7 @@ public sealed class EfRepositorySnapshotRepository(
                     imagePreview: imagePreview);
             }
 
-            var binaryMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "binary");
+            var binaryMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "binary", extension);
             return PendingFileDiffPreviewDto.FromBinary(
                 relativePath: normalizedPath,
                 message: binaryMessage,
@@ -1060,7 +1060,7 @@ public sealed class EfRepositorySnapshotRepository(
                                               || baselineSize.Value.Height != currentSize.Value.Height),
                     SimilarityRatio: byteSimilarity);
 
-                var imageMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "image");
+                var imageMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "image", extension);
                 keepLeftTemp = true;
                 keepRightTemp = true;
 
@@ -1071,7 +1071,7 @@ public sealed class EfRepositorySnapshotRepository(
                     imagePreview: imagePreview);
             }
 
-            var binaryMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "binary");
+            var binaryMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "binary", extension);
             return PendingFileDiffPreviewDto.FromBinary(
                 relativePath: left.RelativePath,
                 message: binaryMessage,
@@ -1508,6 +1508,18 @@ public sealed class EfRepositorySnapshotRepository(
         return normalized is not null && ImageExtensions.Contains(normalized);
     }
 
+    private static bool IsOfficeDocumentExtension(string? extension)
+    {
+        var normalized = NormalizeExtension(extension);
+        if (normalized is null)
+            return false;
+
+        return string.Equals(normalized, ".doc", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(normalized, ".docx", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(normalized, ".rtf", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(normalized, ".odt", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? NormalizeExtension(string? extension)
     {
         if (string.IsNullOrWhiteSpace(extension))
@@ -1677,26 +1689,39 @@ public sealed class EfRepositorySnapshotRepository(
         IReadOnlyList<StoredFileBlockDto> baselineBlocks,
         CurrentFileDigest currentDigest)
     {
-        var baselineManagedHashes = baselineBlocks
-            .Select(b => b.BlockHashBlake3)
-            .Where(h => h.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase))
+        var baselineComparableHashes = baselineBlocks
+            .Select(b => NormalizeBlockHashForComparison(b.BlockHashBlake3))
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var currentComparableHashes = currentDigest.ChunkHashes
+            .Select(NormalizeBlockHashForComparison)
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
+            .ToList();
 
         var currentBlockCount = currentDigest.ChunkHashes.Count;
         var sharedBlockCount = 0;
 
-        if (baselineManagedHashes.Count > 0 && currentBlockCount > 0)
+        if (baselineComparableHashes.Count > 0 && currentComparableHashes.Count > 0)
         {
-            foreach (var hash in currentDigest.ChunkHashes)
+            foreach (var hash in currentComparableHashes)
             {
-                if (baselineManagedHashes.Contains(hash))
+                if (baselineComparableHashes.Contains(hash))
                     sharedBlockCount++;
             }
         }
 
-        var dedupRatio = baselineManagedHashes.Count > 0 && currentBlockCount > 0
-            ? (double)sharedBlockCount / currentBlockCount
-            : (double?)null;
+        double? dedupRatio;
+        if (currentBlockCount == 0)
+        {
+            dedupRatio = baselineBlocks.Count == 0 ? 1d : 0d;
+        }
+        else
+        {
+            dedupRatio = (double)sharedBlockCount / currentBlockCount;
+        }
 
         var changedBlockRatio = dedupRatio.HasValue
             ? 1d - dedupRatio.Value
@@ -1715,6 +1740,22 @@ public sealed class EfRepositorySnapshotRepository(
             DedupRatio: dedupRatio,
             ChangedBlockRatio: changedBlockRatio,
             ByteSimilarityRatio: null);
+    }
+
+    private static string? NormalizeBlockHashForComparison(string? hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+            return null;
+
+        var normalized = hash.Trim();
+
+        if (normalized.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized["msha256:".Length..];
+        else if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized["sha256:".Length..];
+
+        normalized = normalized.Trim();
+        return normalized.Length == 0 ? null : normalized.ToLowerInvariant();
     }
 
     private static async Task<CurrentFileDigest> ComputeCurrentFileDigestAsync(
@@ -1966,7 +2007,8 @@ public sealed class EfRepositorySnapshotRepository(
     private static string BuildBinaryPreviewMessage(
         string relativePath,
         PendingBinaryDiffSummaryDto summary,
-        string previewType)
+        string previewType,
+        string? extension = null)
     {
         var kind = string.Equals(previewType, "image", StringComparison.OrdinalIgnoreCase)
             ? "image"
@@ -1986,7 +2028,11 @@ public sealed class EfRepositorySnapshotRepository(
             ? $", byte similarity {summary.ByteSimilarityRatio.Value * 100:F1}%"
             : string.Empty;
 
-        return $"{relativePath}   {kind}   {sizeLabel}   {dedupLabel}, {changedLabel}{similarityLabel}";
+        var officeHint = IsOfficeDocumentExtension(extension)
+            ? "   Office/Word files are currently compared as binary. Text diff for DOC/DOCX is planned but not enabled yet."
+            : string.Empty;
+
+        return $"{relativePath}   {kind}   {sizeLabel}   {dedupLabel}, {changedLabel}{similarityLabel}{officeHint}";
     }
 
     private static string FormatSignedBytes(long value)
@@ -2136,19 +2182,3 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

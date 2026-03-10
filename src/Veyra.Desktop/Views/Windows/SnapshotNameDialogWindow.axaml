@@ -8,11 +8,13 @@
         x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
         x:Name="Root"
         x:DataType="windows:SnapshotNameDialogWindowViewModel"
-        Width="1280"
-        Height="840"
-        MinWidth="1020"
-        MinHeight="700"
+        Width="1220"
+        Height="790"
+        MinWidth="900"
+        MinHeight="620"
         WindowStartupLocation="CenterOwner"
+        SystemDecorations="Full"
+        CanResize="True"
         Background="{DynamicResource VeyraCanvasBrush}"
         Foreground="{DynamicResource VeyraTextPrimaryBrush}"
         Title="Create Snapshot">
@@ -401,4 +403,3 @@
         </Border>
     </Grid>
 </Window>
-
