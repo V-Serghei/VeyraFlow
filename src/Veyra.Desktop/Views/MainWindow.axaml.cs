@@ -28,7 +28,7 @@ public partial class MainWindow : Window
 
         var workingArea = screen.WorkingArea;
         var scaling = screen.Scaling > 0 ? screen.Scaling : 1d;
-        const double frameMargin = 24d;
+        const double frameMargin = 0d;
 
         var availableWidth = System.Math.Max(720d, (workingArea.Width / scaling) - frameMargin);
         var availableHeight = System.Math.Max(560d, (workingArea.Height / scaling) - frameMargin);
@@ -39,16 +39,17 @@ public partial class MainWindow : Window
         if (MinHeight > availableHeight)
             MinHeight = availableHeight;
 
-        var requestedWidth = Width > 0 ? Width : availableWidth;
-        var requestedHeight = Height > 0 ? Height : availableHeight;
+        // Main window should open fully inside working area.
+        var requestedWidth = availableWidth;
+        var requestedHeight = availableHeight;
 
         var targetWidth = System.Math.Max(MinWidth, System.Math.Min(requestedWidth, availableWidth));
         var targetHeight = System.Math.Max(MinHeight, System.Math.Min(requestedHeight, availableHeight));
 
         Width = targetWidth;
         Height = targetHeight;
-        MaxWidth = availableWidth;
-        MaxHeight = availableHeight;
+        MaxWidth = double.PositiveInfinity;
+        MaxHeight = double.PositiveInfinity;
 
         var targetWidthPx = System.Math.Max(1, (int)System.Math.Round(targetWidth * scaling));
         var targetHeightPx = System.Math.Max(1, (int)System.Math.Round(targetHeight * scaling));

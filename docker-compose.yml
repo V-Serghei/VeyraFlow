@@ -29,8 +29,11 @@ services:
     environment:
       HTTP_PORT: ${HTTP_PORT:-8080}
       DB_DSN: postgres://${POSTGRES_USER:-veyra}:${POSTGRES_PASSWORD:-veyra_dev_password}@db:5432/${POSTGRES_DB:-veyraflow}?sslmode=disable
+      BLOCK_STORE_DIR: ${BLOCK_STORE_DIR:-/var/lib/veyra/blocks}
     ports:
       - "8080:8080"
+    volumes:
+      - cloud-blocks:/var/lib/veyra/blocks
 
   seq:
     image: datalust/seq:2024.1
@@ -45,4 +48,6 @@ services:
 
 volumes:
   pgdata:
+  cloud-blocks:
   seq-data:
+

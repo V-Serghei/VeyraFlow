@@ -19,7 +19,7 @@ public sealed class EfRepositorySnapshotRepository(
     ILogger<EfRepositorySnapshotRepository> log) : IRepositorySnapshotRepository
 {
     private const int PrecomputedDiffMaxLines = 4000;
-    private const int CurrentTextDiffStorageFormatVersion = 2;
+    private const int CurrentTextDiffStorageFormatVersion = 3;
     private const int ManagedPreviewChunkSize = 64 * 1024;
 
     private static readonly JsonSerializerOptions DiffJsonOptions = new();

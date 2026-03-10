@@ -151,8 +151,8 @@ public partial class FileVersionCompareWindow : Window
 
         Width = targetWidth;
         Height = targetHeight;
-        MaxWidth = availableWidth;
-        MaxHeight = availableHeight;
+        MaxWidth = double.PositiveInfinity;
+        MaxHeight = double.PositiveInfinity;
 
         var targetWidthPx = System.Math.Max(1, (int)System.Math.Round(targetWidth * scaling));
         var targetHeightPx = System.Math.Max(1, (int)System.Math.Round(targetHeight * scaling));

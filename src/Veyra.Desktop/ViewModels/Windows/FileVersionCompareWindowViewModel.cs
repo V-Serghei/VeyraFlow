@@ -12,9 +12,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Commands.Repository;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries.Repository;
+using Veyra.Application.Services.Diff;
+using Veyra.Desktop.Services.Preview;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 
 namespace Veyra.Desktop.ViewModels.Windows;
@@ -23,12 +26,15 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 {
     private readonly IMediator _mediator;
     private readonly ILogger<FileVersionCompareWindowViewModel> _log;
+    private readonly INativeWordCompareService _nativeWordCompare;
     private readonly List<string> _tempPreviewFiles = [];
-
+    private const string WordDesktopRequiredMessage =
+        "Microsoft Word Desktop is not installed. For high-fidelity document comparison, install Microsoft Word 2016, 2019, 2021, or Microsoft 365 Desktop.";
     private CancellationTokenSource? _previewCts;
     private FileVersionCompareListItemViewModel? _leftVersion;
     private FileVersionCompareListItemViewModel? _rightVersion;
     private bool _isWordSemanticPreview;
+    private bool _isOpeningNativeWordCompare;
 
     private int _repositoryId;
     private string _repositoryPath = string.Empty;
@@ -117,10 +123,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public ObservableCollection<WordSemanticDiffRowViewModel> WordPreviewRows { get; } = [];
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
 
-    public FileVersionCompareWindowViewModel(IMediator mediator, ILogger<FileVersionCompareWindowViewModel> log)
+    public FileVersionCompareWindowViewModel(
+        IMediator mediator,
+        ILogger<FileVersionCompareWindowViewModel> log,
+        INativeWordCompareService nativeWordCompare)
     {
         _mediator = mediator;
         _log = log;
+        _nativeWordCompare = nativeWordCompare;
 
         Versions.CollectionChanged += OnVersionsCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
@@ -144,15 +154,16 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
     public bool HasFullFilePreviewContent
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
-    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
+    public bool ShowDiffRowsPanel => HasPreviewRows && !IsWordRichPreview;
     public bool ShowWordDiffRowsPanel => !IsFullFilePreviewMode && IsWordRichPreview && HasWordPreviewRows;
-    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
-    public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
-    public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
+    public bool ShowNoDiffPreviewMessage => !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
+    public bool ShowFullFilePreviewPanel => false;
+    public bool ShowNoFullFilePreviewMessage => false;
     public bool CanToggleFullFilePreview
         => !IsPreviewLoading
            && PreviewKind == PendingDiffPreviewKind.Text
            && !_isWordSemanticPreview
+           && !IsNativeWordPreferredForPreview
            && _leftVersion is not null
            && _rightVersion is not null;
 
@@ -160,6 +171,26 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public string WrapToggleLabel => IsWrapEnabled ? "Wrap: On" : "Wrap: Off";
 
     public bool CanOpenSourceFileOnDisk => GetSourceFilePath() is not null;
+
+    public bool IsWordDocument => WordSemanticProjection.IsWordOoxmlExtension(Path.GetExtension(_relativePath));
+
+    public bool CanOpenNativeWordCompare
+        => IsWordDocument
+           && !_isOpeningNativeWordCompare
+           && _leftVersion is not null
+           && _rightVersion is not null
+           && _leftVersion.FileVersionId != _rightVersion.FileVersionId;
+
+    public bool IsNativeWordPreferredForPreview
+        => IsWordDocument && _nativeWordCompare.IsAvailable;
+
+    public string NativeWordCompareHint => _nativeWordCompare.IsAvailable
+        ? "Open selected versions in Microsoft Word compare window (content-focused)."
+        : WordDesktopRequiredMessage;
+
+    public string NativeWordCompareFormattingHint => _nativeWordCompare.IsAvailable
+        ? "Open selected versions in Microsoft Word compare window with formatting/style changes."
+        : WordDesktopRequiredMessage;
 
     public async Task InitializeAsync(
         int repositoryId,
@@ -249,6 +280,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         {
             IsVersionListLoading = false;
             OnPropertyChanged(nameof(CanOpenSourceFileOnDisk));
+            OnPropertyChanged(nameof(IsWordDocument));
+            OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+            OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
+            OnPropertyChanged(nameof(NativeWordCompareHint));
+            OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
         }
     }
 
@@ -272,6 +308,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         ApplySelectionStates();
         RefreshSelectedPairSummary();
+        OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+        OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
 
         _ = LoadPreviewAsync(CancellationToken.None);
     }
@@ -291,6 +329,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (IsFullFilePreviewMode)
         {
             IsFullFilePreviewMode = false;
+            await LoadPreviewAsync(CancellationToken.None);
             return;
         }
 
@@ -340,6 +379,91 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         });
     }
 
+    [RelayCommand]
+    private Task OpenNativeWordCompareAsync()
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.ContentOnly, "Opened native Microsoft Word compare (content-focused).");
+
+    [RelayCommand]
+    private Task OpenNativeWordCompareWithFormattingAsync()
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.WithFormatting, "Opened native Microsoft Word compare with formatting changes.");
+
+    private async Task OpenNativeWordCompareCoreAsync(NativeWordCompareOptions options, string successMessage)
+    {
+        if (!CanOpenNativeWordCompare || _leftVersion is null || _rightVersion is null)
+            return;
+
+        if (!_nativeWordCompare.IsAvailable)
+        {
+            ErrorMessage = WordDesktopRequiredMessage;
+            return;
+        }
+
+        ErrorMessage = null;
+        _isOpeningNativeWordCompare = true;
+        OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+
+        var extension = Path.GetExtension(_relativePath);
+        var tempRoot = Path.Combine(Path.GetTempPath(), "VeyraFlow", "word-native-compare");
+        Directory.CreateDirectory(tempRoot);
+        CleanupStaleNativeWordCompareFiles(tempRoot);
+
+        var leftTemp = Path.Combine(tempRoot, $"{Guid.NewGuid():N}.left{extension}");
+        var rightTemp = Path.Combine(tempRoot, $"{Guid.NewGuid():N}.right{extension}");
+
+        try
+        {
+            var leftRestore = await _mediator.Send(new RestoreFileVersionCommand(
+                _repositoryId,
+                _relativePath,
+                _leftVersion.FileVersionId,
+                OverwriteCurrent: false,
+                TargetPath: leftTemp));
+
+            if (!leftRestore.Success || string.IsNullOrWhiteSpace(leftRestore.Value))
+            {
+                ErrorMessage = leftRestore.Error ?? "Failed to prepare LEFT version for Word compare.";
+                return;
+            }
+
+            var rightRestore = await _mediator.Send(new RestoreFileVersionCommand(
+                _repositoryId,
+                _relativePath,
+                _rightVersion.FileVersionId,
+                OverwriteCurrent: false,
+                TargetPath: rightTemp));
+
+            if (!rightRestore.Success || string.IsNullOrWhiteSpace(rightRestore.Value))
+            {
+                ErrorMessage = rightRestore.Error ?? "Failed to prepare RIGHT version for Word compare.";
+                return;
+            }
+
+            var launch = await _nativeWordCompare.OpenCompareAsync(leftRestore.Value, rightRestore.Value, options);
+            if (!launch.Success)
+            {
+                ErrorMessage = launch.ErrorMessage ?? "Unable to open Microsoft Word native compare.";
+                return;
+            }
+
+            PreviewSummary = successMessage;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to open native Word compare. RepositoryId {RepositoryId}. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _repositoryId,
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+
+            ErrorMessage = "Failed to launch Microsoft Word compare.";
+        }
+        finally
+        {
+            _isOpeningNativeWordCompare = false;
+            OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+            OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
+        }
+    }
     [RelayCommand]
     private void Close()
     {
@@ -407,6 +531,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     WordPreviewRows.Clear();
                     _isWordSemanticPreview = false;
 
+                    if (IsNativeWordPreferredForPreview)
+                    {
+                        PreviewKind = PendingDiffPreviewKind.Text;
+                        PreviewSummary = "For DOCX/DOCM use native Microsoft Word compare for accurate layout, tables, images and formatting.";
+                        break;
+                    }
+
                     if (WordSemanticDiffBuilder.LooksLikeSemanticWordDiff(preview.Lines))
                     {
                         foreach (var row in WordSemanticDiffBuilder.Build(preview.Lines, preview.Hunks))
@@ -414,7 +545,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
                         _isWordSemanticPreview = WordPreviewRows.Count > 0;
                     }
-                    else
+
+                    // Fallback to regular diff rows when semantic Word layout is too noisy or empty.
+                    if (!_isWordSemanticPreview)
                     {
                         foreach (var row in BuildDiffPreviewRows(preview.Lines, preview.Hunks))
                             PreviewRows.Add(row);
@@ -474,46 +607,64 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (_leftVersion is null || _rightVersion is null)
             return;
 
+        const int fullFilePreviewMaxLines = 200_000;
+
         IsFullFilePreviewMode = true;
+        IsPreviewLoading = true;
         IsFullFilePreviewLoading = true;
         FullPreviewBeforeText = string.Empty;
         FullPreviewAfterText = string.Empty;
-        FullPreviewSummary = "Loading full file text...";
+        FullPreviewSummary = string.Empty;
+        PreviewSummary = $"Loading full diff for {_leftVersion.VersionName} -> {_rightVersion.VersionName}...";
+        ErrorMessage = null;
 
-        var beforeTask = _mediator.Send(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000));
-        var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000));
-
-        await Task.WhenAll(beforeTask, afterTask);
-
-        var before = beforeTask.Result;
-        var after = afterTask.Result;
-
-        var summaryParts = new List<string>(2);
-
-        if (before.Success && before.Value is not null)
+        try
         {
-            FullPreviewBeforeText = before.Value.Content;
-            summaryParts.Add($"Before: {FormatBytes(before.Value.SizeBytes)}{(before.Value.IsTruncated ? " (truncated)" : string.Empty)}");
-        }
-        else
-        {
-            FullPreviewBeforeText = before.Error ?? "Before version text is unavailable.";
-            summaryParts.Add("Before unavailable");
-        }
+            var result = await _mediator.Send(
+                new GetFileVersionDiffPreviewQuery(_leftVersion.FileVersionId, _rightVersion.FileVersionId, fullFilePreviewMaxLines));
 
-        if (after.Success && after.Value is not null)
-        {
-            FullPreviewAfterText = after.Value.Content;
-            summaryParts.Add($"After: {FormatBytes(after.Value.SizeBytes)}{(after.Value.IsTruncated ? " (truncated)" : string.Empty)}");
-        }
-        else
-        {
-            FullPreviewAfterText = after.Error ?? "After version text is unavailable.";
-            summaryParts.Add("After unavailable");
-        }
+            if (!result.Success || result.Value is null)
+            {
+                ResetPreview(result.Error ?? "Unable to build full-file diff preview.");
+                IsFullFilePreviewMode = true;
+                return;
+            }
 
-        FullPreviewSummary = string.Join(" | ", summaryParts);
-        IsFullFilePreviewLoading = false;
+            var preview = result.Value;
+            if (!preview.IsAvailable || preview.Kind != PendingDiffPreviewKind.Text)
+            {
+                ResetPreview(preview.Message);
+                IsFullFilePreviewMode = true;
+                return;
+            }
+
+            PreviewRows.Clear();
+            WordPreviewRows.Clear();
+            _isWordSemanticPreview = false;
+
+            foreach (var row in BuildDiffPreviewRows(preview.Lines, []))
+                PreviewRows.Add(row);
+
+            PreviewKind = PendingDiffPreviewKind.Text;
+            PreviewSummary = preview.IsTruncated
+                ? $"Full-file mode loaded with limit {fullFilePreviewMaxLines:N0} lines (truncated)."
+                : $"Full-file mode: {preview.AddedLines} added / {preview.RemovedLines} removed.";
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load full-file diff preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+            ResetPreview("Unable to load full-file diff preview.");
+            IsFullFilePreviewMode = true;
+        }
+        finally
+        {
+            IsPreviewLoading = false;
+            IsFullFilePreviewLoading = false;
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        }
     }
 
     private void ApplySelectionStates()
@@ -838,6 +989,23 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         return fullPath;
     }
 
+    private static void CleanupStaleNativeWordCompareFiles(string directoryPath)
+    {
+        try
+        {
+            var threshold = DateTime.UtcNow.AddDays(-2);
+            foreach (var file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly))
+            {
+                var createdAtUtc = File.GetCreationTimeUtc(file);
+                if (createdAtUtc < threshold)
+                    TryDelete(file);
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private static string NormalizeRelativePath(string value)
         => value.Replace('\\', '/').Trim();
 
@@ -939,3 +1107,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoPreviewContent));
     }
 }
+
+
+
+
+
+

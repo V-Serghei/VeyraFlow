@@ -112,7 +112,7 @@
                                        Classes="muted"
                                        IsVisible="{Binding IsPreviewLoading}"/>
 
-                            <Grid Grid.Row="1" RowDefinitions="*,Auto,Auto" RowSpacing="8">
+                            <Grid Grid.Row="1" RowDefinitions="*,Auto,Auto,Auto" RowSpacing="8">
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding ShowDiffRowsPanel}">
                                     <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                         <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
@@ -244,10 +244,10 @@
                                         </Grid>
                                     </Grid>
                                 </Border>
-                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding ShowWordDiffRowsPanel}" Background="#F6F9FD" BorderBrush="#D5DEE8">
+                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding ShowWordDiffRowsPanel}" Background="#E7EDF5" BorderBrush="#C8D4E2">
                                     <Grid RowDefinitions="Auto,*" RowSpacing="10">
                                         <Grid Grid.Row="0" ColumnDefinitions="*,8,*" ColumnSpacing="0">
-                                            <Border Grid.Column="0" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="8,4">
+                                            <Border Grid.Column="0" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="10,6">
                                                 <TextBlock Text="Before version" FontWeight="SemiBold" Foreground="#1F2937"/>
                                             </Border>
                                             <GridSplitter Grid.Column="1"
@@ -257,86 +257,160 @@
                                                           ResizeBehavior="PreviousAndNext"
                                                           HorizontalAlignment="Stretch"
                                                           VerticalAlignment="Stretch"/>
-                                            <Border Grid.Column="2" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="8,4">
+                                            <Border Grid.Column="2" Background="#F3F6FA" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="10,6">
                                                 <TextBlock Text="After version" FontWeight="SemiBold" Foreground="#1F2937"/>
                                             </Border>
                                         </Grid>
 
                                         <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
-                                            <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="6">
-                                                <ScrollViewer x:Name="LeftWordDiffScrollViewer"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Auto"
-                                                              ScrollChanged="OnLeftWordDiffScrollChanged">
-                                                    <ItemsControl ItemsSource="{Binding WordPreviewRows}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
-                                                                <StackPanel Spacing="4" Margin="0,0,0,2">
+                                            <Border Grid.Column="0" Background="#DFE7F1" BorderBrush="#C8D4E2" BorderThickness="1" CornerRadius="8" Padding="10">
+                                                <Border Background="#FFFFFF" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Padding="48,40,48,48">
+                                                    <ScrollViewer x:Name="LeftWordDiffScrollViewer"
+                                                                  VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Auto"
+                                                                  ScrollChanged="OnLeftWordDiffScrollChanged">
+                                                        <ItemsControl ItemsSource="{Binding WordPreviewRows}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
                                                                     <Border IsVisible="{Binding IsContentRow}"
+                                                                            Margin="{Binding LeftParagraphMargin}"
                                                                             Background="{Binding LeftBackground}"
                                                                             BorderBrush="{Binding LeftBorderBrush}"
-                                                                            BorderThickness="1"
-                                                                            CornerRadius="4"
-                                                                            Padding="8,5"
+                                                                            BorderThickness="{Binding LeftBorderThickness}"
+                                                                            CornerRadius="0"
+                                                                            Padding="0"
                                                                             ToolTip.Tip="{Binding LeftStyleTooltip}"
                                                                             ToolTip.IsEnabled="{Binding HasLeftStyleTooltip}">
-                                                                        <TextBlock Text="{Binding LeftText}"
-                                                                                   xml:space="preserve"
-                                                                                   FontFamily="{Binding LeftFontFamily}"
-                                                                                   FontSize="{Binding LeftFontSize}"
-                                                                                   FontWeight="{Binding LeftFontWeight}"
-                                                                                   FontStyle="{Binding LeftFontStyle}"
-                                                                                   Foreground="{Binding LeftForeground}"
-                                                                                   Background="{Binding LeftTextBackground}"
-                                                                                   TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                        <StackPanel Spacing="0" HorizontalAlignment="{Binding LeftParagraphAlignment}">
+                                                                            <ItemsControl IsVisible="{Binding UseLeftTokenLayout}"
+                                                                                          ItemsSource="{Binding LeftTokens}">
+                                                                                <ItemsControl.ItemsPanel>
+                                                                                    <ItemsPanelTemplate>
+                                                                                        <WrapPanel Orientation="Horizontal"/>
+                                                                                    </ItemsPanelTemplate>
+                                                                                </ItemsControl.ItemsPanel>
+                                                                                <ItemsControl.ItemTemplate>
+                                                                                    <DataTemplate x:DataType="windows:WordSemanticTokenViewModel">
+                                                                                        <Border Background="{Binding Background}"
+                                                                                                BorderBrush="{Binding OutlineBrush}"
+                                                                                                BorderThickness="{Binding OutlineThickness}"
+                                                                                                CornerRadius="1"
+                                                                                                Padding="0"
+                                                                                                ToolTip.Tip="{Binding Tooltip}"
+                                                                                                ToolTip.IsEnabled="{Binding HasTooltip}">
+                                                                                            <TextBlock Text="{Binding Text}"
+                                                                                                       xml:space="preserve"
+                                                                                                       FontFamily="{Binding FontFamily}"
+                                                                                                       FontSize="{Binding FontSize}"
+                                                                                                       FontWeight="{Binding FontWeight}"
+                                                                                                       FontStyle="{Binding FontStyle}"
+                                                                                                        Foreground="{Binding Foreground}"
+                                                                                                        TextDecorations="{Binding TextDecorations}"
+                                                                                                        Margin="{Binding TextMargin}"/>
+                                                                                        </Border>
+                                                                                    </DataTemplate>
+                                                                                </ItemsControl.ItemTemplate>
+                                                                            </ItemsControl>
+
+                                                                            <TextBlock IsVisible="{Binding UseLeftPlainLayout}"
+                                                                                       Text="{Binding LeftText}"
+                                                                                       xml:space="preserve"
+                                                                                       FontFamily="{Binding LeftFontFamily}"
+                                                                                       FontSize="{Binding LeftFontSize}"
+                                                                                       FontWeight="{Binding LeftFontWeight}"
+                                                                                       FontStyle="{Binding LeftFontStyle}"
+                                                                                       Foreground="{Binding LeftForeground}"
+                                                                                       Background="{Binding LeftTextBackground}"
+                                                                                       TextDecorations="{Binding LeftTextDecorations}"
+                                                                                       Margin="{Binding LeftTextMargin}"
+                                                                                       TextAlignment="{Binding LeftTextAlignment}"
+                                                                                       TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                        </StackPanel>
                                                                     </Border>
-                                                                </StackPanel>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </ScrollViewer>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </Border>
                                             </Border>
 
                                             <GridSplitter Grid.Column="1"
                                                           Width="8"
-                                                          Background="#D5DEE8"
+                                                          Background="#C8D4E2"
                                                           ResizeDirection="Columns"
                                                           ResizeBehavior="PreviousAndNext"
                                                           HorizontalAlignment="Stretch"
                                                           VerticalAlignment="Stretch"/>
 
-                                            <Border Grid.Column="2" Background="#FFFFFF" BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="8" Padding="6">
-                                                <ScrollViewer x:Name="RightWordDiffScrollViewer"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Auto"
-                                                              ScrollChanged="OnRightWordDiffScrollChanged">
-                                                    <ItemsControl ItemsSource="{Binding WordPreviewRows}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
-                                                                <StackPanel Spacing="4" Margin="0,0,0,2">
+                                            <Border Grid.Column="2" Background="#DFE7F1" BorderBrush="#C8D4E2" BorderThickness="1" CornerRadius="8" Padding="10">
+                                                <Border Background="#FFFFFF" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="8" Padding="48,40,48,48">
+                                                    <ScrollViewer x:Name="RightWordDiffScrollViewer"
+                                                                  VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Auto"
+                                                                  ScrollChanged="OnRightWordDiffScrollChanged">
+                                                        <ItemsControl ItemsSource="{Binding WordPreviewRows}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
                                                                     <Border IsVisible="{Binding IsContentRow}"
+                                                                            Margin="{Binding RightParagraphMargin}"
                                                                             Background="{Binding RightBackground}"
                                                                             BorderBrush="{Binding RightBorderBrush}"
-                                                                            BorderThickness="1"
-                                                                            CornerRadius="4"
-                                                                            Padding="8,5"
+                                                                            BorderThickness="{Binding RightBorderThickness}"
+                                                                            CornerRadius="0"
+                                                                            Padding="0"
                                                                             ToolTip.Tip="{Binding RightStyleTooltip}"
                                                                             ToolTip.IsEnabled="{Binding HasRightStyleTooltip}">
-                                                                        <TextBlock Text="{Binding RightText}"
-                                                                                   xml:space="preserve"
-                                                                                   FontFamily="{Binding RightFontFamily}"
-                                                                                   FontSize="{Binding RightFontSize}"
-                                                                                   FontWeight="{Binding RightFontWeight}"
-                                                                                   FontStyle="{Binding RightFontStyle}"
-                                                                                   Foreground="{Binding RightForeground}"
-                                                                                   Background="{Binding RightTextBackground}"
-                                                                                   TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                        <StackPanel Spacing="0" HorizontalAlignment="{Binding RightParagraphAlignment}">
+                                                                            <ItemsControl IsVisible="{Binding UseRightTokenLayout}"
+                                                                                          ItemsSource="{Binding RightTokens}">
+                                                                                <ItemsControl.ItemsPanel>
+                                                                                    <ItemsPanelTemplate>
+                                                                                        <WrapPanel Orientation="Horizontal"/>
+                                                                                    </ItemsPanelTemplate>
+                                                                                </ItemsControl.ItemsPanel>
+                                                                                <ItemsControl.ItemTemplate>
+                                                                                    <DataTemplate x:DataType="windows:WordSemanticTokenViewModel">
+                                                                                        <Border Background="{Binding Background}"
+                                                                                                BorderBrush="{Binding OutlineBrush}"
+                                                                                                BorderThickness="{Binding OutlineThickness}"
+                                                                                                CornerRadius="1"
+                                                                                                Padding="0"
+                                                                                                ToolTip.Tip="{Binding Tooltip}"
+                                                                                                ToolTip.IsEnabled="{Binding HasTooltip}">
+                                                                                            <TextBlock Text="{Binding Text}"
+                                                                                                       xml:space="preserve"
+                                                                                                       FontFamily="{Binding FontFamily}"
+                                                                                                       FontSize="{Binding FontSize}"
+                                                                                                       FontWeight="{Binding FontWeight}"
+                                                                                                       FontStyle="{Binding FontStyle}"
+                                                                                                        Foreground="{Binding Foreground}"
+                                                                                                        TextDecorations="{Binding TextDecorations}"
+                                                                                                        Margin="{Binding TextMargin}"/>
+                                                                                        </Border>
+                                                                                    </DataTemplate>
+                                                                                </ItemsControl.ItemTemplate>
+                                                                            </ItemsControl>
+
+                                                                            <TextBlock IsVisible="{Binding UseRightPlainLayout}"
+                                                                                       Text="{Binding RightText}"
+                                                                                       xml:space="preserve"
+                                                                                       FontFamily="{Binding RightFontFamily}"
+                                                                                       FontSize="{Binding RightFontSize}"
+                                                                                       FontWeight="{Binding RightFontWeight}"
+                                                                                       FontStyle="{Binding RightFontStyle}"
+                                                                                       Foreground="{Binding RightForeground}"
+                                                                                       Background="{Binding RightTextBackground}"
+                                                                                       TextDecorations="{Binding RightTextDecorations}"
+                                                                                       Margin="{Binding RightTextMargin}"
+                                                                                       TextAlignment="{Binding RightTextAlignment}"
+                                                                                       TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                        </StackPanel>
                                                                     </Border>
-                                                                </StackPanel>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </ScrollViewer>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </Border>
                                             </Border>
                                         </Grid>
                                     </Grid>
@@ -432,6 +506,13 @@
                                            Classes="muted"
                                            IsVisible="{Binding ShowNoFullFilePreviewMessage}"
                                            TextWrapping="Wrap"/>
+                                <TextBlock Grid.Row="3"
+                                           Text="For the most accurate DOC/DOCX comparison (layout, tables, images, and styles), use Open Word compare in Microsoft Word Desktop (2016/2019/2021/Microsoft 365)."
+                                           Classes="muted"
+                                           FontSize="11"
+                                           Opacity="0.82"
+                                           IsVisible="{Binding IsWordDocument}"
+                                           TextWrapping="Wrap"/>
                             </Grid>
                         </Grid>
                     </Grid>
@@ -458,6 +539,18 @@
                             Command="{Binding ToggleFullFilePreviewCommand}"
                             IsEnabled="{Binding CanToggleFullFilePreview}"
                             IsVisible="{Binding CanToggleFullFilePreview}"/>
+                    <Button Content="Open Word compare"
+                            ToolTip.Tip="{Binding NativeWordCompareHint}"
+                            Classes="subtle"
+                            Command="{Binding OpenNativeWordCompareCommand}"
+                            IsVisible="{Binding IsWordDocument}"
+                            IsEnabled="{Binding CanOpenNativeWordCompare}"/>
+                    <Button Content="Word compare + styles"
+                            ToolTip.Tip="{Binding NativeWordCompareFormattingHint}"
+                            Classes="subtle"
+                            Command="{Binding OpenNativeWordCompareWithFormattingCommand}"
+                            IsVisible="{Binding IsWordDocument}"
+                            IsEnabled="{Binding CanOpenNativeWordCompare}"/>
                     <Button Content="Open file"
                             ToolTip.Tip="Open current file from repository folder"
                             Classes="subtle"
@@ -474,3 +567,5 @@
         </Border>
     </Grid>
 </Window>
+
+

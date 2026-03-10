@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Text;
 using System.Xml.Linq;
 
@@ -69,20 +73,15 @@ public static class WordSemanticProjection
             {
                 runIndex++;
                 var runStyle = BuildRunStyleToken(run, w, styleMap);
+                var effectiveStyle = MergeRunAndParagraphStyle(runStyle, paragraphStyle);
                 var runText = ExtractRunText(run, w);
 
                 if (string.IsNullOrEmpty(runText))
-                {
-                    var marker = ExtractRunObjectMarker(run, w);
-                    if (marker is null)
-                        continue;
-
-                    runText = marker;
-                }
+                    continue;
 
                 hasContent = true;
                 var normalizedText = NormalizeText(runText);
-                lines.Add($"{paragraphLabel}.R{runIndex:D4} [r:{runStyle}] {normalizedText}");
+                lines.Add($"{paragraphLabel}.R{runIndex:D4} [r:{effectiveStyle}] {normalizedText}");
             }
 
             if (!hasContent)
@@ -90,6 +89,72 @@ public static class WordSemanticProjection
         }
 
         return lines;
+    }
+
+    private static string MergeRunAndParagraphStyle(string runStyle, string paragraphStyle)
+    {
+        var merged = new List<string>(12);
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var token in SplitStyleTokens(runStyle))
+        {
+            if (string.IsNullOrWhiteSpace(token) || string.Equals(token, "default", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            merged.Add(token);
+            var key = GetStyleTokenKey(token);
+            if (!string.IsNullOrWhiteSpace(key))
+                keys.Add(key);
+        }
+
+        foreach (var token in SplitStyleTokens(paragraphStyle))
+        {
+            if (string.IsNullOrWhiteSpace(token) || string.Equals(token, "default", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var normalized = token;
+            var key = GetStyleTokenKey(token);
+
+            if (string.Equals(key, "style", StringComparison.OrdinalIgnoreCase))
+            {
+                var idx = token.IndexOf('=');
+                var value = idx >= 0 && idx < token.Length - 1 ? token[(idx + 1)..].Trim() : string.Empty;
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
+
+                key = "pstyle";
+                normalized = "pstyle=" + value;
+            }
+
+            if (string.IsNullOrWhiteSpace(key) || keys.Contains(key))
+                continue;
+
+            merged.Add(normalized);
+            keys.Add(key);
+        }
+
+        return merged.Count == 0 ? "default" : string.Join(';', merged);
+    }
+
+    private static IEnumerable<string> SplitStyleTokens(string style)
+    {
+        if (string.IsNullOrWhiteSpace(style))
+            yield break;
+
+        foreach (var token in style.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            yield return token;
+    }
+
+    private static string GetStyleTokenKey(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return string.Empty;
+
+        var idx = token.IndexOf('=');
+        if (idx <= 0)
+            return token.Trim().ToLowerInvariant();
+
+        return token[..idx].Trim().ToLowerInvariant();
     }
 
     private static Dictionary<string, string> ReadStyleMap(ZipArchive archive)
@@ -125,7 +190,7 @@ public static class WordSemanticProjection
         if (pPr is null)
             return "default";
 
-        var tokens = new List<string>(6);
+        var tokens = new List<string>(8);
 
         var pStyleId = pPr.Element(w + "pStyle")?.Attribute(w + "val")?.Value;
         if (!string.IsNullOrWhiteSpace(pStyleId))
@@ -172,7 +237,7 @@ public static class WordSemanticProjection
         if (rPr is null)
             return "default";
 
-        var tokens = new List<string>(10);
+        var tokens = new List<string>(14);
 
         var runStyleId = rPr.Element(w + "rStyle")?.Attribute(w + "val")?.Value;
         if (!string.IsNullOrWhiteSpace(runStyleId))
@@ -258,26 +323,10 @@ public static class WordSemanticProjection
             }
 
             if (element.Name == w + "noBreakHyphen" || element.Name == w + "softHyphen")
-            {
                 buffer.Append('-');
-            }
         }
 
         return buffer.ToString();
-    }
-
-    private static string? ExtractRunObjectMarker(XElement run, XNamespace w)
-    {
-        if (run.Descendants(w + "drawing").Any() || run.Descendants(w + "pict").Any())
-            return "<object:drawing>";
-
-        if (run.Descendants(w + "fldChar").Any())
-            return "<object:field>";
-
-        if (run.Descendants(w + "object").Any())
-            return "<object:ole>";
-
-        return null;
     }
 
     private static bool IsOn(XElement? element, XNamespace w)
@@ -290,6 +339,9 @@ public static class WordSemanticProjection
             return true;
 
         if (raw == "0")
+            return false;
+
+        if (string.Equals(raw, "none", StringComparison.OrdinalIgnoreCase))
             return false;
 
         if (bool.TryParse(raw, out var parsed))
@@ -308,11 +360,31 @@ public static class WordSemanticProjection
         if (string.IsNullOrEmpty(value))
             return "<empty>";
 
-        return value
+        var normalized = value
             .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Replace("\n", "↵", StringComparison.Ordinal)
-            .Replace("\t", "⇥", StringComparison.Ordinal);
+            .Replace('\r', '\n');
+
+        var sb = new StringBuilder(normalized.Length + 16);
+        foreach (var ch in normalized)
+        {
+            switch (ch)
+            {
+                case '\\':
+                    sb.Append("\\\\");
+                    break;
+                case '\n':
+                    sb.Append("\\n");
+                    break;
+                case '\t':
+                    sb.Append("\\t");
+                    break;
+                default:
+                    sb.Append(ch);
+                    break;
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static string? NormalizeExtension(string? extension)

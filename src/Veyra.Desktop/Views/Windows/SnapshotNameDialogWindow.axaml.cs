@@ -129,8 +129,8 @@ public partial class SnapshotNameDialogWindow : Window
 
         Width = targetWidth;
         Height = targetHeight;
-        MaxWidth = availableWidth;
-        MaxHeight = availableHeight;
+        MaxWidth = double.PositiveInfinity;
+        MaxHeight = double.PositiveInfinity;
 
         var x = workingArea.X + System.Math.Max(0, (int)System.Math.Round((workingArea.Width - targetWidth) / 2d));
         var y = workingArea.Y + System.Math.Max(0, (int)System.Math.Round((workingArea.Height - targetHeight) / 2d));
