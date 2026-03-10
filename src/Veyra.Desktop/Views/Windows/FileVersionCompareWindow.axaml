@@ -13,7 +13,7 @@
         Height="820"
         MinWidth="960"
         MinHeight="620"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="Manual"
         SystemDecorations="Full"
         CanResize="True"
         Background="{DynamicResource VeyraCanvasBrush}"
@@ -34,8 +34,8 @@
 
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Auto">
-            <Grid ColumnDefinitions="320,*" ColumnSpacing="12" MinWidth="980">
+                      HorizontalScrollBarVisibility="Disabled">
+            <Grid ColumnDefinitions="320,*" ColumnSpacing="12">
                 <Border Grid.Column="0" Classes="dialog-shell">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
                         <TextBlock Grid.Row="0" Text="Version history" FontSize="18" FontWeight="SemiBold"/>
@@ -131,17 +131,23 @@
                                         </Grid>
 
                                         <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="8">
-                                            <Grid Grid.Row="0" ColumnDefinitions="*,6,*">
+                                            <Grid Grid.Row="0" ColumnDefinitions="*,8,*">
                                                 <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
                                                     <TextBlock Text="Before" FontWeight="SemiBold"/>
                                                 </Border>
-                                                <Border Grid.Column="1" Background="#4E6F8E" Margin="2,2"/>
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
                                                 <Border Grid.Column="2" Background="#1E3858" CornerRadius="8" Padding="8,4">
                                                     <TextBlock Text="After" FontWeight="SemiBold"/>
                                                 </Border>
                                             </Grid>
 
-                                            <Grid Grid.Row="1" ColumnDefinitions="*,6,*" ColumnSpacing="0">
+                                            <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
                                                 <ScrollViewer x:Name="LeftDiffScrollViewer"
                                                               Grid.Column="0"
                                                               VerticalScrollBarVisibility="Auto"
@@ -184,8 +190,13 @@
                                                         </ItemsControl.ItemTemplate>
                                                     </ItemsControl>
                                                 </ScrollViewer>
-
-                                                <Border Grid.Column="1" Background="#4E6F8E" Margin="2,0"/>
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
 
                                                 <ScrollViewer x:Name="RightDiffScrollViewer"
                                                               Grid.Column="2"
@@ -234,16 +245,184 @@
                                     </Grid>
                                 </Border>
 
+                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding ShowWordDiffRowsPanel}">
+                                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+                                            <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
+                                                <TextBlock Text="+ Added" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
+                                            </Border>
+                                            <Border Grid.Column="1" Background="#4A2530" CornerRadius="8" Padding="8,4">
+                                                <TextBlock Text="- Removed" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
+                                            </Border>
+                                            <Border Grid.Column="2" Background="#30455F" CornerRadius="8" Padding="8,4">
+                                                <TextBlock Text="~ Modified" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
+                                            </Border>
+                                            <Border Grid.Column="3" Background="#4D3D73" CornerRadius="8" Padding="8,4">
+                                                <TextBlock Text="S Style" Foreground="#E4CCFF" FontWeight="SemiBold" FontSize="11"/>
+                                            </Border>
+                                            <Border Grid.Column="4" Background="#213B5A" CornerRadius="8" Padding="8,4">
+                                                <TextBlock Text="= Context" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="8">
+                                            <Grid Grid.Row="0" ColumnDefinitions="*,8,*">
+                                                <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
+                                                    <TextBlock Text="Before (styled)" FontWeight="SemiBold"/>
+                                                </Border>
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
+                                                <Border Grid.Column="2" Background="#1E3858" CornerRadius="8" Padding="8,4">
+                                                    <TextBlock Text="After (styled)" FontWeight="SemiBold"/>
+                                                </Border>
+                                            </Grid>
+
+                                            <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
+                                                <ScrollViewer x:Name="LeftWordDiffScrollViewer"
+                                                              Grid.Column="0"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              HorizontalScrollBarVisibility="Auto"
+                                                              ScrollChanged="OnLeftWordDiffScrollChanged">
+                                                    <ItemsControl ItemsSource="{Binding WordPreviewRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
+                                                                <StackPanel Spacing="4" Margin="0,0,0,4">
+                                                                    <Border IsVisible="{Binding IsHunkHeader}"
+                                                                            Background="#1A3654"
+                                                                            BorderBrush="#4A78A8"
+                                                                            BorderThickness="1"
+                                                                            CornerRadius="8"
+                                                                            Padding="8,4">
+                                                                        <TextBlock Text="{Binding HunkHeader}"
+                                                                                   FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                                   FontSize="12"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#A8D1FF"/>
+                                                                    </Border>
+
+                                                                    <Border IsVisible="{Binding IsContentRow}"
+                                                                            Classes="diff-side"
+                                                                            Background="{Binding LeftBackground}"
+                                                                            ClipToBounds="True"
+                                                                            ToolTip.Tip="{Binding LeftStyleTooltip}">
+                                                                        <Grid ColumnDefinitions="58,16,24,*,Auto" ColumnSpacing="6">
+                                                                            <TextBlock Grid.Column="0" Text="{Binding LeftLineNumber}" Foreground="#A4BEDA" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12"/>
+                                                                            <TextBlock Grid.Column="1" Text="{Binding LeftMarker}" Foreground="{Binding LeftMarkerForeground}" FontWeight="Bold" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12"/>
+                                                                            <TextBlock Grid.Column="2" Text="{Binding KindBadge}" Foreground="#9BC1E8" FontWeight="SemiBold" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="11"/>
+                                                                            <Border Grid.Column="3" Background="{Binding LeftTextBackground}" CornerRadius="4" Padding="4,1">
+                                                                                <TextBlock Text="{Binding LeftText}"
+                                                                                           FontFamily="{Binding LeftFontFamily}"
+                                                                                           FontSize="{Binding LeftFontSize}"
+                                                                                           FontWeight="{Binding LeftFontWeight}"
+                                                                                           FontStyle="{Binding LeftFontStyle}"
+                                                                                           Foreground="{Binding LeftForeground}"
+                                                                                           TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                            </Border>
+                                                                            <Border Grid.Column="4"
+                                                                                    Background="#2F4868"
+                                                                                    CornerRadius="6"
+                                                                                    Padding="6,2"
+                                                                                    IsVisible="{Binding HasLeftStyleTag}"
+                                                                                    ToolTip.Tip="{Binding LeftStyleTooltip}">
+                                                                                <TextBlock Text="{Binding LeftStyleTag}" FontSize="10" FontWeight="SemiBold" Foreground="#CFE6FF"/>
+                                                                            </Border>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
+
+                                                <ScrollViewer x:Name="RightWordDiffScrollViewer"
+                                                              Grid.Column="2"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              HorizontalScrollBarVisibility="Auto"
+                                                              ScrollChanged="OnRightWordDiffScrollChanged">
+                                                    <ItemsControl ItemsSource="{Binding WordPreviewRows}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="windows:WordSemanticDiffRowViewModel">
+                                                                <StackPanel Spacing="4" Margin="0,0,0,4">
+                                                                    <Border IsVisible="{Binding IsHunkHeader}"
+                                                                            Background="#1A3654"
+                                                                            BorderBrush="#4A78A8"
+                                                                            BorderThickness="1"
+                                                                            CornerRadius="8"
+                                                                            Padding="8,4">
+                                                                        <TextBlock Text="{Binding HunkHeader}"
+                                                                                   FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                                   FontSize="12"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="#A8D1FF"/>
+                                                                    </Border>
+
+                                                                    <Border IsVisible="{Binding IsContentRow}"
+                                                                            Classes="diff-side"
+                                                                            Background="{Binding RightBackground}"
+                                                                            ClipToBounds="True"
+                                                                            ToolTip.Tip="{Binding RightStyleTooltip}">
+                                                                        <Grid ColumnDefinitions="58,16,24,*,Auto" ColumnSpacing="6">
+                                                                            <TextBlock Grid.Column="0" Text="{Binding RightLineNumber}" Foreground="#A4BEDA" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12"/>
+                                                                            <TextBlock Grid.Column="1" Text="{Binding RightMarker}" Foreground="{Binding RightMarkerForeground}" FontWeight="Bold" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12"/>
+                                                                            <TextBlock Grid.Column="2" Text="{Binding KindBadge}" Foreground="#9BC1E8" FontWeight="SemiBold" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="11"/>
+                                                                            <Border Grid.Column="3" Background="{Binding RightTextBackground}" CornerRadius="4" Padding="4,1">
+                                                                                <TextBlock Text="{Binding RightText}"
+                                                                                           FontFamily="{Binding RightFontFamily}"
+                                                                                           FontSize="{Binding RightFontSize}"
+                                                                                           FontWeight="{Binding RightFontWeight}"
+                                                                                           FontStyle="{Binding RightFontStyle}"
+                                                                                           Foreground="{Binding RightForeground}"
+                                                                                           TextWrapping="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                            </Border>
+                                                                            <Border Grid.Column="4"
+                                                                                    Background="#2F4868"
+                                                                                    CornerRadius="6"
+                                                                                    Padding="6,2"
+                                                                                    IsVisible="{Binding HasRightStyleTag}"
+                                                                                    ToolTip.Tip="{Binding RightStyleTooltip}">
+                                                                                <TextBlock Text="{Binding RightStyleTag}" FontSize="10" FontWeight="SemiBold" Foreground="#CFE6FF"/>
+                                                                            </Border>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding ShowFullFilePreviewPanel}">
                                     <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                         <TextBlock Grid.Row="0" Text="{Binding FullPreviewSummary}" Classes="muted" TextWrapping="Wrap"/>
-                                        <Grid Grid.Row="1" ColumnDefinitions="*,6,*" ColumnSpacing="0">
+                                        <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
                                             <Border Grid.Column="0" Background="#12273D" CornerRadius="8" Padding="6" ClipToBounds="True">
                                                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                                                     <TextBlock Text="{Binding FullPreviewBeforeText}" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12" TextWrapping="{Binding IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
                                                 </ScrollViewer>
                                             </Border>
-                                            <Border Grid.Column="1" Background="#4E6F8E" Margin="2,0"/>
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
                                             <Border Grid.Column="2" Background="#12273D" CornerRadius="8" Padding="6" ClipToBounds="True">
                                                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                                                     <TextBlock Text="{Binding FullPreviewAfterText}" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="12" TextWrapping="{Binding IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
@@ -279,14 +458,20 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
 
-                                        <Grid Grid.Row="1" ColumnDefinitions="*,6,*" ColumnSpacing="0" IsVisible="{Binding HasImagePreviews}">
+                                        <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0" IsVisible="{Binding HasImagePreviews}">
                                             <Border Grid.Column="0" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
                                                 <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                     <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
                                                     <Image Grid.Row="1" Source="{Binding LeftImagePreview}" Stretch="Uniform"/>
                                                 </Grid>
                                             </Border>
-                                            <Border Grid.Column="1" Background="#4E6F8E" Margin="2,0"/>
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="#4E6F8E"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
                                             <Border Grid.Column="2" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
                                                 <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                     <TextBlock Grid.Row="0" Text="{Binding RightImageCaption}" FontWeight="SemiBold"/>

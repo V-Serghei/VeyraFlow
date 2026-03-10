@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Application.Services.Diff;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -356,7 +357,7 @@ public sealed class EfRepositorySnapshotRepository(
 
                     if (previousVersionForDiff is { Id: > 0, IsDeletionMarker: false }
                         && latestHasBlocks
-                        && IsTextExtension(current.Extension))
+                        && CanBuildTextDiff(current.Extension))
                     {
                         pendingPrecomputedDiffs.Add(new PendingTextDiffPrecompute(
                             path,
@@ -827,7 +828,7 @@ public sealed class EfRepositorySnapshotRepository(
                 baselineBlocks,
                 currentDigest);
 
-            if (IsTextExtension(extension))
+            if (CanBuildTextDiff(extension))
             {
                 var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-diff-preview");
                 Directory.CreateDirectory(tempDir);
@@ -845,9 +846,10 @@ public sealed class EfRepositorySnapshotRepository(
                         await contentStore.RestoreFileAsync(baselineBlocks, baselineTemp, true, ct);
                     }
 
-                    var computed = await diffEngine.BuildDiffAsync(
+                    var computed = await BuildDiffForPreviewAsync(
                         baselineTemp,
                         absolutePath,
+                        extension,
                         normalizedMaxLines,
                         ct);
 
@@ -981,17 +983,12 @@ public sealed class EfRepositorySnapshotRepository(
             await RestoreVersionToTempAsync(left, leftTemp, ct);
             await RestoreVersionToTempAsync(right, rightTemp, ct);
 
-            var currentDigest = await ComputeCurrentFileDigestAsync(rightTemp, ManagedPreviewChunkSize, ct);
             var byteSimilarity = await ComputeByteSimilarityAsync(leftTemp, rightTemp, ct);
 
-            var binarySummary = BuildPendingBinarySummary(
-                left.SizeBytes,
-                left.ContentHashSha256,
-                left.Blocks,
-                currentDigest)
+            var binarySummary = BuildVersionBinarySummary(left, right)
                 with { ByteSimilarityRatio = byteSimilarity };
 
-            if (IsTextExtension(extension))
+            if (CanBuildTextDiff(extension))
             {
                 var cached = await GetStoredTextDiffAsync(left.FileVersionId, right.FileVersionId, normalizedMaxLines, ct);
                 TextDiffResultDto diff;
@@ -1002,7 +999,7 @@ public sealed class EfRepositorySnapshotRepository(
                 }
                 else
                 {
-                    var computed = await diffEngine.BuildDiffAsync(leftTemp, rightTemp, normalizedMaxLines, ct);
+                    var computed = await BuildDiffForPreviewAsync(leftTemp, rightTemp, extension, normalizedMaxLines, ct);
                     diff = new TextDiffResultDto(
                         left.RelativePath,
                         left.FileVersionId,
@@ -1447,7 +1444,7 @@ public sealed class EfRepositorySnapshotRepository(
                 if (!HasStoredContent(left) || !HasStoredContent(right))
                     continue;
 
-                if (!IsTextExtension(right.Extension))
+                if (!CanBuildTextDiff(right.Extension))
                     continue;
 
                 var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "diff-precompute");
@@ -1461,7 +1458,8 @@ public sealed class EfRepositorySnapshotRepository(
                     await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);
                     await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct);
 
-                    var computed = await diffEngine.BuildDiffAsync(leftTemp, rightTemp, PrecomputedDiffMaxLines, ct);
+                    var extension = NormalizeExtension(right.Extension) ?? NormalizeExtension(left.Extension);
+                    var computed = await BuildDiffForPreviewAsync(leftTemp, rightTemp, extension, PrecomputedDiffMaxLines, ct);
 
                     var diff = new TextDiffResultDto(
                         item.RelativePath,
@@ -1495,6 +1493,11 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static bool HasStoredContent(FileVersionRestoreDto data)
         => data.SizeBytes == 0 || data.Blocks.Count > 0;
+
+    private static bool CanBuildTextDiff(string? extension)
+    {
+        return IsTextExtension(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
+    }
 
     private static bool IsTextExtension(string? extension)
     {
@@ -1561,6 +1564,38 @@ public sealed class EfRepositorySnapshotRepository(
         await contentStore.RestoreFileAsync(version.Blocks, tempPath, true, ct);
     }
 
+    private async Task<TextDiffComputationDto> BuildDiffForPreviewAsync(
+        string leftPath,
+        string rightPath,
+        string? extension,
+        int maxLines,
+        CancellationToken ct)
+    {
+        if (!WordSemanticProjection.IsWordOoxmlExtension(extension))
+            return await diffEngine.BuildDiffAsync(leftPath, rightPath, maxLines, ct);
+
+        var semanticTempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "word-diff-preview");
+        Directory.CreateDirectory(semanticTempDir);
+
+        var leftSemanticTemp = Path.Combine(semanticTempDir, $"{Guid.NewGuid():N}.left.txt");
+        var rightSemanticTemp = Path.Combine(semanticTempDir, $"{Guid.NewGuid():N}.right.txt");
+
+        try
+        {
+            var leftSemanticLines = WordSemanticProjection.ExtractSemanticLines(leftPath);
+            var rightSemanticLines = WordSemanticProjection.ExtractSemanticLines(rightPath);
+
+            await File.WriteAllLinesAsync(leftSemanticTemp, leftSemanticLines, Encoding.UTF8, ct);
+            await File.WriteAllLinesAsync(rightSemanticTemp, rightSemanticLines, Encoding.UTF8, ct);
+
+            return await diffEngine.BuildDiffAsync(leftSemanticTemp, rightSemanticTemp, maxLines, ct);
+        }
+        finally
+        {
+            TryDelete(leftSemanticTemp);
+            TryDelete(rightSemanticTemp);
+        }
+    }
     private static string FormatVersionPreviewError(Exception ex)
     {
         var text = ex.ToString();
@@ -1689,43 +1724,12 @@ public sealed class EfRepositorySnapshotRepository(
         IReadOnlyList<StoredFileBlockDto> baselineBlocks,
         CurrentFileDigest currentDigest)
     {
-        var baselineComparableHashes = baselineBlocks
-            .Select(b => NormalizeBlockHashForComparison(b.BlockHashBlake3))
-            .Where(h => !string.IsNullOrWhiteSpace(h))
-            .Select(h => h!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var currentComparableHashes = currentDigest.ChunkHashes
-            .Select(NormalizeBlockHashForComparison)
-            .Where(h => !string.IsNullOrWhiteSpace(h))
-            .Select(h => h!)
-            .ToList();
-
-        var currentBlockCount = currentDigest.ChunkHashes.Count;
-        var sharedBlockCount = 0;
-
-        if (baselineComparableHashes.Count > 0 && currentComparableHashes.Count > 0)
-        {
-            foreach (var hash in currentComparableHashes)
-            {
-                if (baselineComparableHashes.Contains(hash))
-                    sharedBlockCount++;
-            }
-        }
-
-        double? dedupRatio;
-        if (currentBlockCount == 0)
-        {
-            dedupRatio = baselineBlocks.Count == 0 ? 1d : 0d;
-        }
-        else
-        {
-            dedupRatio = (double)sharedBlockCount / currentBlockCount;
-        }
-
-        var changedBlockRatio = dedupRatio.HasValue
-            ? 1d - dedupRatio.Value
-            : (double?)null;
+        var baselineFamily = GetDominantHashFamily(baselineBlocks.Select(b => b.BlockHashBlake3));
+        var (sharedBlockCount, dedupRatio, changedBlockRatio) = ComputeBlockOverlapMetrics(
+            baselineBlocks.Select(b => b.BlockHashBlake3),
+            currentDigest.ChunkHashes,
+            baselineFamily,
+            currentDigest.HashFamily);
 
         return new PendingBinaryDiffSummaryDto(
             BaselineSizeBytes: baselineSizeBytes,
@@ -1735,27 +1739,196 @@ public sealed class EfRepositorySnapshotRepository(
             CurrentHashSha256: currentDigest.Sha256,
             ChunkSizeBytes: ManagedPreviewChunkSize,
             BaselineBlockCount: baselineBlocks.Count,
-            CurrentBlockCount: currentBlockCount,
+            CurrentBlockCount: currentDigest.ChunkHashes.Count,
             SharedBlockCount: sharedBlockCount,
             DedupRatio: dedupRatio,
             ChangedBlockRatio: changedBlockRatio,
             ByteSimilarityRatio: null);
     }
 
-    private static string? NormalizeBlockHashForComparison(string? hash)
+    private static PendingBinaryDiffSummaryDto BuildVersionBinarySummary(
+        FileVersionRestoreDto baselineVersion,
+        FileVersionRestoreDto currentVersion)
+    {
+        var baselineFamily = GetDominantHashFamily(baselineVersion.Blocks.Select(b => b.BlockHashBlake3));
+        var currentFamily = GetDominantHashFamily(currentVersion.Blocks.Select(b => b.BlockHashBlake3));
+
+        var (sharedBlockCount, dedupRatio, changedBlockRatio) = ComputeBlockOverlapMetrics(
+            baselineVersion.Blocks.Select(b => b.BlockHashBlake3),
+            currentVersion.Blocks.Select(b => b.BlockHashBlake3),
+            baselineFamily,
+            currentFamily);
+
+        return new PendingBinaryDiffSummaryDto(
+            BaselineSizeBytes: baselineVersion.SizeBytes,
+            CurrentSizeBytes: currentVersion.SizeBytes,
+            SizeDeltaBytes: currentVersion.SizeBytes - baselineVersion.SizeBytes,
+            BaselineHashSha256: baselineVersion.ContentHashSha256,
+            CurrentHashSha256: currentVersion.ContentHashSha256,
+            ChunkSizeBytes: ManagedPreviewChunkSize,
+            BaselineBlockCount: baselineVersion.Blocks.Count,
+            CurrentBlockCount: currentVersion.Blocks.Count,
+            SharedBlockCount: sharedBlockCount,
+            DedupRatio: dedupRatio,
+            ChangedBlockRatio: changedBlockRatio,
+            ByteSimilarityRatio: null);
+    }
+
+    private static (int SharedBlockCount, double? DedupRatio, double? ChangedBlockRatio) ComputeBlockOverlapMetrics(
+        IEnumerable<string?> baselineHashes,
+        IEnumerable<string?> currentHashes,
+        BlockHashFamily baselineFamily,
+        BlockHashFamily currentFamily)
+    {
+        var baselineList = baselineHashes
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
+            .ToList();
+
+        var currentList = currentHashes
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
+            .ToList();
+
+        var baselineBlockCount = baselineList.Count;
+        var currentBlockCount = currentList.Count;
+
+        if (currentBlockCount == 0)
+        {
+            var dedup = baselineBlockCount == 0 ? 1d : 0d;
+            return (0, dedup, 1d - dedup);
+        }
+
+        if (baselineBlockCount == 0)
+            return (0, 0d, 1d);
+
+        if (!CanCompareHashFamilies(baselineFamily, currentFamily))
+            return (0, null, null);
+
+        var normalizedBaseline = baselineList
+            .Select(h => NormalizeBlockHashForComparison(h, baselineFamily))
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var normalizedCurrent = currentList
+            .Select(h => NormalizeBlockHashForComparison(h, currentFamily))
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h!)
+            .ToList();
+
+        if (normalizedBaseline.Count == 0 || normalizedCurrent.Count == 0)
+            return (0, null, null);
+
+        var sharedBlockCount = 0;
+        foreach (var hash in normalizedCurrent)
+        {
+            if (normalizedBaseline.Contains(hash))
+                sharedBlockCount++;
+        }
+
+        var dedupRatio = (double)sharedBlockCount / normalizedCurrent.Count;
+        return (sharedBlockCount, dedupRatio, 1d - dedupRatio);
+    }
+
+    private static bool CanCompareHashFamilies(BlockHashFamily baselineFamily, BlockHashFamily currentFamily)
+    {
+        if (baselineFamily == BlockHashFamily.Unknown || currentFamily == BlockHashFamily.Unknown)
+            return false;
+
+        return baselineFamily == currentFamily;
+    }
+
+    private static BlockHashFamily GetDominantHashFamily(IEnumerable<string?> hashes)
+    {
+        var sha256Count = 0;
+        var nativeCount = 0;
+
+        foreach (var hash in hashes)
+        {
+            switch (DetectHashFamily(hash))
+            {
+                case BlockHashFamily.Sha256:
+                    sha256Count++;
+                    break;
+                case BlockHashFamily.Native:
+                    nativeCount++;
+                    break;
+            }
+        }
+
+        if (sha256Count > 0 && nativeCount == 0)
+            return BlockHashFamily.Sha256;
+
+        if (nativeCount > 0 && sha256Count == 0)
+            return BlockHashFamily.Native;
+
+        return BlockHashFamily.Unknown;
+    }
+
+    private static BlockHashFamily DetectHashFamily(string? hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+            return BlockHashFamily.Unknown;
+
+        var normalized = hash.Trim();
+
+        if (normalized.StartsWith("sha256-", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+        {
+            return BlockHashFamily.Sha256;
+        }
+
+        if (normalized.StartsWith("blake3:", StringComparison.OrdinalIgnoreCase) || IsHexHash64(normalized))
+            return BlockHashFamily.Native;
+
+        return BlockHashFamily.Unknown;
+    }
+
+    private static string? NormalizeBlockHashForComparison(string? hash, BlockHashFamily family)
     {
         if (string.IsNullOrWhiteSpace(hash))
             return null;
 
         var normalized = hash.Trim();
 
-        if (normalized.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase))
-            normalized = normalized["msha256:".Length..];
-        else if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
-            normalized = normalized["sha256:".Length..];
+        if (family is BlockHashFamily.Sha256 or BlockHashFamily.Unknown)
+        {
+            if (normalized.StartsWith("sha256-", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized["sha256-".Length..];
+            else if (normalized.StartsWith("msha256:", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized["msha256:".Length..];
+            else if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized["sha256:".Length..];
+        }
+
+        if (family is BlockHashFamily.Native or BlockHashFamily.Unknown)
+        {
+            if (normalized.StartsWith("blake3:", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized["blake3:".Length..];
+        }
 
         normalized = normalized.Trim();
-        return normalized.Length == 0 ? null : normalized.ToLowerInvariant();
+        return IsHexHash64(normalized) ? normalized.ToLowerInvariant() : null;
+    }
+
+    private static bool IsHexHash64(string value)
+    {
+        if (value.Length != 64)
+            return false;
+
+        foreach (var ch in value)
+        {
+            var isHex = (ch >= '0' && ch <= '9')
+                        || (ch >= 'a' && ch <= 'f')
+                        || (ch >= 'A' && ch <= 'F');
+
+            if (!isHex)
+                return false;
+        }
+
+        return true;
     }
 
     private static async Task<CurrentFileDigest> ComputeCurrentFileDigestAsync(
@@ -1792,7 +1965,7 @@ public sealed class EfRepositorySnapshotRepository(
         }
 
         var fileHash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
-        return new CurrentFileDigest(fileHash, totalBytes, chunkHashes);
+        return new CurrentFileDigest(fileHash, totalBytes, chunkHashes, BlockHashFamily.Sha256);
     }
 
     private static async Task<double?> ComputeByteSimilarityAsync(
@@ -2028,9 +2201,11 @@ public sealed class EfRepositorySnapshotRepository(
             ? $", byte similarity {summary.ByteSimilarityRatio.Value * 100:F1}%"
             : string.Empty;
 
-        var officeHint = IsOfficeDocumentExtension(extension)
-            ? "   Office/Word files are currently compared as binary. Text diff for DOC/DOCX is planned but not enabled yet."
-            : string.Empty;
+        var officeHint = WordSemanticProjection.IsWordOoxmlExtension(extension)
+            ? "   Word semantic diff is unavailable for this pair, showing binary-only summary."
+            : IsOfficeDocumentExtension(extension)
+                ? "   Legacy office format is compared as binary."
+                : string.Empty;
 
         return $"{relativePath}   {kind}   {sizeLabel}   {dedupLabel}, {changedLabel}{similarityLabel}{officeHint}";
     }
@@ -2053,10 +2228,18 @@ public sealed class EfRepositorySnapshotRepository(
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 
+    private enum BlockHashFamily
+    {
+        Unknown = 0,
+        Sha256 = 1,
+        Native = 2
+    }
+
     private sealed record CurrentFileDigest(
         string Sha256,
         long SizeBytes,
-        IReadOnlyList<string> ChunkHashes);
+        IReadOnlyList<string> ChunkHashes,
+        BlockHashFamily HashFamily);
     private static void TryDelete(string path)
     {
         try

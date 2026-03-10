@@ -1,8 +1,10 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using System.Text;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.Services.Diff;
 
 namespace Veyra.Application.Queries.Repository;
 
@@ -44,8 +46,8 @@ public sealed class GetTextDiffHandler(
             if (left.IsDeletionMarker || right.IsDeletionMarker)
                 return OperationResult<TextDiffResultDto>.Fail("Diff preview is not available for deletion versions.");
 
-            var extension = left.Extension ?? right.Extension;
-            if (string.IsNullOrWhiteSpace(extension) || !TextExtensions.Contains(extension))
+            var extension = NormalizeExtension(left.Extension) ?? NormalizeExtension(right.Extension);
+            if (!CanBuildTextDiff(extension))
                 return OperationResult<TextDiffResultDto>.Fail("File format is not supported for text diff.");
 
             var cached = await snapshots.GetStoredTextDiffAsync(request.LeftFileVersionId, request.RightFileVersionId, maxLines, ct);
@@ -58,7 +60,7 @@ public sealed class GetTextDiffHandler(
             await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);
             await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct);
 
-            var computed = await diffEngine.BuildDiffAsync(leftTemp, rightTemp, maxLines, ct);
+            var computed = await BuildDiffAsync(leftTemp, rightTemp, extension, maxLines, ct);
 
             var result = new TextDiffResultDto(
                 left.RelativePath,
@@ -104,6 +106,59 @@ public sealed class GetTextDiffHandler(
         }
     }
 
+    private async Task<TextDiffComputationDto> BuildDiffAsync(
+        string leftFilePath,
+        string rightFilePath,
+        string? extension,
+        int maxLines,
+        CancellationToken ct)
+    {
+        if (!WordSemanticProjection.IsWordOoxmlExtension(extension))
+            return await diffEngine.BuildDiffAsync(leftFilePath, rightFilePath, maxLines, ct);
+
+        var semanticTempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "word-diff");
+        Directory.CreateDirectory(semanticTempDir);
+
+        var leftSemanticTemp = Path.Combine(semanticTempDir, $"{Guid.NewGuid():N}.left.txt");
+        var rightSemanticTemp = Path.Combine(semanticTempDir, $"{Guid.NewGuid():N}.right.txt");
+
+        try
+        {
+            var leftSemanticLines = WordSemanticProjection.ExtractSemanticLines(leftFilePath);
+            var rightSemanticLines = WordSemanticProjection.ExtractSemanticLines(rightFilePath);
+
+            await File.WriteAllLinesAsync(leftSemanticTemp, leftSemanticLines, Encoding.UTF8, ct);
+            await File.WriteAllLinesAsync(rightSemanticTemp, rightSemanticLines, Encoding.UTF8, ct);
+
+            return await diffEngine.BuildDiffAsync(leftSemanticTemp, rightSemanticTemp, maxLines, ct);
+        }
+        finally
+        {
+            TryDelete(leftSemanticTemp);
+            TryDelete(rightSemanticTemp);
+        }
+    }
+
+    private static bool CanBuildTextDiff(string? extension)
+    {
+        if (string.IsNullOrWhiteSpace(extension))
+            return false;
+
+        return TextExtensions.Contains(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
+    }
+
+    private static string? NormalizeExtension(string? extension)
+    {
+        if (string.IsNullOrWhiteSpace(extension))
+            return null;
+
+        var normalized = extension.Trim();
+        if (!normalized.StartsWith('.'))
+            normalized = "." + normalized;
+
+        return normalized;
+    }
+
     private static void TryDelete(string path)
     {
         try
@@ -115,6 +170,7 @@ public sealed class GetTextDiffHandler(
         {
         }
     }
+
     private static string FormatDiffBuildError(Exception ex)
     {
         var text = ex.ToString();
@@ -139,4 +195,3 @@ public sealed class GetTextDiffHandler(
         return ex.Message;
     }
 }
-

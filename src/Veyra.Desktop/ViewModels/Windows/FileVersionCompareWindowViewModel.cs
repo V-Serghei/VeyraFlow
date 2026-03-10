@@ -28,6 +28,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private CancellationTokenSource? _previewCts;
     private FileVersionCompareListItemViewModel? _leftVersion;
     private FileVersionCompareListItemViewModel? _rightVersion;
+    private bool _isWordSemanticPreview;
 
     private int _repositoryId;
     private string _repositoryPath = string.Empty;
@@ -57,6 +58,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsWordRichPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowNoDiffPreviewMessage))]
     [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
     [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
     private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
@@ -83,6 +88,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
     [NotifyPropertyChangedFor(nameof(ShowFullFilePreviewPanel))]
     [NotifyPropertyChangedFor(nameof(ShowNoDiffPreviewMessage))]
     [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
@@ -108,6 +114,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     public ObservableCollection<FileVersionCompareListItemViewModel> Versions { get; } = [];
     public ObservableCollection<DiffPreviewRowViewModel> PreviewRows { get; } = [];
+    public ObservableCollection<WordSemanticDiffRowViewModel> WordPreviewRows { get; } = [];
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
 
     public FileVersionCompareWindowViewModel(IMediator mediator, ILogger<FileVersionCompareWindowViewModel> log)
@@ -117,6 +124,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         Versions.CollectionChanged += OnVersionsCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
+        WordPreviewRows.CollectionChanged += OnWordPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
     }
 
@@ -125,28 +133,26 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasNoVersions => !IsVersionListLoading && Versions.Count == 0;
 
     public bool HasPreviewRows => PreviewRows.Count > 0;
+    public bool HasWordPreviewRows => WordPreviewRows.Count > 0;
     public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
-
-    public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && HasPreviewRows;
+    public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && (HasPreviewRows || HasWordPreviewRows);
+    public bool IsWordRichPreview => IsTextPreview && _isWordSemanticPreview && HasWordPreviewRows;
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
-
     public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
     public bool HasNoImagePreviews => !HasImagePreviews;
-
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
-
     public bool HasFullFilePreviewContent
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
-
-    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows;
-    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && !IsPreviewLoading && !HasPreviewRows;
+    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
+    public bool ShowWordDiffRowsPanel => !IsFullFilePreviewMode && IsWordRichPreview && HasWordPreviewRows;
+    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
     public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
-
     public bool CanToggleFullFilePreview
         => !IsPreviewLoading
            && PreviewKind == PendingDiffPreviewKind.Text
+           && !_isWordSemanticPreview
            && _leftVersion is not null
            && _rightVersion is not null;
 
@@ -184,8 +190,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         Versions.Clear();
         PreviewRows.Clear();
+        WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
+        _isWordSemanticPreview = false;
         ResetFullPreviewState();
 
         try
@@ -396,8 +404,21 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             {
                 case PendingDiffPreviewKind.Text:
                     PreviewRows.Clear();
-                    foreach (var row in BuildDiffPreviewRows(preview.Lines, preview.Hunks))
-                        PreviewRows.Add(row);
+                    WordPreviewRows.Clear();
+                    _isWordSemanticPreview = false;
+
+                    if (WordSemanticDiffBuilder.LooksLikeSemanticWordDiff(preview.Lines))
+                    {
+                        foreach (var row in WordSemanticDiffBuilder.Build(preview.Lines, preview.Hunks))
+                            WordPreviewRows.Add(row);
+
+                        _isWordSemanticPreview = WordPreviewRows.Count > 0;
+                    }
+                    else
+                    {
+                        foreach (var row in BuildDiffPreviewRows(preview.Lines, preview.Hunks))
+                            PreviewRows.Add(row);
+                    }
 
                     PreviewKind = PendingDiffPreviewKind.Text;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
@@ -755,7 +776,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         IsPreviewLoading = false;
         PreviewSummary = message;
         PreviewRows.Clear();
+        WordPreviewRows.Clear();
         PreviewMetrics.Clear();
+        _isWordSemanticPreview = false;
         ResetFullPreviewState();
         OnPropertyChanged(nameof(CanToggleFullFilePreview));
     }
@@ -763,8 +786,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void ReleasePreviewResources()
     {
         PreviewRows.Clear();
+        WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
+        _isWordSemanticPreview = false;
         ResetFullPreviewState();
 
         LeftImagePreview?.Dispose();
@@ -887,9 +912,24 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasPreviewRows));
         OnPropertyChanged(nameof(IsTextPreview));
+        OnPropertyChanged(nameof(IsWordRichPreview));
         OnPropertyChanged(nameof(HasNoPreviewContent));
         OnPropertyChanged(nameof(ShowDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowWordDiffRowsPanel));
         OnPropertyChanged(nameof(ShowNoDiffPreviewMessage));
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+    }
+
+    private void OnWordPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasWordPreviewRows));
+        OnPropertyChanged(nameof(IsTextPreview));
+        OnPropertyChanged(nameof(IsWordRichPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+        OnPropertyChanged(nameof(ShowDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowWordDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowNoDiffPreviewMessage));
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
     }
 
     private void OnPreviewMetricsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
