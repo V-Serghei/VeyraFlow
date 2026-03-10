@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -37,34 +37,13 @@ public static class WordSemanticDiffBuilder
 
     public static IReadOnlyList<WordSemanticDiffRowViewModel> Build(
         IReadOnlyList<TextDiffLineDto> lines,
-        IReadOnlyList<TextDiffHunkDto> hunks)
+        IReadOnlyList<TextDiffHunkDto> _)
     {
         if (lines.Count == 0)
             return [];
 
-        var rows = new List<WordSemanticDiffRowViewModel>(lines.Count + (hunks.Count * 2));
-
-        if (hunks.Count > 0)
-        {
-            foreach (var hunk in hunks.OrderBy(h => h.Sequence))
-            {
-                var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
-                var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
-
-                rows.Add(WordSemanticDiffRowViewModel.CreateHunkHeader(
-                    FormatHunkRange(hunk.OldStartLine, hunk.OldLineCount),
-                    FormatHunkRange(hunk.NewStartLine, hunk.NewLineCount),
-                    NormalizeHunkKind(hunk.ChangeKind)));
-
-                AppendRows(lines, start, end, rows);
-            }
-        }
-        else
-        {
-            rows.Add(WordSemanticDiffRowViewModel.CreateHunkHeader("(full)", "(full)", "context"));
-            AppendRows(lines, 0, lines.Count - 1, rows);
-        }
-
+        var rows = new List<WordSemanticDiffRowViewModel>(lines.Count);
+        AppendRows(lines, 0, lines.Count - 1, rows);
         return rows;
     }
 
@@ -147,101 +126,85 @@ public static class WordSemanticDiffBuilder
         if (bothParagraph && string.Equals(leftParsed.Style.Raw, rightParsed.Style.Raw, StringComparison.Ordinal))
             return null;
 
-        var kindBadge = (leftKind, rightKind) switch
-        {
-            ("remove", "add") => "~",
-            ("remove", _) => "-",
-            (_, "add") => "+",
-            _ => "="
-        };
+        var leftDisplay = BuildDisplayText(leftParsed);
+        var rightDisplay = BuildDisplayText(rightParsed);
 
         var isStyleOnlyChange = leftParsed.Kind == WordSemanticLineKind.Run
                                 && rightParsed.Kind == WordSemanticLineKind.Run
-                                && string.Equals(leftParsed.Text, rightParsed.Text, StringComparison.Ordinal)
+                                && string.Equals(leftDisplay, rightDisplay, StringComparison.Ordinal)
                                 && !leftParsed.Style.IsEquivalentTo(rightParsed.Style);
 
-        var leftDisplay = BuildDisplayText(leftParsed, leftKind);
-        var rightDisplay = BuildDisplayText(rightParsed, rightKind);
+        var isTextChanged = !string.Equals(leftDisplay, rightDisplay, StringComparison.Ordinal);
+        var hasStructuralChange = leftKind != "equal" || rightKind != "equal";
+        var hasChangeDetails = hasStructuralChange || isStyleOnlyChange || isTextChanged;
 
-        var leftBackground = PickSideBackground(leftKind, isStyleOnlyChange, leftDisplay.Length > 0);
-        var rightBackground = PickSideBackground(rightKind, isStyleOnlyChange, rightDisplay.Length > 0);
+        var kindBadge = isStyleOnlyChange
+            ? "S"
+            : (leftKind, rightKind) switch
+            {
+                ("remove", "add") => "~",
+                ("remove", _) => "-",
+                (_, "add") => "+",
+                _ => "="
+            };
+
+        var leftRenderText = string.IsNullOrEmpty(leftDisplay) ? "\u00A0" : leftDisplay;
+        var rightRenderText = string.IsNullOrEmpty(rightDisplay) ? "\u00A0" : rightDisplay;
+
+        var leftTooltip = hasChangeDetails
+            ? BuildStyleTooltip(leftParsed, rightParsed, leftKind, isStyleOnlyChange, isTextChanged, isLeftSide: true)
+            : string.Empty;
+
+        var rightTooltip = hasChangeDetails
+            ? BuildStyleTooltip(rightParsed, leftParsed, rightKind, isStyleOnlyChange, isTextChanged, isLeftSide: false)
+            : string.Empty;
 
         return new WordSemanticDiffRowViewModel
         {
-            KindBadge = isStyleOnlyChange ? "S" : kindBadge,
+            IsChanged = hasChangeDetails,
+            KindBadge = kindBadge,
 
-            LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
-            LeftMarker = leftKind switch
-            {
-                "remove" => "-",
-                "equal" => "|",
-                _ => " "
-            },
-            LeftText = leftDisplay,
+            LeftLineNumber = string.Empty,
+            LeftMarker = string.Empty,
+            LeftText = leftRenderText,
             LeftFontFamily = leftParsed.Style.FontFamily,
             LeftFontSize = leftParsed.Style.FontSizePt,
             LeftFontWeight = leftParsed.Style.Bold ? FontWeight.Bold : FontWeight.Normal,
             LeftFontStyle = leftParsed.Style.Italic ? FontStyle.Italic : FontStyle.Normal,
             LeftForeground = leftParsed.Style.Foreground,
             LeftTextBackground = leftParsed.Style.HighlightBackground,
-            LeftBackground = leftBackground,
-            LeftMarkerForeground = leftKind == "remove" ? "#FF9EB1" : "#9BB5D1",
+            LeftBackground = PickSideBackground(),
+            LeftBorderBrush = PickSideBorder(leftKind, isStyleOnlyChange, hasChangeDetails),
+            LeftMarkerForeground = "Transparent",
             LeftStyleTag = BuildStyleTag(leftParsed.Style),
-            LeftStyleTooltip = BuildStyleTooltip(leftParsed, leftKind),
+            LeftStyleTooltip = leftTooltip,
 
-            RightLineNumber = right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
-            RightMarker = rightKind switch
-            {
-                "add" => "+",
-                "equal" => "|",
-                _ => " "
-            },
-            RightText = rightDisplay,
+            RightLineNumber = string.Empty,
+            RightMarker = string.Empty,
+            RightText = rightRenderText,
             RightFontFamily = rightParsed.Style.FontFamily,
             RightFontSize = rightParsed.Style.FontSizePt,
             RightFontWeight = rightParsed.Style.Bold ? FontWeight.Bold : FontWeight.Normal,
             RightFontStyle = rightParsed.Style.Italic ? FontStyle.Italic : FontStyle.Normal,
             RightForeground = rightParsed.Style.Foreground,
             RightTextBackground = rightParsed.Style.HighlightBackground,
-            RightBackground = rightBackground,
-            RightMarkerForeground = rightKind == "add" ? "#8CFFD0" : "#9BB5D1",
+            RightBackground = PickSideBackground(),
+            RightBorderBrush = PickSideBorder(rightKind, isStyleOnlyChange, hasChangeDetails),
+            RightMarkerForeground = "Transparent",
             RightStyleTag = BuildStyleTag(rightParsed.Style),
-            RightStyleTooltip = BuildStyleTooltip(rightParsed, rightKind)
+            RightStyleTooltip = rightTooltip
         };
     }
 
-    private static string BuildDisplayText(ParsedSemanticLine line, string kind)
+    private static string BuildDisplayText(ParsedSemanticLine line)
     {
         if (line.Kind == WordSemanticLineKind.Paragraph)
-        {
-            var paragraphStyle = line.Style.StyleName;
-            if (!string.IsNullOrWhiteSpace(line.Style.Alignment) || !string.IsNullOrWhiteSpace(line.Style.ListDescriptor))
-            {
-                var extra = string.Join(", ",
-                    new[]
-                    {
-                        string.IsNullOrWhiteSpace(line.Style.Alignment) ? null : $"align {line.Style.Alignment}",
-                        string.IsNullOrWhiteSpace(line.Style.ListDescriptor) ? null : $"list {line.Style.ListDescriptor}"
-                    }.Where(x => x is not null)!);
-
-                return $"Paragraph style: {paragraphStyle} ({extra})";
-            }
-
-            return $"Paragraph style: {paragraphStyle}";
-        }
+            return string.Empty;
 
         if (line.Kind == WordSemanticLineKind.Run)
-        {
-            if (string.IsNullOrWhiteSpace(line.Text))
-                return "<empty run>";
+            return string.IsNullOrEmpty(line.Text) ? string.Empty : line.Text;
 
-            return line.Text;
-        }
-
-        if (string.IsNullOrWhiteSpace(line.Raw))
-            return kind == "add" ? "<added>" : kind == "remove" ? "<removed>" : string.Empty;
-
-        return line.Raw;
+        return string.IsNullOrWhiteSpace(line.Raw) ? string.Empty : line.Raw;
     }
 
     private static string BuildStyleTag(WordStyleInfo style)
@@ -256,7 +219,7 @@ public static class WordSemanticDiffBuilder
         if (style.Italic) parts.Add("I");
         if (style.Underline) parts.Add("U");
         if (style.Strike) parts.Add("S");
-        if (!string.IsNullOrWhiteSpace(style.FontFamily) && !string.Equals(style.FontFamily, "Segoe UI Variable", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(style.FontFamily) && !string.Equals(style.FontFamily, "Calibri", StringComparison.OrdinalIgnoreCase))
             parts.Add(style.FontFamily);
         if (Math.Abs(style.FontSizePt - 14d) > 0.01)
             parts.Add($"{style.FontSizePt:0.#}pt");
@@ -264,19 +227,29 @@ public static class WordSemanticDiffBuilder
         return string.Join(" ", parts.Take(4));
     }
 
-    private static string BuildStyleTooltip(ParsedSemanticLine line, string kind)
+    private static string BuildStyleTooltip(
+        ParsedSemanticLine line,
+        ParsedSemanticLine other,
+        string selfKind,
+        bool isStyleOnlyChange,
+        bool isTextChanged,
+        bool isLeftSide)
     {
         if (line.Kind == WordSemanticLineKind.None)
             return string.Empty;
 
+        var changeLabel = selfKind switch
+        {
+            "add" => isLeftSide ? "Added in LEFT version" : "Added in RIGHT version",
+            "remove" => isLeftSide ? "Removed from LEFT version" : "Removed from RIGHT version",
+            _ when isStyleOnlyChange => "Formatting changed",
+            _ when isTextChanged => "Text changed",
+            _ => "Changed"
+        };
+
         var parts = new List<string>
         {
-            kind switch
-            {
-                "add" => "Change: Added",
-                "remove" => "Change: Removed",
-                _ => "Change: Context"
-            },
+            $"Diff: {changeLabel}",
             line.Kind == WordSemanticLineKind.Paragraph ? "Type: Paragraph" : "Type: Text run",
             $"Style: {line.Style.StyleName}",
             $"Font: {line.Style.FontFamily}",
@@ -287,7 +260,16 @@ public static class WordSemanticDiffBuilder
             $"Strike: {(line.Style.Strike ? "Yes" : "No")}"
         };
 
-        if (!string.IsNullOrWhiteSpace(line.Style.Foreground) && !string.Equals(line.Style.Foreground, "#F5FAFF", StringComparison.OrdinalIgnoreCase))
+        if (other.Kind != WordSemanticLineKind.None)
+            AddStyleDelta(parts, line.Style, other.Style);
+
+        if (line.Kind != other.Kind && other.Kind != WordSemanticLineKind.None)
+            parts.Add($"Structure changed: {DescribeKind(other.Kind)} -> {DescribeKind(line.Kind)}");
+
+        if (isTextChanged && line.Kind == WordSemanticLineKind.Run && other.Kind == WordSemanticLineKind.Run)
+            parts.Add("Run text changed.");
+
+        if (!string.IsNullOrWhiteSpace(line.Style.Foreground) && !string.Equals(line.Style.Foreground, "#111827", StringComparison.OrdinalIgnoreCase))
             parts.Add($"Text color: {line.Style.Foreground}");
 
         if (!string.IsNullOrWhiteSpace(line.Style.HighlightRaw))
@@ -302,19 +284,74 @@ public static class WordSemanticDiffBuilder
         return string.Join(Environment.NewLine, parts);
     }
 
-    private static string PickSideBackground(string sideKind, bool isStyleOnlyChange, bool hasText)
+    private static void AddStyleDelta(List<string> parts, WordStyleInfo current, WordStyleInfo previous)
     {
-        if (!hasText)
-            return "#10233A";
+        if (current.IsEquivalentTo(previous))
+            return;
+
+        if (!string.Equals(previous.StyleName, current.StyleName, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Style changed: {NormalizeLabel(previous.StyleName)} -> {NormalizeLabel(current.StyleName)}");
+
+        if (!string.Equals(previous.FontFamily, current.FontFamily, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Font changed: {previous.FontFamily} -> {current.FontFamily}");
+
+        if (Math.Abs(previous.FontSizePt - current.FontSizePt) > 0.01)
+            parts.Add($"Size changed: {previous.FontSizePt:0.#}pt -> {current.FontSizePt:0.#}pt");
+
+        if (previous.Bold != current.Bold)
+            parts.Add($"Bold: {(previous.Bold ? "On" : "Off")} -> {(current.Bold ? "On" : "Off")}");
+
+        if (previous.Italic != current.Italic)
+            parts.Add($"Italic: {(previous.Italic ? "On" : "Off")} -> {(current.Italic ? "On" : "Off")}");
+
+        if (previous.Underline != current.Underline)
+            parts.Add($"Underline: {(previous.Underline ? "On" : "Off")} -> {(current.Underline ? "On" : "Off")}");
+
+        if (previous.Strike != current.Strike)
+            parts.Add($"Strike: {(previous.Strike ? "On" : "Off")} -> {(current.Strike ? "On" : "Off")}");
+
+        if (!string.Equals(previous.Foreground, current.Foreground, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Text color changed: {previous.Foreground} -> {current.Foreground}");
+
+        if (!string.Equals(previous.HighlightRaw, current.HighlightRaw, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Highlight changed: {NormalizeLabel(previous.HighlightRaw)} -> {NormalizeLabel(current.HighlightRaw)}");
+
+        if (!string.Equals(previous.Alignment, current.Alignment, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"Alignment changed: {NormalizeLabel(previous.Alignment)} -> {NormalizeLabel(current.Alignment)}");
+
+        if (!string.Equals(previous.ListDescriptor, current.ListDescriptor, StringComparison.OrdinalIgnoreCase))
+            parts.Add($"List changed: {NormalizeLabel(previous.ListDescriptor)} -> {NormalizeLabel(current.ListDescriptor)}");
+    }
+
+    private static string DescribeKind(WordSemanticLineKind kind)
+    {
+        return kind switch
+        {
+            WordSemanticLineKind.Paragraph => "Paragraph",
+            WordSemanticLineKind.Run => "Text run",
+            _ => "Unknown"
+        };
+    }
+
+    private static string NormalizeLabel(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "(none)" : value;
+
+    private static string PickSideBackground()
+        => "#FFFFFF";
+
+    private static string PickSideBorder(string sideKind, bool isStyleOnlyChange, bool hasChangeDetails)
+    {
+        if (!hasChangeDetails)
+            return "#E3E8EF";
 
         if (isStyleOnlyChange)
-            return "#2A3956";
+            return "#A58AD6";
 
         return sideKind switch
         {
-            "remove" => "#4A2330",
-            "add" => "#204838",
-            _ => "#173149"
+            "remove" => "#E5A6B2",
+            "add" => "#9DD4B2",
+            _ => "#8CB4DB"
         };
     }
 
@@ -323,16 +360,19 @@ public static class WordSemanticDiffBuilder
         if (string.IsNullOrWhiteSpace(raw))
             return ParsedSemanticLine.None;
 
-        var text = raw.Trim();
+        var text = raw.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        if (string.IsNullOrWhiteSpace(text))
+            return ParsedSemanticLine.None;
 
-        var paragraph = ParagraphRegex.Match(text);
+        var matchInput = text.TrimStart();
+        var paragraph = ParagraphRegex.Match(matchInput);
         if (paragraph.Success)
         {
             var style = WordStyleInfo.Parse(paragraph.Groups["style"].Value, isParagraph: true);
             return new ParsedSemanticLine(WordSemanticLineKind.Paragraph, style, string.Empty, text);
         }
 
-        var run = RunRegex.Match(text);
+        var run = RunRegex.Match(matchInput);
         if (run.Success)
         {
             var style = WordStyleInfo.Parse(run.Groups["style"].Value, isParagraph: false);
@@ -351,22 +391,6 @@ public static class WordSemanticDiffBuilder
             return "remove";
         return "equal";
     }
-
-    private static string NormalizeHunkKind(string? kind)
-    {
-        if (string.Equals(kind, "added", StringComparison.OrdinalIgnoreCase))
-            return "added";
-        if (string.Equals(kind, "removed", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(kind, "deleted", StringComparison.OrdinalIgnoreCase))
-            return "removed";
-        return "modified";
-    }
-
-    private static string FormatLineNumber(int? lineNumber)
-        => lineNumber is int value ? value.ToString("D4") : string.Empty;
-
-    private static string FormatHunkRange(int startLine, int count)
-        => count <= 0 ? $"{Math.Max(0, startLine)}" : $"{Math.Max(0, startLine)},{count}";
 
     private enum WordSemanticLineKind
     {
@@ -407,9 +431,9 @@ public static class WordSemanticDiffBuilder
                && !Italic
                && !Underline
                && !Strike
-               && string.Equals(FontFamily, "Segoe UI Variable", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(FontFamily, "Calibri", StringComparison.OrdinalIgnoreCase)
                && Math.Abs(FontSizePt - 14d) < 0.01
-               && string.Equals(Foreground, "#F5FAFF", StringComparison.OrdinalIgnoreCase)
+               && string.Equals(Foreground, "#111827", StringComparison.OrdinalIgnoreCase)
                && string.IsNullOrWhiteSpace(HighlightRaw)
                && string.IsNullOrWhiteSpace(Alignment)
                && string.IsNullOrWhiteSpace(ListDescriptor)
@@ -432,13 +456,13 @@ public static class WordSemanticDiffBuilder
             Raw: "default",
             IsParagraph: false,
             StyleName: "default",
-            FontFamily: "Segoe UI Variable",
+            FontFamily: "Calibri",
             FontSizePt: 14d,
             Bold: false,
             Italic: false,
             Underline: false,
             Strike: false,
-            Foreground: "#F5FAFF",
+            Foreground: "#111827",
             HighlightBackground: "Transparent",
             HighlightRaw: string.Empty,
             Alignment: string.Empty,
@@ -451,13 +475,13 @@ public static class WordSemanticDiffBuilder
                 return Default with { IsParagraph = isParagraph, Raw = raw ?? "default" };
 
             var styleName = "default";
-            var fontFamily = "Segoe UI Variable";
+            var fontFamily = "Calibri";
             var fontSizePt = 14d;
             var bold = false;
             var italic = false;
             var underline = false;
             var strike = false;
-            var foreground = "#F5FAFF";
+            var foreground = "#111827";
             var highlightBackground = "Transparent";
             var highlightRaw = string.Empty;
             var alignment = string.Empty;
@@ -506,7 +530,7 @@ public static class WordSemanticDiffBuilder
                             fontSizePt = Math.Clamp(parsedSize, 7d, 40d);
                         break;
                     case "color":
-                        foreground = NormalizeColor(value, "#F5FAFF");
+                        foreground = NormalizeColor(value, "#111827");
                         break;
                     case "hl":
                         highlightRaw = value;
