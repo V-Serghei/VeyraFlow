@@ -938,6 +938,165 @@ public sealed class EfRepositorySnapshotRepository(
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Unable to build diff preview for selected file.");
         }
     }
+    public async Task<PendingFileDiffPreviewDto> GetFileVersionDiffPreviewAsync(
+        long leftFileVersionId,
+        long rightFileVersionId,
+        int maxLines = 3000,
+        CancellationToken ct = default)
+    {
+        if (leftFileVersionId <= 0 || rightFileVersionId <= 0)
+            return PendingFileDiffPreviewDto.Unavailable(string.Empty, "Both versions must be selected.");
+
+        if (leftFileVersionId == rightFileVersionId)
+            return PendingFileDiffPreviewDto.Unavailable(string.Empty, "Select two different versions.");
+
+        var normalizedMaxLines = NormalizeMaxLines(maxLines);
+
+        var left = await GetFileVersionRestoreDataAsync(leftFileVersionId, ct);
+        var right = await GetFileVersionRestoreDataAsync(rightFileVersionId, ct);
+
+        if (left is null || right is null)
+            return PendingFileDiffPreviewDto.Unavailable(string.Empty, "One of the selected versions was not found.");
+
+        if (!left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase))
+            return PendingFileDiffPreviewDto.Unavailable(left.RelativePath, "Selected versions belong to different files.");
+
+        if (left.IsDeletionMarker || right.IsDeletionMarker)
+            return PendingFileDiffPreviewDto.Unavailable(left.RelativePath, "Diff preview is unavailable for deletion versions.");
+
+        var extension = NormalizeExtension(left.Extension) ?? NormalizeExtension(right.Extension) ?? NormalizeExtension(Path.GetExtension(left.RelativePath));
+        var safeExtension = GetSafeTempExtension(extension);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "version-diff-preview");
+        Directory.CreateDirectory(tempDir);
+
+        var leftTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.left{safeExtension}");
+        var rightTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.right{safeExtension}");
+
+        var keepLeftTemp = false;
+        var keepRightTemp = false;
+
+        try
+        {
+            await RestoreVersionToTempAsync(left, leftTemp, ct);
+            await RestoreVersionToTempAsync(right, rightTemp, ct);
+
+            var currentDigest = await ComputeCurrentFileDigestAsync(rightTemp, ManagedPreviewChunkSize, ct);
+            var byteSimilarity = await ComputeByteSimilarityAsync(leftTemp, rightTemp, ct);
+
+            var binarySummary = BuildPendingBinarySummary(
+                left.SizeBytes,
+                left.ContentHashSha256,
+                left.Blocks,
+                currentDigest)
+                with { ByteSimilarityRatio = byteSimilarity };
+
+            if (IsTextExtension(extension))
+            {
+                var cached = await GetStoredTextDiffAsync(left.FileVersionId, right.FileVersionId, normalizedMaxLines, ct);
+                TextDiffResultDto diff;
+
+                if (cached is not null)
+                {
+                    diff = cached;
+                }
+                else
+                {
+                    var computed = await diffEngine.BuildDiffAsync(leftTemp, rightTemp, normalizedMaxLines, ct);
+                    diff = new TextDiffResultDto(
+                        left.RelativePath,
+                        left.FileVersionId,
+                        right.FileVersionId,
+                        computed.AddedLines,
+                        computed.RemovedLines,
+                        computed.IsTruncated,
+                        computed.Lines,
+                        computed.Hunks);
+
+                    try
+                    {
+                        await SaveStoredTextDiffAsync(diff, normalizedMaxLines, ct);
+                    }
+                    catch (Exception cacheEx)
+                    {
+                        log.LogWarning(
+                            cacheEx,
+                            "Failed to persist text diff cache. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                            left.FileVersionId,
+                            right.FileVersionId);
+                    }
+                }
+
+                var textMessage = $"{left.RelativePath}   +{diff.AddedLines} / -{diff.RemovedLines}" +
+                                  (diff.IsTruncated ? "  (truncated)" : string.Empty);
+
+                return PendingFileDiffPreviewDto.FromText(
+                    relativePath: left.RelativePath,
+                    message: textMessage,
+                    addedLines: diff.AddedLines,
+                    removedLines: diff.RemovedLines,
+                    isTruncated: diff.IsTruncated,
+                    lines: diff.Lines,
+                    hunks: diff.Hunks);
+            }
+
+            if (IsImageExtension(extension))
+            {
+                var baselineSize = TryReadImageDimensions(leftTemp);
+                var currentSize = TryReadImageDimensions(rightTemp);
+
+                var imagePreview = new PendingImageDiffPreviewDto(
+                    BaselineImagePath: leftTemp,
+                    IsBaselineTempFile: true,
+                    CurrentImagePath: rightTemp,
+                    IsCurrentTempFile: true,
+                    BaselineWidth: baselineSize?.Width,
+                    BaselineHeight: baselineSize?.Height,
+                    CurrentWidth: currentSize?.Width,
+                    CurrentHeight: currentSize?.Height,
+                    HasDimensionMismatch: baselineSize.HasValue
+                                          && currentSize.HasValue
+                                          && (baselineSize.Value.Width != currentSize.Value.Width
+                                              || baselineSize.Value.Height != currentSize.Value.Height),
+                    SimilarityRatio: byteSimilarity);
+
+                var imageMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "image");
+                keepLeftTemp = true;
+                keepRightTemp = true;
+
+                return PendingFileDiffPreviewDto.FromImage(
+                    relativePath: left.RelativePath,
+                    message: imageMessage,
+                    binarySummary: binarySummary,
+                    imagePreview: imagePreview);
+            }
+
+            var binaryMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "binary");
+            return PendingFileDiffPreviewDto.FromBinary(
+                relativePath: left.RelativePath,
+                message: binaryMessage,
+                binarySummary: binarySummary);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(
+                ex,
+                "Failed to build file-version diff preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}. Path {Path}",
+                leftFileVersionId,
+                rightFileVersionId,
+                left.RelativePath);
+
+            return PendingFileDiffPreviewDto.Unavailable(left.RelativePath, FormatVersionPreviewError(ex));
+        }
+        finally
+        {
+            if (!keepLeftTemp)
+                TryDelete(leftTemp);
+
+            if (!keepRightTemp)
+                TryDelete(rightTemp);
+        }
+    }
     public async Task<TextDiffResultDto?> GetStoredTextDiffAsync(
         long leftFileVersionId,
         long rightFileVersionId,
@@ -1359,6 +1518,61 @@ public sealed class EfRepositorySnapshotRepository(
             normalized = "." + normalized;
 
         return normalized;
+    }
+
+    private static string GetSafeTempExtension(string? extension)
+    {
+        var normalized = NormalizeExtension(extension);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return ".tmp";
+
+        if (normalized.Length > 10)
+            return ".tmp";
+
+        return normalized;
+    }
+
+    private async Task RestoreVersionToTempAsync(
+        FileVersionRestoreDto version,
+        string tempPath,
+        CancellationToken ct)
+    {
+        if (version.SizeBytes <= 0)
+        {
+            await File.WriteAllBytesAsync(tempPath, [], ct);
+            return;
+        }
+
+        if (version.Blocks.Count == 0)
+            throw new InvalidOperationException("Blocks are missing for selected version.");
+
+        await contentStore.RestoreFileAsync(version.Blocks, tempPath, true, ct);
+    }
+
+    private static string FormatVersionPreviewError(Exception ex)
+    {
+        var text = ex.ToString();
+
+        if (text.Contains("native block format", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("native block hash", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Preview is unavailable right now: selected versions use native block format, but native restore entrypoints are unavailable. Rebuild/update veyra_core and run Reindex data.";
+        }
+
+        if (text.Contains("Block file not found", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("blocks are missing", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("missing", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Preview is unavailable because some block files are missing. Run Repair data or Reindex data.";
+        }
+
+        if (text.Contains("decryption", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Artifact key", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Preview is unavailable because encrypted blocks cannot be decrypted with current keys.";
+        }
+
+        return ex.Message;
     }
 
     private async Task InvalidateTextDiffCacheRowAsync(long diffId, CancellationToken ct)
@@ -1922,6 +2136,8 @@ public sealed class EfRepositorySnapshotRepository(
         DateTime LastWriteUtc,
         string? ContentHashSha256);
 }
+
+
 
 
 

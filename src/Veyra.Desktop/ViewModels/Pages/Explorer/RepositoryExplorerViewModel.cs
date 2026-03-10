@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -27,6 +28,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 {
     private const int LiveSyncDebounceMs = 800;
     private const int LiveSyncMinIntervalMs = 1500;
+    private const int CollapsedVisibleFileVersions = 4;
 
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
@@ -52,6 +54,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private long _snapshotFilesLoadRequestId;
     private CancellationTokenSource? _versionsLoadCts;
     private long _versionsLoadRequestId;
+    private long? _diffPreviewBeforeVersionId;
+    private long? _diffPreviewAfterVersionId;
+    private string? _diffPreviewRelativePath;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -94,10 +99,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    [NotifyPropertyChangedFor(nameof(CanSwapCompareVersions))]
+    [NotifyCanExecuteChangedFor(nameof(SwapCompareVersionsCommand))]
     private ExplorerFileVersionViewModel? _compareLeftVersion;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    [NotifyPropertyChangedFor(nameof(CanSwapCompareVersions))]
+    [NotifyCanExecuteChangedFor(nameof(SwapCompareVersionsCommand))]
     private ExplorerFileVersionViewModel? _compareRightVersion;
 
     [ObservableProperty]
@@ -177,9 +186,39 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty] private bool _isDiffPreviewMenuOpen;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoDiffPreviewRows))]
+    [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
     private bool _isDiffPreviewLoading;
     [ObservableProperty] private string _diffPreviewTitle = string.Empty;
     [ObservableProperty] private string _diffPreviewSummary = string.Empty;
+    [ObservableProperty] private string _comparePairSummary = "Select Before and After versions.";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FullPreviewToggleLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowNoDiffPreviewMessage))]
+    [NotifyPropertyChangedFor(nameof(ShowFullFilePreviewPanel))]
+    private bool _isFullFilePreviewMode;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private bool _isFullFilePreviewLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFullFilePreviewContent))]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private string _fullPreviewBeforeText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFullFilePreviewContent))]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private string _fullPreviewAfterText = string.Empty;
+
+    [ObservableProperty] private string _fullPreviewSummary = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggleFileVersionsView))]
+    [NotifyPropertyChangedFor(nameof(FileVersionsToggleLabel))]
+    private bool _showAllFileVersions;
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
     public bool HasNoSelectedItem => !HasSelectedItem;
@@ -195,6 +234,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasNoSnapshotFiles => SelectedSnapshot is not null && !HasSnapshotFiles;
     public bool HasDiffPreviewRows => DiffPreviewRows.Count > 0;
     public bool HasNoDiffPreviewRows => !IsDiffPreviewLoading && !HasDiffPreviewRows;
+    public bool HasComparableVersions => ComparableFileVersions.Count > 0;
+    public bool HasFullFilePreviewContent
+        => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
+    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasDiffPreviewRows;
+    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && HasNoDiffPreviewRows;
+    public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
+    public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
+    public string FullPreviewToggleLabel => IsFullFilePreviewMode ? "Show changes only" : "View full file";
+    public bool CanToggleFullFilePreview => !IsDiffPreviewLoading && _diffPreviewBeforeVersionId is > 0 && _diffPreviewAfterVersionId is > 0;
+    public bool CanOpenSelectedFileOnDisk => GetSelectedFileFullPath() is not null;
     public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
     public bool CanRunMaintenanceActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
     public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
@@ -208,9 +257,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
            && CompareRightVersion is { HasContentBlocks: true, IsDeletionMarker: false } right
            && left.FileVersionId != right.FileVersionId;
 
+    public bool CanSwapCompareVersions
+        => CompareLeftVersion is not null
+           && CompareRightVersion is not null
+           && CompareLeftVersion.FileVersionId != CompareRightVersion.FileVersionId;
+
+    public bool CanToggleFileVersionsView => FileVersions.Count > CollapsedVisibleFileVersions;
+
+    public string FileVersionsToggleLabel => ShowAllFileVersions
+        ? $"Show latest {CollapsedVisibleFileVersions}"
+        : $"Show all ({FileVersions.Count})";
+
     public ObservableCollection<ExplorerTreeNodeViewModel> TreeNodes { get; } = [];
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
     public ObservableCollection<ExplorerFileVersionViewModel> FileVersions { get; } = [];
+    public ObservableCollection<ExplorerFileVersionViewModel> VisibleFileVersions { get; } = [];
+    public ObservableCollection<ExplorerFileVersionViewModel> ComparableFileVersions { get; } = [];
     public ObservableCollection<RepositoryPendingChangeViewModel> PendingChanges { get; } = [];
     public ObservableCollection<RepositorySnapshotHistoryEntryViewModel> SnapshotHistory { get; } = [];
     public ObservableCollection<RepositorySnapshotFileChangeViewModel> SnapshotFiles { get; } = [];
@@ -225,6 +287,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _windows = windows;
         _log = log;
         FileVersions.CollectionChanged += OnFileVersionsCollectionChanged;
+        ComparableFileVersions.CollectionChanged += OnComparableVersionsCollectionChanged;
         DiffPreviewRows.CollectionChanged += OnDiffPreviewRowsCollectionChanged;
     }
 
@@ -245,6 +308,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             CompareLeftVersion = null;
             CompareRightVersion = null;
             FileVersions.Clear();
+            VisibleFileVersions.Clear();
+            ComparableFileVersions.Clear();
+            ShowAllFileVersions = false;
             PendingChanges.Clear();
             SnapshotHistory.Clear();
             SnapshotFiles.Clear();
@@ -264,6 +330,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
+            _diffPreviewBeforeVersionId = null;
+            _diffPreviewAfterVersionId = null;
+            _diffPreviewRelativePath = null;
+            ResetFullFilePreviewState();
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+            OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
             PendingChangesSummary = "No changes since the last snapshot.";
             LastSnapshotLabel = "No snapshot has been created yet.";
 
@@ -291,6 +363,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             Items.Clear();
             TreeNodes.Clear();
             FileVersions.Clear();
+            VisibleFileVersions.Clear();
+            ComparableFileVersions.Clear();
+            ShowAllFileVersions = false;
             PendingChanges.Clear();
             SnapshotHistory.Clear();
             SnapshotFiles.Clear();
@@ -310,6 +385,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             DiffPreviewTitle = string.Empty;
             DiffPreviewSummary = string.Empty;
             DiffPreviewRows.Clear();
+            _diffPreviewBeforeVersionId = null;
+            _diffPreviewAfterVersionId = null;
+            _diffPreviewRelativePath = null;
+            ResetFullFilePreviewState();
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+            OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
             PendingChangesSummary = "Failed to load pending changes.";
             LastSnapshotLabel = "No snapshot has been created yet.";
             IsEmpty = true;
@@ -321,6 +402,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     }
 
     partial void OnSearchQueryChanged(string value) => ShowItemsForPath(_selectedDirectoryPath);
+
+    partial void OnRepositoryPathChanged(string value)
+        => OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
 
     partial void OnSelectedTreeNodeChanged(ExplorerTreeNodeViewModel? value)
     {
@@ -343,7 +427,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SelectedSnapshotFile = null;
             _isClearingSnapshotFileSelection = false;
         }
-
+        OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
         _ = LoadVersionsForSelectedItemAsync(value);
     }
 
@@ -394,7 +478,42 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (value is not null)
             _preferredSnapshotFileVersionId = value.FileVersionId;
 
+        RefreshComparePairSummary();
         OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
+    }
+
+    partial void OnCompareLeftVersionChanged(ExplorerFileVersionViewModel? value)
+    {
+        if (value is not null
+            && CompareRightVersion is not null
+            && CompareRightVersion.FileVersionId == value.FileVersionId)
+        {
+            CompareRightVersion = PickAlternativeComparableVersion(value.FileVersionId);
+        }
+
+        RefreshComparePairSummary();
+        OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
+    }
+
+    partial void OnCompareRightVersionChanged(ExplorerFileVersionViewModel? value)
+    {
+        if (value is not null
+            && CompareLeftVersion is not null
+            && CompareLeftVersion.FileVersionId == value.FileVersionId)
+        {
+            CompareLeftVersion = PickAlternativeComparableVersion(value.FileVersionId) ?? CompareLeftVersion;
+        }
+
+        RefreshComparePairSummary();
+        OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
+    }
+
+    private ExplorerFileVersionViewModel? PickAlternativeComparableVersion(long excludedFileVersionId)
+        => ComparableFileVersions.FirstOrDefault(v => v.FileVersionId != excludedFileVersionId);
+
+    partial void OnShowAllFileVersionsChanged(bool value)
+    {
+        RebuildVisibleFileVersions();
     }
 
     private void SelectItemFromSnapshotFile(RepositorySnapshotFileChangeViewModel value)
@@ -706,7 +825,30 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [RelayCommand]
     private void CloseDiffPreviewMenu()
-        => IsDiffPreviewMenuOpen = false;
+    {
+        IsDiffPreviewMenuOpen = false;
+        _diffPreviewBeforeVersionId = null;
+        _diffPreviewAfterVersionId = null;
+        _diffPreviewRelativePath = null;
+        ResetFullFilePreviewState();
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
+    }
+
+    [RelayCommand]
+    private async Task ToggleFullFilePreviewAsync()
+    {
+        if (!CanToggleFullFilePreview)
+            return;
+
+        if (IsFullFilePreviewMode)
+        {
+            IsFullFilePreviewMode = false;
+            return;
+        }
+
+        await LoadFullFilePreviewAsync();
+    }
 
     [RelayCommand]
     private void SelectTreeNode(ExplorerTreeNodeViewModel? node)
@@ -741,6 +883,68 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             node.IsExpanded = true;
             SelectedTreeNode = node;
             SelectTreeNode(node);
+        }
+    }
+    [RelayCommand]
+    private void OpenSelectedFile()
+    {
+        var fullPath = GetSelectedFileFullPath();
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            VersionPanelError = "Select a file to open.";
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            VersionPanelError = "File was not found on disk.";
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = fullPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open file {Path}", fullPath);
+            VersionPanelError = "Unable to open file in default application.";
+        }
+    }
+
+    [RelayCommand]
+    private void OpenSelectedFileInExplorer()
+    {
+        var fullPath = GetSelectedFileFullPath();
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            VersionPanelError = "Select a file to show in Explorer.";
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            VersionPanelError = "File was not found on disk.";
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{fullPath}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open Explorer for file {Path}", fullPath);
+            VersionPanelError = "Unable to open file in Windows Explorer.";
         }
     }
 
@@ -830,32 +1034,30 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks || selectedVersion.IsDeletionMarker)
         {
-            ErrorMessage = "Diff preview is unavailable for this version.";
+            VersionPanelError = "Diff preview is unavailable for this version.";
             return;
         }
 
-        var ordered = FileVersions.ToList();
+        var ordered = ComparableFileVersions.ToList();
         var index = ordered.FindIndex(v => v.FileVersionId == selectedVersion.FileVersionId);
         if (index < 0)
         {
-            ErrorMessage = "Unable to locate the selected file version.";
+            VersionPanelError = "Unable to locate the selected file version.";
             return;
         }
 
-        var previous = ordered
-            .Skip(index + 1)
-            .FirstOrDefault(v => v.HasContentBlocks && !v.IsDeletionMarker);
-
+        var previous = ordered.Skip(index + 1).FirstOrDefault();
         if (previous is null)
         {
-            ErrorMessage = "No previous content version was found for diff.";
+            VersionPanelError = "No older version is available for comparison.";
             return;
         }
 
-        CompareLeftVersion = selectedVersion;
-        CompareRightVersion = previous;
+        CompareLeftVersion = previous;
+        CompareRightVersion = selectedVersion;
+        RefreshComparePairSummary();
 
-        await ShowDiffPreviewAsync(selectedVersion, previous);
+        await OpenVersionCompareWindowAsync(previous, selectedVersion);
     }
 
 
@@ -864,25 +1066,85 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         if (!CanCompareSelectedVersionPair || CompareLeftVersion is null || CompareRightVersion is null)
         {
-            ErrorMessage = "Select two different versions with stored content to compare.";
+            VersionPanelError = "Select two different versions with stored content to compare.";
             return;
         }
 
-        await ShowDiffPreviewAsync(CompareLeftVersion, CompareRightVersion);
+        var (left, right) = NormalizeComparePairByCreatedAt(CompareLeftVersion, CompareRightVersion);
+        CompareLeftVersion = left;
+        CompareRightVersion = right;
+        RefreshComparePairSummary();
+
+        await OpenVersionCompareWindowAsync(left, right);
     }
 
+    [RelayCommand(CanExecute = nameof(CanSwapCompareVersions))]
+    private void SwapCompareVersions()
+    {
+        if (!CanSwapCompareVersions || CompareLeftVersion is null || CompareRightVersion is null)
+            return;
+
+        (CompareLeftVersion, CompareRightVersion) = (CompareRightVersion, CompareLeftVersion);
+        RefreshComparePairSummary();
+    }
+
+    [RelayCommand]
+    private void ToggleFileVersionsView()
+    {
+        if (!CanToggleFileVersionsView)
+            return;
+
+        ShowAllFileVersions = !ShowAllFileVersions;
+        RebuildVisibleFileVersions();
+    }
+
+    private async Task OpenVersionCompareWindowAsync(
+        ExplorerFileVersionViewModel leftVersion,
+        ExplorerFileVersionViewModel rightVersion)
+    {
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            VersionPanelError = "Unable to open compare window.";
+            return;
+        }
+
+        var dialog = _windows.Create<FileVersionCompareWindow>();
+        if (dialog.DataContext is FileVersionCompareWindowViewModel vm)
+        {
+            await vm.InitializeAsync(
+                repositoryId: RepositoryId,
+                repositoryPath: RepositoryPath,
+                relativePath: SelectedItem?.RelativePath ?? leftVersion.RelativePath,
+                fileDisplayName: SelectedItem?.Name ?? leftVersion.FileName,
+                preferredLeftVersionId: leftVersion.FileVersionId,
+                preferredRightVersionId: rightVersion.FileVersionId);
+        }
+
+        await _windows.ShowDialogAsync(dialog, owner);
+    }
     private async Task ShowDiffPreviewAsync(
         ExplorerFileVersionViewModel leftVersion,
         ExplorerFileVersionViewModel rightVersion)
     {
+        var (beforeVersion, afterVersion) = NormalizeComparePairByCreatedAt(leftVersion, rightVersion);
+
+        _diffPreviewBeforeVersionId = beforeVersion.FileVersionId;
+        _diffPreviewAfterVersionId = afterVersion.FileVersionId;
+        _diffPreviewRelativePath = SelectedItem?.RelativePath;
+        ResetFullFilePreviewState();
+
         ErrorMessage = null;
         DiffPreview = null;
         VersionActionMessage = null;
+        VersionPanelError = null;
 
         IsDiffPreviewLoading = true;
         IsDiffPreviewMenuOpen = true;
-        DiffPreviewTitle = SelectedItem?.Name ?? string.Empty;
-        DiffPreviewSummary = "Building preview...";
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
+        DiffPreviewTitle = $"{(SelectedItem?.Name ?? beforeVersion.FileName)}  {beforeVersion.VersionName} -> {afterVersion.VersionName}";
+        DiffPreviewSummary = $"Preparing diff: before {FormatVersionInline(beforeVersion)} -> after {FormatVersionInline(afterVersion)}";
         DiffPreviewRows.Clear();
 
         OperationResult<TextDiffResultDto> diffResult;
@@ -890,8 +1152,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         try
         {
             diffResult = await Task.Run(() => _mediator.Send(new GetTextDiffQuery(
-                leftVersion.FileVersionId,
-                rightVersion.FileVersionId,
+                beforeVersion.FileVersionId,
+                afterVersion.FileVersionId,
                 4000)));
         }
         catch (Exception ex)
@@ -899,11 +1161,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             _log.LogError(ex,
                 "Failed to build diff preview. RepositoryId {RepositoryId}. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 RepositoryId,
-                leftVersion.FileVersionId,
-                rightVersion.FileVersionId);
+                beforeVersion.FileVersionId,
+                afterVersion.FileVersionId);
 
-            ErrorMessage = "Unable to build diff preview.";
-            DiffPreviewSummary = ErrorMessage;
+            var message = FormatDiffPreviewError(ex.Message, beforeVersion, afterVersion);
+            VersionPanelError = message;
+            DiffPreviewSummary = message;
             DiffPreviewRows.Clear();
             IsDiffPreviewLoading = false;
             return;
@@ -913,22 +1176,27 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!diffResult.Success || diffResult.Value is null)
         {
-            ErrorMessage = diffResult.Error ?? "Unable to build diff preview.";
-            DiffPreviewSummary = ErrorMessage;
+            var message = FormatDiffPreviewError(diffResult.Error, beforeVersion, afterVersion);
+            VersionPanelError = message;
+            DiffPreviewSummary = message;
             DiffPreviewRows.Clear();
             return;
         }
 
         var value = diffResult.Value;
-        DiffPreviewTitle = SelectedItem?.Name ?? value.RelativePath;
-        DiffPreviewSummary = $"{value.RelativePath}   +{value.AddedLines} / -{value.RemovedLines}"
+        _diffPreviewRelativePath = value.RelativePath;
+        OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
+        DiffPreviewTitle = $"{(SelectedItem?.Name ?? value.RelativePath)}  {beforeVersion.VersionName} -> {afterVersion.VersionName}";
+        DiffPreviewSummary = $"Before {FormatVersionInline(beforeVersion)} -> after {FormatVersionInline(afterVersion)} | +{value.AddedLines} / -{value.RemovedLines}"
                              + (value.IsTruncated ? "  (truncated)" : string.Empty);
 
         DiffPreviewRows.Clear();
         foreach (var row in BuildDiffPreviewRows(value.Lines, value.Hunks))
             DiffPreviewRows.Add(row);
-        VersionActionMessage = $"Diff ready: +{value.AddedLines} / -{value.RemovedLines}";
+
+        VersionActionMessage = $"Diff ready: {beforeVersion.VersionName} -> {afterVersion.VersionName} (+{value.AddedLines} / -{value.RemovedLines}).";
     }
+
     private async Task<bool> ExecuteScanAsync(
         bool saveFileVersions,
         string triggerOverride,
@@ -1017,6 +1285,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var (requestId, ct) = BeginVersionsLoadRequest();
 
         FileVersions.Clear();
+        VisibleFileVersions.Clear();
+        ComparableFileVersions.Clear();
+        ShowAllFileVersions = false;
         OnPropertyChanged(nameof(HasNoFileVersions));
         SelectedVersion = null;
         CompareLeftVersion = null;
@@ -1029,6 +1300,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         DiffPreviewTitle = string.Empty;
         DiffPreviewSummary = string.Empty;
         DiffPreviewRows.Clear();
+        _diffPreviewBeforeVersionId = null;
+        _diffPreviewAfterVersionId = null;
+        _diffPreviewRelativePath = null;
+        ResetFullFilePreviewState();
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
 
         if (item is null || item.IsDirectory || RepositoryId == 0)
         {
@@ -1102,38 +1379,162 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+    private void RebuildVisibleFileVersions()
+    {
+        var selectedVersionId = SelectedVersion?.FileVersionId;
+
+        var ordered = FileVersions
+            .OrderByDescending(v => v.CreatedAtUtc)
+            .ThenByDescending(v => v.FileVersionId)
+            .ToList();
+
+        var visible = ShowAllFileVersions
+            ? ordered
+            : ordered.Take(CollapsedVisibleFileVersions).ToList();
+
+        if (!ShowAllFileVersions
+            && selectedVersionId.HasValue
+            && visible.All(v => v.FileVersionId != selectedVersionId.Value))
+        {
+            var selected = ordered.FirstOrDefault(v => v.FileVersionId == selectedVersionId.Value);
+            if (selected is not null)
+                visible.Add(selected);
+        }
+
+        VisibleFileVersions.Clear();
+        foreach (var version in visible)
+            VisibleFileVersions.Add(version);
+
+        OnPropertyChanged(nameof(CanToggleFileVersionsView));
+        OnPropertyChanged(nameof(FileVersionsToggleLabel));
+    }
     private void InitializeVersionComparePair()
     {
+        RebuildVisibleFileVersions();
+        ComparableFileVersions.Clear();
+
         var comparable = FileVersions
             .Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
+            .OrderByDescending(v => v.CreatedAtUtc)
+            .ThenByDescending(v => v.FileVersionId)
             .ToList();
+
+        foreach (var version in comparable)
+            ComparableFileVersions.Add(version);
 
         if (comparable.Count == 0)
         {
             CompareLeftVersion = null;
             CompareRightVersion = null;
+            RefreshComparePairSummary();
             OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
             return;
         }
 
         if (SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false } selected)
         {
-            CompareLeftVersion = selected;
-
             var index = comparable.FindIndex(v => v.FileVersionId == selected.FileVersionId);
-            CompareRightVersion = index >= 0
+            var previous = index >= 0
                 ? comparable.Skip(index + 1).FirstOrDefault()
                   ?? comparable.FirstOrDefault(v => v.FileVersionId != selected.FileVersionId)
                 : comparable.FirstOrDefault(v => v.FileVersionId != selected.FileVersionId);
+
+            CompareLeftVersion = previous;
+            CompareRightVersion = selected;
         }
         else
         {
-            CompareLeftVersion = comparable[0];
-            CompareRightVersion = comparable.Skip(1).FirstOrDefault();
+            CompareLeftVersion = comparable.Skip(1).FirstOrDefault();
+            CompareRightVersion = comparable[0];
         }
 
+        if (CompareLeftVersion is not null && CompareRightVersion is not null)
+        {
+            var normalized = NormalizeComparePairByCreatedAt(CompareLeftVersion, CompareRightVersion);
+            CompareLeftVersion = normalized.Left;
+            CompareRightVersion = normalized.Right;
+        }
+
+        RefreshComparePairSummary();
         OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
     }
+
+    private (ExplorerFileVersionViewModel Left, ExplorerFileVersionViewModel Right) NormalizeComparePairByCreatedAt(
+        ExplorerFileVersionViewModel left,
+        ExplorerFileVersionViewModel right)
+    {
+        if (left.CreatedAtUtc < right.CreatedAtUtc)
+            return (left, right);
+
+        if (left.CreatedAtUtc > right.CreatedAtUtc)
+            return (right, left);
+
+        return left.FileVersionId <= right.FileVersionId
+            ? (left, right)
+            : (right, left);
+    }
+
+    private void RefreshComparePairSummary()
+    {
+        if (ComparableFileVersions.Count == 0)
+        {
+            ComparePairSummary = "No comparable versions yet. Create another snapshot for this file.";
+            return;
+        }
+
+        if (CompareLeftVersion is null && CompareRightVersion is null)
+        {
+            ComparePairSummary = "Select Before and After versions.";
+            return;
+        }
+
+        if (CompareLeftVersion is not null && CompareRightVersion is not null)
+        {
+            if (CompareLeftVersion.FileVersionId == CompareRightVersion.FileVersionId)
+            {
+                ComparePairSummary = "Choose two different versions to compare.";
+                return;
+            }
+
+            var normalized = NormalizeComparePairByCreatedAt(CompareLeftVersion, CompareRightVersion);
+            ComparePairSummary = $"Before {FormatVersionInline(normalized.Left)} -> after {FormatVersionInline(normalized.Right)}";
+            return;
+        }
+
+        var selected = CompareLeftVersion ?? CompareRightVersion;
+        ComparePairSummary = selected is null
+            ? "Select Before and After versions."
+            : $"Pick the second version to compare with {FormatVersionInline(selected)}.";
+    }
+
+    private static string FormatVersionInline(ExplorerFileVersionViewModel version)
+        => $"{version.VersionName} ({version.CreatedAtDisplay}, {version.SizeDisplay})";
+
+    private static string FormatDiffPreviewError(
+        string? rawMessage,
+        ExplorerFileVersionViewModel beforeVersion,
+        ExplorerFileVersionViewModel afterVersion)
+    {
+        if (string.IsNullOrWhiteSpace(rawMessage))
+            return "Unable to build diff preview for selected versions.";
+
+        var message = rawMessage.Trim();
+
+        if (message.Contains("native block format", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("native block hash", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Cannot compare {beforeVersion.VersionName} and {afterVersion.VersionName}: current runtime cannot restore native block data. Rebuild/update veyra_core, then run Reindex data and retry.";
+        }
+
+        if (message.Contains("missing", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("block", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Cannot compare {beforeVersion.VersionName} and {afterVersion.VersionName}: required blocks are missing. Run Repair data or Reindex data and retry.";
+        }
+
+        return message;
+    }
+
     private async Task LoadPendingChangesAsync()
     {
         var pending = await _mediator.Send(new GetRepositoryPendingChangesQuery(RepositoryId, 400));
@@ -1852,15 +2253,129 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void OnFileVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        RebuildVisibleFileVersions();
         OnPropertyChanged(nameof(HasNoFileVersions));
+        OnPropertyChanged(nameof(CanToggleFileVersionsView));
+        OnPropertyChanged(nameof(FileVersionsToggleLabel));
+    }
+
+    private void OnComparableVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasComparableVersions));
     }
 
     private void OnDiffPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasDiffPreviewRows));
         OnPropertyChanged(nameof(HasNoDiffPreviewRows));
+        OnPropertyChanged(nameof(ShowDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowNoDiffPreviewMessage));
     }
 
+
+    private async Task LoadFullFilePreviewAsync()
+    {
+        if (_diffPreviewBeforeVersionId is not > 0 || _diffPreviewAfterVersionId is not > 0)
+            return;
+
+        IsFullFilePreviewMode = true;
+        IsFullFilePreviewLoading = true;
+        FullPreviewBeforeText = string.Empty;
+        FullPreviewAfterText = string.Empty;
+        FullPreviewSummary = "Loading full file content...";
+
+        try
+        {
+            var beforeTask = _mediator.Send(new GetFileVersionTextContentQuery(_diffPreviewBeforeVersionId.Value, 4_000_000));
+            var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_diffPreviewAfterVersionId.Value, 4_000_000));
+
+            await Task.WhenAll(beforeTask, afterTask);
+
+            var before = beforeTask.Result;
+            var after = afterTask.Result;
+            var summaryParts = new List<string>(2);
+
+            if (before.Success && before.Value is not null)
+            {
+                FullPreviewBeforeText = before.Value.Content;
+                summaryParts.Add($"Before: {FormatSize(before.Value.SizeBytes)}{(before.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+            }
+            else
+            {
+                FullPreviewBeforeText = $"Unable to load before version.\n\n{before.Error}";
+                summaryParts.Add("Before unavailable");
+            }
+
+            if (after.Success && after.Value is not null)
+            {
+                FullPreviewAfterText = after.Value.Content;
+                summaryParts.Add($"After: {FormatSize(after.Value.SizeBytes)}{(after.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+            }
+            else
+            {
+                FullPreviewAfterText = $"Unable to load after version.\n\n{after.Error}";
+                summaryParts.Add("After unavailable");
+            }
+
+            FullPreviewSummary = string.Join(" | ", summaryParts);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load full-file preview. RepositoryId {RepositoryId}. BeforeVersion {BeforeVersion}. AfterVersion {AfterVersion}",
+                RepositoryId,
+                _diffPreviewBeforeVersionId,
+                _diffPreviewAfterVersionId);
+
+            FullPreviewBeforeText = string.Empty;
+            FullPreviewAfterText = string.Empty;
+            FullPreviewSummary = "Failed to load full file preview.";
+            VersionPanelError = "Failed to load full file preview.";
+        }
+        finally
+        {
+            IsFullFilePreviewLoading = false;
+        }
+    }
+
+    private string? GetSelectedFileFullPath()
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryPath))
+            return null;
+
+        var relativePath = SelectedItem?.RelativePath;
+        if (string.IsNullOrWhiteSpace(relativePath))
+            relativePath = _diffPreviewRelativePath;
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        var root = Path.GetFullPath(RepositoryPath);
+        var normalizedRelative = relativePath.Replace('/', Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var fullPath = Path.GetFullPath(Path.Combine(root, normalizedRelative));
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return fullPath;
+    }
+
+    private void ResetFullFilePreviewState()
+    {
+        IsFullFilePreviewMode = false;
+        IsFullFilePreviewLoading = false;
+        FullPreviewBeforeText = string.Empty;
+        FullPreviewAfterText = string.Empty;
+        FullPreviewSummary = string.Empty;
+    }
     private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
         IReadOnlyList<TextDiffLineDto> lines,
         IReadOnlyList<TextDiffHunkDto> hunks)
@@ -1962,8 +2477,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var leftKind = NormalizeDiffKind(left?.Kind);
         var rightKind = NormalizeDiffKind(right?.Kind);
 
+        var kindBadge = (leftKind, rightKind) switch
+        {
+            ("remove", "add") => "~",
+            ("remove", _) => "-",
+            (_, "add") => "+",
+            _ => "="
+        };
+
         return new DiffPreviewRowViewModel
         {
+            KindBadge = kindBadge,
             LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
             LeftMarker = leftKind switch
             {
@@ -2083,3 +2607,4 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             : normalized;
     }
 }
+

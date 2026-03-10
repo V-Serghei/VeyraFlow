@@ -303,22 +303,50 @@ internal sealed class RustFileContentStore : IFileContentStore
 
         foreach (var block in blocks.OrderBy(b => b.Sequence))
         {
-            if (!block.BlockHashBlake3.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+            byte[] plaintextBytes;
+
+            if (block.BlockHashBlake3.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var hash = block.BlockHashBlake3[ManagedHashPrefix.Length..];
+                var blockPath = GetManagedBlockPath(hash);
+
+                if (!File.Exists(blockPath))
+                    throw new FileNotFoundException("Block file not found for restore.", blockPath);
+
+                var storedBytes = await File.ReadAllBytesAsync(blockPath, ct);
+                plaintextBytes = _artifactCryptor.Unprotect(storedBytes);
+
+                if (plaintextBytes.Length < block.LengthBytes)
+                    throw new InvalidOperationException(
+                        $"Block {block.BlockHashBlake3} is shorter than expected after decryption.");
+            }
+            else if (IsNativeBlockHash(block.BlockHashBlake3))
+            {
+                var nativeCompressedPath = GetNativeBlockPath(block.BlockHashBlake3);
+                if (!File.Exists(nativeCompressedPath))
+                    throw new FileNotFoundException("Native block file not found for restore.", nativeCompressedPath);
+
+                var compressedBytes = await File.ReadAllBytesAsync(nativeCompressedPath, ct);
+
+                try
+                {
+                    plaintextBytes = VeyraCoreNative.ZstdDecompress(compressedBytes, block.LengthBytes);
+                }
+                catch (EntryPointNotFoundException)
+                {
+                    throw new InvalidOperationException(
+                        $"Managed fallback cannot restore native block hash {block.BlockHashBlake3}. Rebuild native veyra_core with block entrypoints.");
+                }
+
+                if (plaintextBytes.Length < block.LengthBytes)
+                    throw new InvalidOperationException(
+                        $"Native block {block.BlockHashBlake3} is shorter than expected after decompression.");
+            }
+            else
+            {
                 throw new InvalidOperationException(
-                    $"Managed fallback cannot restore native block hash {block.BlockHashBlake3}. Rebuild native veyra_core with block entrypoints.");
-
-            var hash = block.BlockHashBlake3[ManagedHashPrefix.Length..];
-            var blockPath = GetManagedBlockPath(hash);
-
-            if (!File.Exists(blockPath))
-                throw new FileNotFoundException("Block file not found for restore.", blockPath);
-
-            var storedBytes = await File.ReadAllBytesAsync(blockPath, ct);
-            var plaintextBytes = _artifactCryptor.Unprotect(storedBytes);
-
-            if (plaintextBytes.Length < block.LengthBytes)
-                throw new InvalidOperationException(
-                    $"Block {block.BlockHashBlake3} is shorter than expected after decryption.");
+                    $"Unsupported block hash format {block.BlockHashBlake3}.");
+            }
 
             await outStream.WriteAsync(plaintextBytes.AsMemory(0, block.LengthBytes), ct);
             totalWritten += block.LengthBytes;
@@ -419,6 +447,34 @@ internal sealed class RustFileContentStore : IFileContentStore
         return Path.Combine(_storeRoot, "managed", "blocks", p1, p2, $"{normalized}.bin");
     }
 
+    private string GetNativeBlockPath(string hash)
+    {
+        var normalized = hash.Trim().ToLowerInvariant();
+
+        var p1 = normalized.Length >= 2 ? normalized[..2] : "00";
+        var p2 = normalized.Length >= 4 ? normalized[2..4] : "00";
+
+        return Path.Combine(_storeRoot, "blocks", p1, p2, $"{normalized}.zst");
+    }
+
+    private static bool IsNativeBlockHash(string hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash) || hash.Length != 64)
+            return false;
+
+        foreach (var ch in hash)
+        {
+            var isHex = (ch >= '0' && ch <= '9')
+                        || (ch >= 'a' && ch <= 'f')
+                        || (ch >= 'A' && ch <= 'F');
+
+            if (!isHex)
+                return false;
+        }
+
+        return true;
+    }
+
     private static string ResolveStoreRoot(IConfiguration cfg)
     {
         var fromCfg = cfg["Storage:BlockStorePath"];
@@ -481,3 +537,4 @@ internal sealed class RustFileContentStore : IFileContentStore
         public int LengthBytes { get; init; }
     }
 }
+

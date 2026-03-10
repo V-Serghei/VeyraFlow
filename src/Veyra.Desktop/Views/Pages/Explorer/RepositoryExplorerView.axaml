@@ -170,14 +170,6 @@
                                 <StackPanel Spacing="8">
                                     <TextBlock Text="Repository tools" FontWeight="SemiBold"/>
                                     <WrapPanel Orientation="Horizontal" ItemWidth="170" ItemHeight="34">
-                                        <Button Content="Export bundle" AutomationProperties.Name="Export repository bundle"
-                                                Command="{Binding ExportRepositoryBundleCommand}"
-                                                IsEnabled="{Binding CanRunMaintenanceActions}"
-                                                Classes="subtle"/>
-                                        <Button Content="Import bundle" AutomationProperties.Name="Import repository bundle"
-                                                Command="{Binding ImportRepositoryBundleCommand}"
-                                                IsEnabled="{Binding CanRunMaintenanceActions}"
-                                                Classes="subtle"/>
                                         <Button Content="Repair data" AutomationProperties.Name="Repair repository data"
                                                 Command="{Binding RepairRepositoryDataCommand}"
                                                 IsEnabled="{Binding CanRunMaintenanceActions}"
@@ -216,25 +208,27 @@
                                 <TextBlock Text="No versions found for selected file." Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
 
                                 <ListBox Classes="clean-list"
-                                         ItemsSource="{Binding FileVersions}"
+                                         ItemsSource="{Binding VisibleFileVersions}"
                                          SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
                                          MaxHeight="200">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
                                             <Border Classes="card" Padding="8">
-                                                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
+                                                <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
                                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
-                                                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Text="{Binding HashShort}" Opacity="0.66" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                    
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
 
+                                <Button Content="{Binding FileVersionsToggleLabel}" Command="{Binding ToggleFileVersionsViewCommand}" Classes="subtle" IsVisible="{Binding CanToggleFileVersionsView}"/>
+
                                 <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
-                                    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
+                                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
                                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Path" Opacity="0.7"/>
                                         <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
                                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Opacity="0.7"/>
@@ -243,8 +237,6 @@
                                         <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Date" Opacity="0.7"/>
                                         <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
-                                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Hash" Opacity="0.7"/>
-                                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedVersion.HashDisplay}" FontSize="11" TextWrapping="Wrap"/>
                                     </Grid>
                                 </Border>
 
@@ -289,12 +281,14 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
+
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Preview vs previous"
+                                    <Button Content="Compare with previous"
                                             Command="{Binding CompareSelectedWithPreviousCommand}"
                                             IsEnabled="{Binding CanRunDiffForSelectedVersion}"
                                             Classes="subtle"/>
-                                    <Button Content="Compare selected pair"
+                                    <Button Content="Compare in window"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
                                             Classes="primary"/>
@@ -403,7 +397,7 @@
                                             <TextBlock Text="{Binding SelectedItem.Type}"/>
                                             <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
                                             <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
-                                            <TextBlock Classes="muted" Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap"/>
+                                            
 
                                             <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
 
@@ -416,25 +410,27 @@
                                             <TextBlock Text="No versions found for selected file." Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
 
                                             <ListBox Classes="clean-list"
-                                                     ItemsSource="{Binding FileVersions}"
+                                                     ItemsSource="{Binding VisibleFileVersions}"
                                                      SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
                                                      MaxHeight="220">
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
                                                         <Border Classes="card" Padding="8">
-                                                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
+                                                            <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
                                                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
                                                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
                                                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
-                                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Text="{Binding HashShort}" Opacity="0.66" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                                
                                                             </Grid>
                                                         </Border>
                                                     </DataTemplate>
                                                 </ListBox.ItemTemplate>
                                             </ListBox>
 
+                                            <Button Content="{Binding FileVersionsToggleLabel}" Command="{Binding ToggleFileVersionsViewCommand}" Classes="subtle" IsVisible="{Binding CanToggleFileVersionsView}"/>
+
                                             <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
-                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
+                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
                                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Path" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
                                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Opacity="0.7"/>
@@ -443,8 +439,6 @@
                                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
                                                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Date" Opacity="0.7"/>
                                                     <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
-                                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Hash" Opacity="0.7"/>
-                                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedVersion.HashDisplay}" FontSize="11" TextWrapping="Wrap"/>
                                                 </Grid>
                                             </Border>
 
@@ -489,12 +483,14 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
+
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="Preview vs previous"
+                                    <Button Content="Compare with previous"
                                             Command="{Binding CompareSelectedWithPreviousCommand}"
                                             IsEnabled="{Binding CanRunDiffForSelectedVersion}"
                                             Classes="subtle"/>
-                                    <Button Content="Compare selected pair"
+                                    <Button Content="Compare in window"
                                             Command="{Binding CompareSelectedVersionsCommand}"
                                             IsEnabled="{Binding CanCompareSelectedVersionPair}"
                                             Classes="primary"/>
@@ -652,5 +648,4 @@
         </Grid>
     </Grid>
 </UserControl>
-
 

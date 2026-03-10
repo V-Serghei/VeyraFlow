@@ -6,6 +6,8 @@ public sealed class DiffPreviewRowViewModel
     public bool IsContentRow => !IsHunkHeader;
     public string HunkHeader { get; init; } = string.Empty;
 
+    public string KindBadge { get; init; } = "=";
+
     public string LeftLineNumber { get; init; } = string.Empty;
     public string LeftMarker { get; init; } = string.Empty;
     public string LeftText { get; init; } = string.Empty;
@@ -21,6 +23,7 @@ public sealed class DiffPreviewRowViewModel
     public static DiffPreviewRowViewModel CreateHunkHeader(string oldRange, string newRange, string kind) => new()
     {
         IsHunkHeader = true,
+        KindBadge = "@@",
         HunkHeader = $"@@ {oldRange} -> {newRange} [{kind}] @@"
     };
 }

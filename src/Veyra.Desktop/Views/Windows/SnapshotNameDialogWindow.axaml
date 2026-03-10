@@ -200,7 +200,7 @@
 
                                                             <Border IsVisible="{Binding IsContentRow}"
                                                                     Classes="diff-side"
-                                                                    Background="{Binding LeftBackground}">
+                                                                    Background="{Binding LeftBackground}" ClipToBounds="True">
                                                                 <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
                                                                     <TextBlock Grid.Column="0"
                                                                                Text="{Binding LeftGutter}"
@@ -267,7 +267,7 @@
 
                                                             <Border IsVisible="{Binding IsContentRow}"
                                                                     Classes="diff-side"
-                                                                    Background="{Binding RightBackground}">
+                                                                    Background="{Binding RightBackground}" ClipToBounds="True">
                                                                 <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
                                                                     <TextBlock Grid.Column="0"
                                                                                Text="{Binding RightGutter}"
@@ -401,6 +401,4 @@
         </Border>
     </Grid>
 </Window>
-
-
 

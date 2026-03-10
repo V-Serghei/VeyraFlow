@@ -103,6 +103,13 @@ internal static class VeyraCoreNative
         out ulong written);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_zstd_decompress(
+        byte[] data,
+        int dataLen,
+        byte[] output,
+        int outputLen);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_compare_snapshot_links_utf8(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string currentStatesJson,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string previousStatesJson,
@@ -260,6 +267,25 @@ internal static class VeyraCoreNative
             "Native text diff failed");
     }
 
+    public static byte[] ZstdDecompress(byte[] compressedBytes, int expectedOutputLength)
+    {
+        if (compressedBytes is null || compressedBytes.Length == 0)
+            return [];
+
+        if (expectedOutputLength <= 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedOutputLength));
+
+        var output = new byte[expectedOutputLength];
+        var written = veyra_zstd_decompress(compressedBytes, compressedBytes.Length, output, output.Length);
+        if (written < 0)
+            throw new InvalidOperationException($"Native zstd decompress failed {GetLastError()}".Trim());
+
+        if (written == output.Length)
+            return output;
+
+        return output[..written];
+    }
+
     public static string CompareSnapshotLinksJson(string currentStatesJson, string previousStatesJson)
     {
         return ReadJsonResult(
@@ -377,6 +403,8 @@ internal static class VeyraCoreNative
     {
         var candidates = BuildCandidates();
         var loadErrors = new List<string>();
+        NativeLibraryProbe? bestPartial = null;
+        var bestPartialMissingCount = int.MaxValue;
 
         foreach (var candidate in candidates)
         {
@@ -387,18 +415,58 @@ internal static class VeyraCoreNative
             {
                 var handle = NativeLibrary.Load(candidate);
                 var exports = ReadExportedEntrypoints(handle);
+                var missingCount = CountMissingRequiredEntrypoints(exports);
 
-                return new NativeLibraryProbe(
-                    Handle: handle,
-                    LoadedPath: candidate,
-                    ExportedEntrypoints: exports,
-                    CandidatePaths: candidates,
-                    LoadError: null);
+                if (missingCount == 0)
+                {
+                    if (bestPartial is not null && bestPartial.Handle != IntPtr.Zero)
+                        NativeLibrary.Free(bestPartial.Handle);
+
+                    return new NativeLibraryProbe(
+                        Handle: handle,
+                        LoadedPath: candidate,
+                        ExportedEntrypoints: exports,
+                        CandidatePaths: candidates,
+                        LoadError: null);
+                }
+
+                if (missingCount < bestPartialMissingCount)
+                {
+                    if (bestPartial is not null && bestPartial.Handle != IntPtr.Zero)
+                        NativeLibrary.Free(bestPartial.Handle);
+
+                    bestPartialMissingCount = missingCount;
+                    bestPartial = new NativeLibraryProbe(
+                        Handle: handle,
+                        LoadedPath: candidate,
+                        ExportedEntrypoints: exports,
+                        CandidatePaths: candidates,
+                        LoadError: $"Loaded partial native library (missing required entrypoints: {missingCount}).");
+                }
+                else
+                {
+                    NativeLibrary.Free(handle);
+                }
             }
             catch (Exception ex)
             {
                 loadErrors.Add($"{candidate}: {ex.Message}");
             }
+        }
+
+        if (bestPartial is not null)
+        {
+            var missingEntrypoints = RequiredEntrypoints
+                .Where(entrypoint => !bestPartial.ExportedEntrypoints.Contains(entrypoint))
+                .ToArray();
+
+            var partialError =
+                $"Loaded native library {bestPartial.LoadedPath} but it is missing required entrypoints: {string.Join(", ", missingEntrypoints)}.";
+            var combinedError = loadErrors.Count == 0
+                ? partialError
+                : partialError + " Other candidates load errors: " + string.Join(" | ", loadErrors);
+
+            return bestPartial with { LoadError = combinedError };
         }
 
         var missingHint = candidates.Count == 0
@@ -416,6 +484,9 @@ internal static class VeyraCoreNative
             CandidatePaths: candidates,
             LoadError: errorMessage);
     }
+
+    private static int CountMissingRequiredEntrypoints(HashSet<string> exports)
+        => RequiredEntrypoints.Count(entrypoint => !exports.Contains(entrypoint));
 
     private static HashSet<string> ReadExportedEntrypoints(IntPtr handle)
     {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -20,11 +20,13 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
     {
         get
         {
-            var baseTitle = IsDeletionMarker
-                ? $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss} · deleted"
-                : $"{CreatedAtUtc:yyyy-MM-dd HH:mm:ss}";
+            var state = IsDeletionMarker
+                ? "deleted"
+                : HasContentBlocks
+                    ? SizeDisplay
+                    : "no content";
 
-            return HasContentBlocks ? baseTitle : baseTitle + " · no content";
+            return $"{VersionName} | {CreatedAtUtc:yyyy-MM-dd HH:mm:ss} | {state}";
         }
     }
 
@@ -41,10 +43,10 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
     }
 
     public string CreatedAtDisplay => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-    public string SizeDisplay => IsDeletionMarker ? "—" : FormatSize(SizeBytes);
-    public string HashDisplay => string.IsNullOrWhiteSpace(ContentHashSha256) ? "—" : ContentHashSha256;
+    public string SizeDisplay => IsDeletionMarker ? "-" : FormatSize(SizeBytes);
+    public string HashDisplay => string.IsNullOrWhiteSpace(ContentHashSha256) ? "-" : ContentHashSha256;
     public string HashShort => string.IsNullOrWhiteSpace(ContentHashSha256)
-        ? "—"
+        ? "-"
         : ContentHashSha256.Length <= 16
             ? ContentHashSha256
             : ContentHashSha256[..16] + "...";
@@ -57,3 +59,4 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
+

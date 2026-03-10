@@ -6,12 +6,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
@@ -57,6 +59,11 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _cloudSyncQueueText = "pending: 0, conflicts: 0";
     [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
     [ObservableProperty] private bool _isSyncNowRunning;
+    [ObservableProperty] private bool _isBundleOperationRunning;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBundleOperationMessage))]
+    private string _bundleOperationMessage = string.Empty;
 
     [ObservableProperty] private bool _isRetentionRunning;
     [ObservableProperty] private string _retentionProgressText = string.Empty;
@@ -117,6 +124,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             RetentionResultText = string.Empty;
             RetentionProgressText = string.Empty;
+            BundleOperationMessage = string.Empty;
         }
         catch (Exception ex)
         {
@@ -265,6 +273,109 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         }
     }
 
+    [RelayCommand(CanExecute = nameof(CanRunBundleOperations))]
+    private async Task ExportBundleAsync()
+    {
+        if (!CanRunBundleOperations)
+            return;
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            ErrorMessage = "Unable to open file picker window.";
+            return;
+        }
+
+        var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export repository bundle",
+            SuggestedFileName = BuildSuggestedBundleFileName(),
+            DefaultExtension = "zip",
+            ShowOverwritePrompt = true,
+            FileTypeChoices =
+            [
+                new FilePickerFileType("Veyra bundle")
+                {
+                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
+                }
+            ]
+        });
+
+        var bundlePath = file?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(bundlePath))
+            return;
+
+        await RunBundleOperationAsync(
+            startedMessage: "Exporting repository bundle...",
+            operation: async () => await _mediator.Send(new ExportRepositoryBundleCommand(RepositoryId, bundlePath)),
+            onSuccess: result =>
+                $"{result.Summary}\nBundle: {result.BundlePath}\nSize: {FormatSize(result.BundleSizeBytes)}");
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRunBundleOperations))]
+    private async Task ImportBundleAsync()
+    {
+        if (!CanRunBundleOperations)
+            return;
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            ErrorMessage = "Unable to open file picker window.";
+            return;
+        }
+
+        var bundleSelection = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import repository bundle",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Veyra bundle")
+                {
+                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
+                }
+            ]
+        });
+
+        var bundlePath = bundleSelection.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(bundlePath))
+            return;
+
+        var validation = await _mediator.Send(new ValidateRepositoryBundleQuery(bundlePath));
+        if (!validation.IsValid)
+        {
+            ErrorMessage = validation.Message;
+            BundleOperationMessage = validation.Message;
+            return;
+        }
+
+        var targetDirectorySelection = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select target directory for imported repository",
+            AllowMultiple = false
+        });
+
+        var targetDirectory = targetDirectorySelection.FirstOrDefault()?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+            return;
+
+        await RunBundleOperationAsync(
+            startedMessage: "Importing repository bundle...",
+            operation: async () => await _mediator.Send(new ImportRepositoryBundleCommand(
+                bundlePath,
+                targetDirectory,
+                RepositoryNameOverride: null)),
+            onSuccess: result =>
+            {
+                var warningText = result.Warnings.Count == 0
+                    ? string.Empty
+                    : "\nWarnings:\n" + string.Join('\n', result.Warnings);
+
+                return $"{result.Summary}\nImported repository id: {result.RepositoryId}{warningText}";
+            });
+    }
+
     [RelayCommand]
     private async Task DeleteAsync()
     {
@@ -305,6 +416,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         BackRequested?.Invoke();
     }
 
+    public bool HasBundleOperationMessage => !string.IsNullOrWhiteSpace(BundleOperationMessage);
+    public bool CanRunBundleOperations => RepositoryId > 0 && !IsLoading && !IsBundleOperationRunning;
+
     public bool CanRunRetention => RepositoryId > 0 && RetentionEnabled && !IsRetentionRunning;
     public bool CanCancelRetention => IsRetentionRunning;
 
@@ -317,11 +431,28 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CanCancelRetention));
     }
 
+    partial void OnIsLoadingChanged(bool value)
+    {
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        ImportBundleCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanRunBundleOperations));
+    }
+
+    partial void OnIsBundleOperationRunningChanged(bool value)
+    {
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        ImportBundleCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanRunBundleOperations));
+    }
+
     partial void OnRepositoryIdChanged(int value)
     {
         RunRetentionDryRunCommand.NotifyCanExecuteChanged();
         RunRetentionApplyCommand.NotifyCanExecuteChanged();
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        ImportBundleCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanRunRetention));
+        OnPropertyChanged(nameof(CanRunBundleOperations));
     }
 
     partial void OnRetentionEnabledChanged(bool value)
@@ -331,6 +462,44 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CanRunRetention));
     }
 
+
+    private async Task RunBundleOperationAsync<TResult>(
+        string startedMessage,
+        Func<Task<OperationResult<TResult>>> operation,
+        Func<TResult, string> onSuccess)
+        where TResult : class
+    {
+        if (!CanRunBundleOperations)
+            return;
+
+        try
+        {
+            IsBundleOperationRunning = true;
+            ErrorMessage = null;
+            BundleOperationMessage = startedMessage;
+
+            var result = await operation();
+            if (!result.Success || result.Value is null)
+            {
+                var message = result.Error ?? "Bundle operation failed.";
+                ErrorMessage = message;
+                BundleOperationMessage = message;
+                return;
+            }
+
+            BundleOperationMessage = onSuccess(result.Value);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Bundle operation failed for repository {RepositoryId}", RepositoryId);
+            ErrorMessage = "Bundle operation failed.";
+            BundleOperationMessage = ErrorMessage;
+        }
+        finally
+        {
+            IsBundleOperationRunning = false;
+        }
+    }
     private async Task RunRetentionAsync(bool dryRun)
     {
         if (!CanRunRetention)
@@ -480,6 +649,33 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             _ => status.Replace('_', ' ')
         };
     }
+    private string BuildSuggestedBundleFileName()
+    {
+        var safeName = string.IsNullOrWhiteSpace(RepositoryName)
+            ? $"repo_{RepositoryId}"
+            : SanitizeFileName(RepositoryName);
+
+        return $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.veyra.zip";
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = value.Trim().Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray();
+        var normalized = new string(chars).Trim('_', ' ');
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "repository"
+            : normalized;
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
     private static string NormalizeFormat(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -522,3 +718,4 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : null;
     }
 }
+

@@ -141,6 +141,30 @@
 
                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
 
+                <TextBlock Text="Repository bundle" FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock Text="Export current repository data or import a bundle into another folder."
+                           Opacity="0.8"
+                           TextWrapping="Wrap"/>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Export bundle"
+                            Command="{Binding ExportBundleCommand}"
+                            IsEnabled="{Binding CanRunBundleOperations}"
+                            Classes="subtle"/>
+                    <Button Content="Import bundle"
+                            Command="{Binding ImportBundleCommand}"
+                            IsEnabled="{Binding CanRunBundleOperations}"
+                            Classes="subtle"/>
+                    <TextBlock Text="Working..." VerticalAlignment="Center"
+                               IsVisible="{Binding IsBundleOperationRunning}"/>
+                </StackPanel>
+
+                <TextBlock Text="{Binding BundleOperationMessage}"
+                           Foreground="#93C5FD"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding HasBundleOperationMessage}"/>
+
+                <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,8"/>
                 <TextBlock Text="Retention policy" FontSize="16" FontWeight="SemiBold"/>
                 <CheckBox Content="Enable retention for this repository"
                           IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
@@ -195,3 +219,4 @@
         </ScrollViewer>
     </DockPanel>
 </UserControl>
+

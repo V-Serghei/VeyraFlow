@@ -85,6 +85,7 @@ public static class DependencyInjection
 
         services.AddTransient<CreateRepositoryWindowViewModel>();
         services.AddTransient<SnapshotNameDialogWindowViewModel>();
+        services.AddTransient<FileVersionCompareWindowViewModel>();
 
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
@@ -104,8 +105,14 @@ public static class DependencyInjection
         services.AddTransient<SnapshotNameDialogWindow>(sp =>
             new SnapshotNameDialogWindow { DataContext = sp.GetRequiredService<SnapshotNameDialogWindowViewModel>() });
 
+        services.AddTransient<FileVersionCompareWindow>(sp =>
+            new FileVersionCompareWindow { DataContext = sp.GetRequiredService<FileVersionCompareWindowViewModel>() });
+
         services.AddTransient<SetupWizardWindow>();
 
         return services.BuildServiceProvider();
     }
 }
+
+
+

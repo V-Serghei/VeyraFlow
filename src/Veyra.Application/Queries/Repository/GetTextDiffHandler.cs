@@ -87,13 +87,15 @@ public sealed class GetTextDiffHandler(
         }
         catch (Exception ex)
         {
+            var safeError = FormatDiffBuildError(ex);
+
             log.LogError(
                 ex,
                 "Failed to build text diff. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 request.LeftFileVersionId,
                 request.RightFileVersionId);
 
-            return OperationResult<TextDiffResultDto>.Fail(ex.Message);
+            return OperationResult<TextDiffResultDto>.Fail(safeError);
         }
         finally
         {
@@ -112,6 +114,29 @@ public sealed class GetTextDiffHandler(
         catch
         {
         }
+    }
+    private static string FormatDiffBuildError(Exception ex)
+    {
+        var text = ex.ToString();
+
+        if (text.Contains("Managed fallback cannot restore native block hash", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Diff is unavailable for this pair right now: selected versions use native block format, but native restore entrypoints are unavailable. Rebuild/update veyra_core and run Reindex data, then retry.";
+        }
+
+        if (text.Contains("Block file not found for restore", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Blocks are missing", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Diff is unavailable because some version blocks are missing. Run Repair data or Reindex data, then retry.";
+        }
+
+        if (text.Contains("decryption", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Artifact key", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Diff is unavailable because encrypted artifact blocks cannot be decrypted with current keys.";
+        }
+
+        return ex.Message;
     }
 }
 
