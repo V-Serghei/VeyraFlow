@@ -104,6 +104,135 @@ public sealed class RepositoryCloudSyncOrchestrator(
         }
     }
 
+    public async Task<RepositoryCloudRepairResultDto> RepairRepositoryCloudDataAsync(int repositoryId, CancellationToken ct = default)
+    {
+        var accessToken = await TryGetSyncAccessTokenAsync("repair repository cloud data", ct);
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return new RepositoryCloudRepairResultDto(
+                Success: false,
+                ReferencedBlocks: 0,
+                AlreadyPresentBlocks: 0,
+                UploadedBlocks: 0,
+                MissingLocalBlocks: 0,
+                FailedUploads: 0,
+                ErrorMessage: "Cloud access token is unavailable.");
+        }
+
+        var repository = await db.Repositories
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repository is null)
+        {
+            return new RepositoryCloudRepairResultDto(
+                Success: false,
+                ReferencedBlocks: 0,
+                AlreadyPresentBlocks: 0,
+                UploadedBlocks: 0,
+                MissingLocalBlocks: 0,
+                FailedUploads: 0,
+                ErrorMessage: $"Repository {repositoryId} was not found.");
+        }
+
+        var blockHashes = await db.Set<FileVersionBlock>()
+            .Where(b => !b.IsDeleted)
+            .Where(b => !b.FileVersion.IsDeleted)
+            .Where(b => !b.FileVersion.FileIdentity.IsDeleted)
+            .Where(b => b.FileVersion.FileIdentity.RepositoryId == repositoryId)
+            .Select(b => b.BlockHashBlake3)
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Distinct()
+            .OrderBy(h => h)
+            .ToListAsync(ct);
+
+        if (blockHashes.Count == 0)
+        {
+            await TryPushLatestSnapshotAsync(repositoryId, ct);
+            await ProcessPendingQueueAsync(ct);
+
+            return new RepositoryCloudRepairResultDto(
+                Success: true,
+                ReferencedBlocks: 0,
+                AlreadyPresentBlocks: 0,
+                UploadedBlocks: 0,
+                MissingLocalBlocks: 0,
+                FailedUploads: 0);
+        }
+
+        var alreadyPresent = 0;
+        var uploaded = 0;
+        var missingLocal = 0;
+        var failedUploads = 0;
+
+        foreach (var blockHash in blockHashes)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            bool existsRemotely;
+            try
+            {
+                existsRemotely = await cloudSync.BlockExistsAsync(accessToken, blockHash, ct);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(
+                    ex,
+                    "Failed to probe remote block presence during repository repair. RepositoryId {RepositoryId}. Block {BlockHash}",
+                    repositoryId,
+                    blockHash);
+                failedUploads++;
+                continue;
+            }
+
+            if (existsRemotely)
+            {
+                alreadyPresent++;
+                continue;
+            }
+
+            try
+            {
+                var uploadedNow = await TryUploadMissingBlockAsync(accessToken, blockHash, ct);
+                if (uploadedNow)
+                    uploaded++;
+                else
+                    missingLocal++;
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(
+                    ex,
+                    "Failed to upload missing block during repository repair. RepositoryId {RepositoryId}. Block {BlockHash}",
+                    repositoryId,
+                    blockHash);
+                failedUploads++;
+            }
+        }
+
+        await TryPushLatestSnapshotAsync(repositoryId, ct);
+        await ProcessPendingQueueAsync(ct);
+
+        log.LogInformation(
+            "Repository cloud repair completed. RepositoryId {RepositoryId}. Referenced {Referenced}. Present {Present}. Uploaded {Uploaded}. MissingLocal {MissingLocal}. Failed {Failed}",
+            repositoryId,
+            blockHashes.Count,
+            alreadyPresent,
+            uploaded,
+            missingLocal,
+            failedUploads);
+
+        return new RepositoryCloudRepairResultDto(
+            Success: failedUploads == 0,
+            ReferencedBlocks: blockHashes.Count,
+            AlreadyPresentBlocks: alreadyPresent,
+            UploadedBlocks: uploaded,
+            MissingLocalBlocks: missingLocal,
+            FailedUploads: failedUploads,
+            ErrorMessage: failedUploads == 0
+                ? null
+                : $"Failed to upload {failedUploads} block(s) during repair.");
+    }
+
     public async Task<int> RestoreRepositoriesFromCloudAsync(CancellationToken ct = default)
     {
         var profile = await userProfiles.GetActiveProfileAsync(ct);

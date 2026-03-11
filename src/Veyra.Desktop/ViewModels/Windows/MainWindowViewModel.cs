@@ -16,6 +16,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly ThemeManager _theme = ThemeManager.Instance;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
+    private bool _returnToAppSettingsFromRepositorySettings;
 
     public RepositoryDashboardViewModel Dashboard { get; }
     public RepositoryExplorerViewModel Explorer { get; }
@@ -48,6 +49,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Settings.RepositoryDeleted += OnRepositoryDeleted;
 
         AppSettings.BackRequested += ShowDashboard;
+        AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
         _theme.ThemeChanged += OnThemeChanged;
         _localization.LanguageChanged += OnLanguageChanged;
 
@@ -107,6 +109,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task OpenRepositorySettingsAsync(int repositoryId)
     {
+        _returnToAppSettingsFromRepositorySettings = false;
+        await Settings.LoadAsync(repositoryId);
+        CurrentPage = Settings;
+    }
+
+    private async Task OpenRepositorySettingsFromAppSettingsAsync(int repositoryId)
+    {
+        _returnToAppSettingsFromRepositorySettings = true;
         await Settings.LoadAsync(repositoryId);
         CurrentPage = Settings;
     }
@@ -125,6 +135,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void ShowDashboard()
     {
+        if (_returnToAppSettingsFromRepositorySettings && ReferenceEquals(CurrentPage, Settings))
+        {
+            _returnToAppSettingsFromRepositorySettings = false;
+            CurrentPage = AppSettings;
+            return;
+        }
+
         _ = ShowDashboardAsync();
     }
 

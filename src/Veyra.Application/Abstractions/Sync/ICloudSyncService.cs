@@ -33,6 +33,16 @@ public interface ICloudSyncService
         string blockHash,
         string targetPath,
         CancellationToken ct = default);
+
+    Task<CloudStorageMetricsDto?> GetStorageMetricsAsync(
+        string accessToken,
+        CancellationToken ct = default);
+
+    Task<CloudStorageRepairResultDto?> RepairStorageAsync(
+        string accessToken,
+        int scanLimit = 512,
+        int compactLimit = 128,
+        CancellationToken ct = default);
 }
 
 

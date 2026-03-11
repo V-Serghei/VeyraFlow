@@ -322,6 +322,135 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         }
     }
 
+    public async Task<CloudStorageMetricsDto?> GetStorageMetricsAsync(
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        using var req = BuildRequest(HttpMethod.Get, "/api/admin/storage/metrics", accessToken);
+        using var resp = await _http.SendAsync(req, ct);
+
+        if (resp.StatusCode == HttpStatusCode.Unauthorized)
+            return null;
+
+        resp.EnsureSuccessStatusCode();
+
+        var payload = await resp.Content.ReadFromJsonAsync<StorageMetricsResponse>(JsonOptions, ct);
+        if (payload is null || !payload.Ok || payload.Summary is null || payload.Blocks is null || payload.Packs is null || payload.Filesystem is null)
+            return null;
+
+        return new CloudStorageMetricsDto(
+            payload.Ok,
+            new CloudStorageSummaryDto(
+                payload.Summary.LogicalBlockCount,
+                payload.Summary.LogicalBytes,
+                payload.Summary.PhysicalObjectCount,
+                payload.Summary.PhysicalPayloadBytes,
+                payload.Summary.MissingBlockCount,
+                payload.Summary.ReducedObjectCount,
+                payload.Summary.ReducedObjectPercentFloor),
+            new CloudStorageBlockMetricsDto(
+                payload.Blocks.TotalBlocks,
+                payload.Blocks.PackedBlocks,
+                payload.Blocks.LooseBlocks,
+                payload.Blocks.MissingBlocks,
+                payload.Blocks.LogicalBytes,
+                payload.Blocks.PackedBytes,
+                payload.Blocks.LooseBytes,
+                payload.Blocks.MissingBytes),
+            new CloudStoragePackMetricsDto(
+                payload.Packs.TotalPacks,
+                payload.Packs.ActivePacks,
+                payload.Packs.SealedPacks,
+                payload.Packs.BytesWritten,
+                payload.Packs.PackedBlockRefs),
+            new CloudStorageFilesystemStatsDto(
+                payload.Filesystem.PackFileCount,
+                payload.Filesystem.LooseFileCount,
+                payload.Filesystem.OtherFileCount,
+                payload.Filesystem.PackFileBytes,
+                payload.Filesystem.LooseFileBytes,
+                payload.Filesystem.OtherFileBytes,
+                payload.Filesystem.TotalPhysicalBytes));
+    }
+
+    public async Task<CloudStorageRepairResultDto?> RepairStorageAsync(
+        string accessToken,
+        int scanLimit = 512,
+        int compactLimit = 128,
+        CancellationToken ct = default)
+    {
+        var requestPayload = new StorageRepairRequest
+        {
+            ScanLimit = scanLimit,
+            CompactLimit = compactLimit
+        };
+
+        using var req = BuildRequest(HttpMethod.Post, "/api/admin/storage/repair", accessToken);
+        req.Content = JsonContent.Create(requestPayload);
+
+        using var resp = await _http.SendAsync(req, ct);
+        if (resp.StatusCode == HttpStatusCode.Unauthorized)
+            return null;
+
+        resp.EnsureSuccessStatusCode();
+
+        var payload = await resp.Content.ReadFromJsonAsync<StorageRepairResponse>(JsonOptions, ct);
+        if (payload is null || !payload.Ok || payload.Repair is null || payload.Metrics is null)
+            return null;
+
+        var metrics = payload.Metrics.Summary is not null &&
+                      payload.Metrics.Blocks is not null &&
+                      payload.Metrics.Packs is not null &&
+                      payload.Metrics.Filesystem is not null
+            ? new CloudStorageMetricsDto(
+                payload.Metrics.Ok,
+                new CloudStorageSummaryDto(
+                    payload.Metrics.Summary.LogicalBlockCount,
+                    payload.Metrics.Summary.LogicalBytes,
+                    payload.Metrics.Summary.PhysicalObjectCount,
+                    payload.Metrics.Summary.PhysicalPayloadBytes,
+                    payload.Metrics.Summary.MissingBlockCount,
+                    payload.Metrics.Summary.ReducedObjectCount,
+                    payload.Metrics.Summary.ReducedObjectPercentFloor),
+                new CloudStorageBlockMetricsDto(
+                    payload.Metrics.Blocks.TotalBlocks,
+                    payload.Metrics.Blocks.PackedBlocks,
+                    payload.Metrics.Blocks.LooseBlocks,
+                    payload.Metrics.Blocks.MissingBlocks,
+                    payload.Metrics.Blocks.LogicalBytes,
+                    payload.Metrics.Blocks.PackedBytes,
+                    payload.Metrics.Blocks.LooseBytes,
+                    payload.Metrics.Blocks.MissingBytes),
+                new CloudStoragePackMetricsDto(
+                    payload.Metrics.Packs.TotalPacks,
+                    payload.Metrics.Packs.ActivePacks,
+                    payload.Metrics.Packs.SealedPacks,
+                    payload.Metrics.Packs.BytesWritten,
+                    payload.Metrics.Packs.PackedBlockRefs),
+                new CloudStorageFilesystemStatsDto(
+                    payload.Metrics.Filesystem.PackFileCount,
+                    payload.Metrics.Filesystem.LooseFileCount,
+                    payload.Metrics.Filesystem.OtherFileCount,
+                    payload.Metrics.Filesystem.PackFileBytes,
+                    payload.Metrics.Filesystem.LooseFileBytes,
+                    payload.Metrics.Filesystem.OtherFileBytes,
+                    payload.Metrics.Filesystem.TotalPhysicalBytes))
+            : null;
+
+        if (metrics is null)
+            return null;
+
+        return new CloudStorageRepairResultDto(
+            payload.Ok,
+            new CloudStorageRepairStatsDto(
+                payload.Repair.Scanned,
+                payload.Repair.MissingMarked,
+                payload.Repair.BrokenLooseRefs,
+                payload.Repair.BrokenPackRefs,
+                payload.Repair.Compacted),
+            metrics);
+    }
+
     private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken, string? idempotencyKey = null)
     {
         var request = new HttpRequestMessage(method, path);
@@ -436,6 +565,80 @@ public sealed class CloudSyncHttpService : ICloudSyncService
     {
         public bool Ok { get; init; }
         public List<string>? MissingBlockHashes { get; init; }
+    }
+
+    private sealed class StorageRepairRequest
+    {
+        public int ScanLimit { get; init; }
+        public int CompactLimit { get; init; }
+    }
+
+    private sealed class StorageMetricsResponse
+    {
+        public bool Ok { get; init; }
+        public StorageSummaryResponse? Summary { get; init; }
+        public StorageBlocksResponse? Blocks { get; init; }
+        public StoragePacksResponse? Packs { get; init; }
+        public StorageFilesystemResponse? Filesystem { get; init; }
+    }
+
+    private sealed class StorageRepairResponse
+    {
+        public bool Ok { get; init; }
+        public StorageRepairStatsResponse? Repair { get; init; }
+        public StorageMetricsResponse? Metrics { get; init; }
+    }
+
+    private sealed class StorageSummaryResponse
+    {
+        public long LogicalBlockCount { get; init; }
+        public long LogicalBytes { get; init; }
+        public long PhysicalObjectCount { get; init; }
+        public long PhysicalPayloadBytes { get; init; }
+        public long MissingBlockCount { get; init; }
+        public long ReducedObjectCount { get; init; }
+        public long ReducedObjectPercentFloor { get; init; }
+    }
+
+    private sealed class StorageBlocksResponse
+    {
+        public long TotalBlocks { get; init; }
+        public long PackedBlocks { get; init; }
+        public long LooseBlocks { get; init; }
+        public long MissingBlocks { get; init; }
+        public long LogicalBytes { get; init; }
+        public long PackedBytes { get; init; }
+        public long LooseBytes { get; init; }
+        public long MissingBytes { get; init; }
+    }
+
+    private sealed class StoragePacksResponse
+    {
+        public long TotalPacks { get; init; }
+        public long ActivePacks { get; init; }
+        public long SealedPacks { get; init; }
+        public long BytesWritten { get; init; }
+        public long PackedBlockRefs { get; init; }
+    }
+
+    private sealed class StorageFilesystemResponse
+    {
+        public long PackFileCount { get; init; }
+        public long LooseFileCount { get; init; }
+        public long OtherFileCount { get; init; }
+        public long PackFileBytes { get; init; }
+        public long LooseFileBytes { get; init; }
+        public long OtherFileBytes { get; init; }
+        public long TotalPhysicalBytes { get; init; }
+    }
+
+    private sealed class StorageRepairStatsResponse
+    {
+        public int Scanned { get; init; }
+        public int MissingMarked { get; init; }
+        public int BrokenLooseRefs { get; init; }
+        public int BrokenPackRefs { get; init; }
+        public int Compacted { get; init; }
     }
 
     private sealed class PushSnapshotRequest

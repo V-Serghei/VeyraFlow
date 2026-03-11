@@ -544,6 +544,12 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
 
         public Task<bool> DownloadBlockToFileAsync(string accessToken, string blockHash, string targetPath, CancellationToken ct = default)
             => Task.FromResult(false);
+
+        public Task<CloudStorageMetricsDto?> GetStorageMetricsAsync(string accessToken, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageMetricsDto?>(null);
+
+        public Task<CloudStorageRepairResultDto?> RepairStorageAsync(string accessToken, int scanLimit = 512, int compactLimit = 128, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageRepairResultDto?>(null);
     }
 
     private sealed class AlwaysFailPushCloudSyncService : ICloudSyncService
@@ -570,5 +576,11 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
 
         public Task<bool> DownloadBlockToFileAsync(string accessToken, string blockHash, string targetPath, CancellationToken ct = default)
             => Task.FromResult(false);
+
+        public Task<CloudStorageMetricsDto?> GetStorageMetricsAsync(string accessToken, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageMetricsDto?>(null);
+
+        public Task<CloudStorageRepairResultDto?> RepairStorageAsync(string accessToken, int scanLimit = 512, int compactLimit = 128, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageRepairResultDto?>(null);
     }
 }

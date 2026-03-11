@@ -141,8 +141,8 @@
                                             VerticalAlignment="Top"/>
                                 </Grid>
 
-                                <WrapPanel Orientation="Horizontal" ItemWidth="148">
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,10,10">
+                                <WrapPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
                                         <TextBlock Text="{loc:Tr explorer.filter_type}" Classes="label"/>
                                         <ComboBox ItemsSource="{Binding EntryTypeFilters}"
                                                   SelectedItem="{Binding SelectedEntryTypeFilter, Mode=TwoWay}">
@@ -154,13 +154,13 @@
                                         </ComboBox>
                                     </StackPanel>
 
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,10,10">
+                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
                                         <TextBlock Text="{loc:Tr explorer.filter_extension}" Classes="label"/>
                                         <ComboBox ItemsSource="{Binding ExtensionFilters}"
                                                   SelectedItem="{Binding SelectedExtensionFilter, Mode=TwoWay}"/>
                                     </StackPanel>
 
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,10,10">
+                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
                                         <TextBlock Text="{loc:Tr explorer.filter_modified}" Classes="label"/>
                                         <ComboBox ItemsSource="{Binding ModifiedWindowFilters}"
                                                   SelectedItem="{Binding SelectedModifiedWindowFilter, Mode=TwoWay}">
@@ -172,12 +172,12 @@
                                         </ComboBox>
                                     </StackPanel>
 
-                                    <StackPanel Width="132" Spacing="4" Margin="0,0,10,10">
+                                    <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
                                         <TextBlock Text="{loc:Tr explorer.filter_min_size_mb}" Classes="label"/>
                                         <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0"/>
                                     </StackPanel>
 
-                                    <StackPanel Width="132" Spacing="4" Margin="0,0,10,10">
+                                    <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
                                         <TextBlock Text="{loc:Tr explorer.filter_max_size_mb}" Classes="label"/>
                                         <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0"/>
                                     </StackPanel>
@@ -190,34 +190,37 @@
                                             <TextBlock Text="{loc:Tr explorer.saved_filters_hint}" Classes="muted" FontSize="12"/>
                                         </StackPanel>
 
-                                        <WrapPanel Orientation="Horizontal" ItemWidth="220">
-                                            <TextBox Width="220"
-                                                     Margin="0,0,10,10"
-                                                     Text="{Binding SavedExplorerFilterName, Mode=TwoWay}"
-                                                     Watermark="{loc:Tr explorer.saved_filter_name}"/>
-                                            <Button Margin="0,0,10,10"
-                                                    Content="{loc:Tr explorer.save_filter}"
-                                                    Command="{Binding SaveCurrentExplorerFilterCommand}"/>
-                                            <ComboBox Width="220"
-                                                      Margin="0,0,10,10"
-                                                      ItemsSource="{Binding SavedExplorerFilters}"
-                                                      SelectedItem="{Binding SelectedExplorerSavedFilter, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="explorer:RepositoryExplorerSavedFilterViewModel">
-                                                        <TextBlock Text="{Binding Name}"/>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                            <Button Margin="0,0,10,10"
-                                                    Content="{loc:Tr common.apply}"
-                                                    Command="{Binding ApplyExplorerSavedFilterCommand}"
-                                                    CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
-                                            <Button Margin="0,0,10,10"
-                                                    Content="{loc:Tr common.delete}"
-                                                    Classes="danger"
-                                                    Command="{Binding DeleteExplorerSavedFilterCommand}"
-                                                    CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
-                                        </WrapPanel>
+                                        <StackPanel Spacing="10">
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                <TextBox Grid.Column="0"
+                                                         Text="{Binding SavedExplorerFilterName, Mode=TwoWay}"
+                                                         Watermark="{loc:Tr explorer.saved_filter_name}"/>
+                                                <Button Grid.Column="1"
+                                                        Content="{loc:Tr explorer.save_filter}"
+                                                        Command="{Binding SaveCurrentExplorerFilterCommand}"/>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                                <ComboBox Grid.Column="0"
+                                                          ItemsSource="{Binding SavedExplorerFilters}"
+                                                          SelectedItem="{Binding SelectedExplorerSavedFilter, Mode=TwoWay}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="explorer:RepositoryExplorerSavedFilterViewModel">
+                                                            <TextBlock Text="{Binding Name}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <Button Grid.Column="1"
+                                                        Content="{loc:Tr common.apply}"
+                                                        Command="{Binding ApplyExplorerSavedFilterCommand}"
+                                                        CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                                <Button Grid.Column="2"
+                                                        Content="{loc:Tr common.delete}"
+                                                        Classes="danger"
+                                                        Command="{Binding DeleteExplorerSavedFilterCommand}"
+                                                        CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                            </Grid>
+                                        </StackPanel>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -314,29 +317,6 @@
                                     HorizontalAlignment="Stretch"
                                     Padding="12,10"/>
 
-                            <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
-                                <StackPanel Spacing="8">
-                                    <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
-                                    <TextBlock Classes="muted" Text="{loc:Tr explorer.repository_tools_hint}" FontSize="11" TextWrapping="Wrap"/>
-                                    <WrapPanel Orientation="Horizontal" ItemWidth="170" ItemHeight="34">
-                                        <Button Content="{loc:Tr explorer.fix_missing_data}" ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}" AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
-                                                Command="{Binding RepairRepositoryDataCommand}"
-                                                IsEnabled="{Binding CanRunMaintenanceActions}"
-                                                Classes="subtle"/>
-                                        <Button Content="{loc:Tr explorer.rebuild_index}" ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}" AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
-                                                Command="{Binding ReindexRepositoryDataCommand}"
-                                                IsEnabled="{Binding CanRunMaintenanceActions}"
-                                                Classes="subtle"/>
-                                        <Button Content="{loc:Tr explorer.repair_links}" ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}" AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
-                                                Command="{Binding RelinkRepositoryDataCommand}"
-                                                IsEnabled="{Binding CanRunMaintenanceActions}"
-                                                Classes="subtle"/>
-                                    </WrapPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
-
                             <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
 
                             <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
@@ -347,6 +327,58 @@
                                 <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}" Opacity="0.84"/>
 
                                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
+
+                                <Border Classes="metric-card">
+                                    <StackPanel Spacing="10">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="{loc:Tr explorer.compare_in_window}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Content="{loc:Tr explorer.compare_in_window}"
+                                                    Command="{Binding CompareSelectedVersionsCommand}"
+                                                    IsEnabled="{Binding CanCompareSelectedVersionPair}"
+                                                    Classes="primary"
+                                                    VerticalAlignment="Top"/>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+                                            <StackPanel Grid.Column="0" Spacing="4">
+                                                <TextBlock Text="{loc:Tr explorer.left_version}" Opacity="0.8" FontSize="11"/>
+                                                <ComboBox ItemsSource="{Binding FileVersions}"
+                                                          SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Content="&#xE8AB;"
+                                                    Classes="subtle icon"
+                                                    VerticalAlignment="Bottom"
+                                                    ToolTip.Tip="{loc:Tr common.swap}"
+                                                    Command="{Binding SwapCompareVersionsCommand}"
+                                                    IsEnabled="{Binding CanSwapCompareVersions}"/>
+
+                                            <StackPanel Grid.Column="2" Spacing="4">
+                                                <TextBlock Text="{loc:Tr explorer.right_version}" Opacity="0.8" FontSize="11"/>
+                                                <ComboBox ItemsSource="{Binding FileVersions}"
+                                                          SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
 
                                 <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
                                 <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
@@ -367,7 +399,6 @@
                                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
                                                     <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
-                                                    
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
@@ -375,41 +406,6 @@
                                 </ListBox>
 
                                 <Button Content="{Binding FileVersionsToggleLabel}" Command="{Binding ToggleFileVersionsViewCommand}" Classes="subtle" IsVisible="{Binding CanToggleFileVersionsView}"/>
-
-                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                                    <StackPanel Grid.Column="0" Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.left_version}" Opacity="0.8" FontSize="11"/>
-                                        <ComboBox ItemsSource="{Binding FileVersions}"
-                                                  SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-
-                                    <StackPanel Grid.Column="1" Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.right_version}" Opacity="0.8" FontSize="11"/>
-                                        <ComboBox ItemsSource="{Binding FileVersions}"
-                                                  SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-                                </Grid>
-
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Button Content="{loc:Tr explorer.compare_in_window}"
-                                            Command="{Binding CompareSelectedVersionsCommand}"
-                                            IsEnabled="{Binding CanCompareSelectedVersionPair}"
-                                            Classes="primary"/>
-                                </StackPanel>
-
-                                <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
 
                                 <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
                                     <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
@@ -449,6 +445,42 @@
                                        Opacity="0.72"
                                        IsVisible="{Binding HasNoSelectedItem}"
                                        TextWrapping="Wrap"/>
+
+                            <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,6"/>
+
+                            <Border Classes="card" Padding="12" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                <StackPanel Spacing="10">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
+                                        <TextBlock Classes="muted"
+                                                   Text="{loc:Tr explorer.repository_tools_hint}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <Button Content="{loc:Tr explorer.fix_missing_data}"
+                                            ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}"
+                                            AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
+                                            Command="{Binding RepairRepositoryDataCommand}"
+                                            IsEnabled="{Binding CanRunMaintenanceActions}"
+                                            Classes="subtle"
+                                            HorizontalAlignment="Stretch"/>
+                                    <Button Content="{loc:Tr explorer.rebuild_index}"
+                                            ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}"
+                                            AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
+                                            Command="{Binding ReindexRepositoryDataCommand}"
+                                            IsEnabled="{Binding CanRunMaintenanceActions}"
+                                            Classes="subtle"
+                                            HorizontalAlignment="Stretch"/>
+                                    <Button Content="{loc:Tr explorer.repair_links}"
+                                            ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}"
+                                            AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
+                                            Command="{Binding RelinkRepositoryDataCommand}"
+                                            IsEnabled="{Binding CanRunMaintenanceActions}"
+                                            Classes="subtle"
+                                            HorizontalAlignment="Stretch"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </ScrollViewer>
                 </Border>

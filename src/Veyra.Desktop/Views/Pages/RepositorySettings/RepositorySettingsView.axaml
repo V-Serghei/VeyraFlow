@@ -84,53 +84,67 @@
                                 <TextBlock Text="{loc:Tr repo_settings.formats_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
                             </StackPanel>
 
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="{loc:Tr repo_settings.selected_formats}" Classes="label"/>
-                                <ItemsControl ItemsSource="{Binding SelectedFormats}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="x:String">
-                                            <Border Classes="chip" Padding="8,4" Margin="0,0,8,8">
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <TextBlock Text="{Binding .}"/>
-                                                    <Button Content="&#xE711;"
-                                                            Width="22"
-                                                            Height="22"
-                                                            Padding="0"
-                                                            Classes="ghost icon"
-                                                            ToolTip.Tip="{loc:Tr common.remove}"
-                                                            Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).RemoveFormatCommand}"
-                                                            CommandParameter="{Binding .}"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                <Border Grid.Column="0" Classes="metric-card">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="{loc:Tr repo_settings.selected_formats}" Classes="label"/>
+                                        <ScrollViewer MaxHeight="144"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl ItemsSource="{Binding SelectedFormats}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:String">
+                                                        <Border Classes="chip" Padding="8,4" Margin="0,0,8,8">
+                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                <TextBlock Text="{Binding .}"/>
+                                                                <Button Content="&#xE711;"
+                                                                        Width="22"
+                                                                        Height="22"
+                                                                        Padding="0"
+                                                                        Classes="ghost icon"
+                                                                        ToolTip.Tip="{loc:Tr common.remove}"
+                                                                        Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).RemoveFormatCommand}"
+                                                                        CommandParameter="{Binding .}"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
 
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="{loc:Tr repo_settings.available_formats}" Classes="label"/>
-                                <ItemsControl ItemsSource="{Binding AvailableFormats}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="x:String">
-                                            <Button Content="{Binding .}"
-                                                    Margin="0,0,8,8"
-                                                    Classes="subtle"
-                                                    Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).AddAvailableFormatCommand}"
-                                                    CommandParameter="{Binding .}"/>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
+                                <Border Grid.Column="1" Classes="metric-card">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="{loc:Tr repo_settings.available_formats}" Classes="label"/>
+                                        <ScrollViewer MaxHeight="144"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl ItemsSource="{Binding AvailableFormats}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:String">
+                                                        <Button Content="{Binding .}"
+                                                                Margin="0,0,8,8"
+                                                                Classes="subtle"
+                                                                Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).AddAvailableFormatCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
 
                             <StackPanel Spacing="6">
                                 <TextBlock Text="{loc:Tr repo_settings.add_custom_format}" Classes="label"/>
@@ -221,15 +235,34 @@
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding CloudSyncErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
 
-                            <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Classes="metric-card">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr repo_settings.cloud_repair_title}" Classes="label"/>
+                                    <TextBlock Text="{loc:Tr repo_settings.cloud_repair_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left">
                                 <Button Content="{loc:Tr repo_settings.sync_now}"
                                         Command="{Binding SyncNowCommand}"
                                         IsEnabled="{Binding IsSyncNowRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                         Classes="primary"/>
+                                <Button Content="{loc:Tr repo_settings.cloud_repair_button}"
+                                        Command="{Binding RepairCloudDataCommand}"
+                                        IsEnabled="{Binding IsCloudRepairRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                        Classes="subtle"/>
                                 <TextBlock Text="{loc:Tr common.running}"
                                            VerticalAlignment="Center"
                                            IsVisible="{Binding IsSyncNowRunning}"/>
+                                <TextBlock Text="{loc:Tr common.running}"
+                                           VerticalAlignment="Center"
+                                           IsVisible="{Binding IsCloudRepairRunning}"/>
                             </StackPanel>
+
+                            <TextBlock Text="{Binding CloudRepairMessage}"
+                                       Foreground="{DynamicResource VeyraInfoBrush}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasCloudRepairMessage}"/>
                         </StackPanel>
                     </Border>
 

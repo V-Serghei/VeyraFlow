@@ -124,8 +124,8 @@
                                 VerticalAlignment="Top"/>
                     </Grid>
 
-                    <WrapPanel Orientation="Horizontal" ItemWidth="180">
-                        <StackPanel Width="180" Spacing="4" Margin="0,0,10,10">
+                    <WrapPanel Orientation="Horizontal" Margin="0,0,0,2">
+                        <StackPanel Width="180" Spacing="4" Margin="0,0,12,12">
                             <TextBlock Text="{loc:Tr dashboard.filter_availability}" Classes="label"/>
                             <ComboBox ItemsSource="{Binding AvailabilityFilters}"
                                       SelectedItem="{Binding SelectedAvailabilityFilter, Mode=TwoWay}">
@@ -137,7 +137,7 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel Width="180" Spacing="4" Margin="0,0,10,10">
+                        <StackPanel Width="180" Spacing="4" Margin="0,0,12,12">
                             <TextBlock Text="{loc:Tr dashboard.filter_sync_state}" Classes="label"/>
                             <ComboBox ItemsSource="{Binding SyncStateFilters}"
                                       SelectedItem="{Binding SelectedSyncStateFilter, Mode=TwoWay}">
@@ -149,23 +149,23 @@
                             </ComboBox>
                         </StackPanel>
 
-                        <StackPanel Width="180" Spacing="4" Margin="0,0,10,10">
+                        <StackPanel Width="180" Spacing="4" Margin="0,0,12,12">
                             <TextBlock Text="{loc:Tr dashboard.filter_format_tag}" Classes="label"/>
                             <ComboBox ItemsSource="{Binding FormatTagFilters}"
                                       SelectedItem="{Binding SelectedFormatTagFilter, Mode=TwoWay}"/>
                         </StackPanel>
 
-                        <StackPanel Width="140" Spacing="4" Margin="0,0,10,10">
+                        <StackPanel Width="140" Spacing="4" Margin="0,0,12,12">
                             <TextBlock Text="{loc:Tr dashboard.filter_min_size_mb}" Classes="label"/>
                             <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0"/>
                         </StackPanel>
 
-                        <StackPanel Width="140" Spacing="4" Margin="0,0,10,10">
+                        <StackPanel Width="140" Spacing="4" Margin="0,0,12,12">
                             <TextBlock Text="{loc:Tr dashboard.filter_max_size_mb}" Classes="label"/>
                             <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0"/>
                         </StackPanel>
 
-                        <StackPanel Width="180" Spacing="4" Margin="0,20,10,10">
+                        <StackPanel Width="220" Spacing="4" Margin="0,18,12,12">
                             <CheckBox Content="{loc:Tr dashboard.queue_issues_only}"
                                       IsChecked="{Binding OnlyQueueIssues, Mode=TwoWay}"/>
                         </StackPanel>
@@ -178,34 +178,37 @@
                                 <TextBlock Text="{loc:Tr dashboard.saved_filters_hint}" Classes="muted" FontSize="12"/>
                             </StackPanel>
 
-                            <WrapPanel Orientation="Horizontal" ItemWidth="220">
-                                <TextBox Width="220"
-                                         Margin="0,0,10,10"
-                                         Text="{Binding SavedFilterName, Mode=TwoWay}"
-                                         Watermark="{loc:Tr dashboard.saved_filter_name}"/>
-                                <Button Margin="0,0,10,10"
-                                        Content="{loc:Tr dashboard.save_filter}"
-                                        Command="{Binding SaveCurrentFilterCommand}"/>
-                                <ComboBox Width="240"
-                                          Margin="0,0,10,10"
-                                          ItemsSource="{Binding SavedFilters}"
-                                          SelectedItem="{Binding SelectedSavedFilter, Mode=TwoWay}">
-                                    <ComboBox.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:RepositoryDashboardSavedFilterViewModel">
-                                            <TextBlock Text="{Binding Name}"/>
-                                        </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                                <Button Margin="0,0,10,10"
-                                        Content="{loc:Tr common.apply}"
-                                        Command="{Binding ApplySavedFilterCommand}"
-                                        CommandParameter="{Binding SelectedSavedFilter}"/>
-                                <Button Margin="0,0,10,10"
-                                        Content="{loc:Tr common.delete}"
-                                        Classes="danger"
-                                        Command="{Binding DeleteSavedFilterCommand}"
-                                        CommandParameter="{Binding SelectedSavedFilter}"/>
-                            </WrapPanel>
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding SavedFilterName, Mode=TwoWay}"
+                                             Watermark="{loc:Tr dashboard.saved_filter_name}"/>
+                                    <Button Grid.Column="1"
+                                            Content="{loc:Tr dashboard.save_filter}"
+                                            Command="{Binding SaveCurrentFilterCommand}"/>
+                                </Grid>
+
+                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding SavedFilters}"
+                                              SelectedItem="{Binding SelectedSavedFilter, Mode=TwoWay}">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:RepositoryDashboardSavedFilterViewModel">
+                                                <TextBlock Text="{Binding Name}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <Button Grid.Column="1"
+                                            Content="{loc:Tr common.apply}"
+                                            Command="{Binding ApplySavedFilterCommand}"
+                                            CommandParameter="{Binding SelectedSavedFilter}"/>
+                                    <Button Grid.Column="2"
+                                            Content="{loc:Tr common.delete}"
+                                            Classes="danger"
+                                            Command="{Binding DeleteSavedFilterCommand}"
+                                            CommandParameter="{Binding SelectedSavedFilter}"/>
+                                </Grid>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>

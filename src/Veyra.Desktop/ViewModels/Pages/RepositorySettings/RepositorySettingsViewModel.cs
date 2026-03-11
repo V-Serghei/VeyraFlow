@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -37,6 +39,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private CancellationTokenSource? _retentionCts;
     private RepositoryRetentionPolicyDto? _lastAppliedRetentionPolicy;
     private RepositoryCloudSyncStatusDto? _lastAppliedCloudSyncStatus;
+    private readonly HashSet<string> _allFormatOptions = new(StringComparer.OrdinalIgnoreCase);
 
     public event Action? BackRequested;
     public event Func<int, Task>? RepositoryUpdated;
@@ -67,7 +70,11 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _cloudSyncQueueText = "";
     [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
     [ObservableProperty] private bool _isSyncNowRunning;
+    [ObservableProperty] private bool _isCloudRepairRunning;
     [ObservableProperty] private bool _isBundleOperationRunning;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCloudRepairMessage))]
+    private string _cloudRepairMessage = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasBundleOperationMessage))]
@@ -98,6 +105,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         _cloudSync = cloudSync;
         _sensitiveActionGuard = sensitiveActionGuard;
         _log = log;
+        SelectedFormats.CollectionChanged += OnSelectedFormatsCollectionChanged;
         _localization.LanguageChanged += OnLanguageChanged;
         RefreshLocalizationState();
     }
@@ -123,13 +131,28 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             Description = repo.Description;
             DirectoryPath = repo.DirectoryPath;
 
-            SelectedFormats.Clear();
-            foreach (var format in repo.LinkedFormats.OrderBy(x => x))
-                SelectedFormats.Add(format);
+            _allFormatOptions.Clear();
+            foreach (var format in allFormats
+                         .Select(NormalizeFormat)
+                         .Where(static format => !string.IsNullOrWhiteSpace(format))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(static format => format, StringComparer.OrdinalIgnoreCase))
+            {
+                _allFormatOptions.Add(format);
+            }
 
-            AvailableFormats.Clear();
-            foreach (var format in allFormats.OrderBy(x => x))
-                AvailableFormats.Add(format);
+            SelectedFormats.Clear();
+            foreach (var format in repo.LinkedFormats
+                         .Select(NormalizeFormat)
+                         .Where(static format => !string.IsNullOrWhiteSpace(format))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(static format => format, StringComparer.OrdinalIgnoreCase))
+            {
+                _allFormatOptions.Add(format);
+                SelectedFormats.Add(format);
+            }
+
+            RefreshAvailableFormats();
 
             ApplyRetentionPolicy(repo.RetentionPolicy);
             ApplyCloudSyncStatus(repo.CloudSync);
@@ -178,6 +201,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase))
             return;
 
+        _allFormatOptions.Add(normalized);
         SelectedFormats.Add(normalized);
     }
 
@@ -188,9 +212,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
-        if (!AvailableFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase))
-            AvailableFormats.Add(normalized);
-
+        _allFormatOptions.Add(normalized);
         if (!SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase))
             SelectedFormats.Add(normalized);
 
@@ -293,6 +315,62 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         finally
         {
             IsSyncNowRunning = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RepairCloudDataAsync()
+    {
+        if (RepositoryId <= 0)
+            return;
+
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_repository_cloud_repair"),
+                Loc.F("security.action_repository_cloud_repair_body", RepositoryName));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            IsCloudRepairRunning = true;
+            ErrorMessage = null;
+            CloudRepairMessage = Loc.T("repo_settings.cloud_repair_running");
+
+            var result = await _cloudSync.RepairRepositoryCloudDataAsync(RepositoryId);
+            await LoadAsync(RepositoryId);
+
+            CloudRepairMessage = result.Success
+                ? Loc.F(
+                    "repo_settings.cloud_repair_finished",
+                    result.ReferencedBlocks,
+                    result.AlreadyPresentBlocks,
+                    result.UploadedBlocks,
+                    result.MissingLocalBlocks)
+                : Loc.F(
+                    "repo_settings.cloud_repair_finished_with_errors",
+                    result.ReferencedBlocks,
+                    result.AlreadyPresentBlocks,
+                    result.UploadedBlocks,
+                    result.MissingLocalBlocks,
+                    result.FailedUploads);
+
+            if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !result.Success)
+                ErrorMessage = result.ErrorMessage;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to repair cloud data for repository {RepositoryId}", RepositoryId);
+            ErrorMessage = Loc.T("repo_settings.cloud_repair_failed");
+            CloudRepairMessage = ErrorMessage;
+        }
+        finally
+        {
+            IsCloudRepairRunning = false;
         }
     }
 
@@ -438,6 +516,24 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRunRetention))]
     private Task RunRetentionDryRunAsync() => RunRetentionAsync(dryRun: true);
 
+    private void OnSelectedFormatsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        RefreshAvailableFormats();
+    }
+
+    private void RefreshAvailableFormats()
+    {
+        var selected = new HashSet<string>(SelectedFormats, StringComparer.OrdinalIgnoreCase);
+        var available = _allFormatOptions
+            .Where(format => !selected.Contains(format))
+            .OrderBy(format => format, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        AvailableFormats.Clear();
+        foreach (var format in available)
+            AvailableFormats.Add(format);
+    }
+
     [RelayCommand(CanExecute = nameof(CanRunRetention))]
     private Task RunRetentionApplyAsync() => RunRetentionAsync(dryRun: false);
 
@@ -454,6 +550,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     }
 
     public bool HasBundleOperationMessage => !string.IsNullOrWhiteSpace(BundleOperationMessage);
+    public bool HasCloudRepairMessage => !string.IsNullOrWhiteSpace(CloudRepairMessage);
     public bool CanRunBundleOperations => RepositoryId > 0 && !IsLoading && !IsBundleOperationRunning;
 
     public bool CanRunRetention => RepositoryId > 0 && RetentionEnabled && !IsRetentionRunning;

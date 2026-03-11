@@ -72,6 +72,8 @@ func main() {
 	mux.HandleFunc("HEAD /api/sync/blocks/{blockHash}", h.WithAuth(h.HeadBlock))
 	mux.HandleFunc("POST /api/sync/blocks/{blockHash}", h.WithAuth(h.PutBlock))
 	mux.HandleFunc("GET /api/sync/blocks/{blockHash}", h.WithAuth(h.GetBlock))
+	mux.HandleFunc("GET /api/admin/storage/metrics", h.WithAuth(h.GetStorageMetrics))
+	mux.HandleFunc("POST /api/admin/storage/repair", h.WithAuth(h.RepairStorage))
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -96,13 +98,30 @@ func runBlockMaintenance(
 		runCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		compacted, err := h.CompactLooseBlocks(runCtx, batchSize)
+		stats, err := h.RepairBlockStorage(runCtx, batchSize*4, batchSize)
 		if err != nil {
-			log.Printf("cloud block compaction error. trigger=%s compacted=%d err=%v", trigger, compacted, err)
+			log.Printf(
+				"cloud block maintenance error. trigger=%s scanned=%d missing_marked=%d broken_loose=%d broken_pack=%d compacted=%d err=%v",
+				trigger,
+				stats.Scanned,
+				stats.MissingMarked,
+				stats.BrokenLooseRefs,
+				stats.BrokenPackRefs,
+				stats.Compacted,
+				err,
+			)
 			return
 		}
-		if compacted > 0 {
-			log.Printf("cloud block compaction completed. trigger=%s compacted=%d", trigger, compacted)
+		if stats.MissingMarked > 0 || stats.Compacted > 0 || stats.BrokenPackRefs > 0 || stats.BrokenLooseRefs > 0 {
+			log.Printf(
+				"cloud block maintenance completed. trigger=%s scanned=%d missing_marked=%d broken_loose=%d broken_pack=%d compacted=%d",
+				trigger,
+				stats.Scanned,
+				stats.MissingMarked,
+				stats.BrokenLooseRefs,
+				stats.BrokenPackRefs,
+				stats.Compacted,
+			)
 		}
 	}
 

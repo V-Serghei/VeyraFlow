@@ -61,3 +61,57 @@ public sealed record CloudSnapshotPackageDto(
 public sealed record CloudPushResultDto(
     bool Ok,
     IReadOnlyList<string> MissingBlockHashes);
+
+public sealed record CloudStorageSummaryDto(
+    long LogicalBlockCount,
+    long LogicalBytes,
+    long PhysicalObjectCount,
+    long PhysicalPayloadBytes,
+    long MissingBlockCount,
+    long ReducedObjectCount,
+    long ReducedObjectPercentFloor);
+
+public sealed record CloudStorageBlockMetricsDto(
+    long TotalBlocks,
+    long PackedBlocks,
+    long LooseBlocks,
+    long MissingBlocks,
+    long LogicalBytes,
+    long PackedBytes,
+    long LooseBytes,
+    long MissingBytes);
+
+public sealed record CloudStoragePackMetricsDto(
+    long TotalPacks,
+    long ActivePacks,
+    long SealedPacks,
+    long BytesWritten,
+    long PackedBlockRefs);
+
+public sealed record CloudStorageFilesystemStatsDto(
+    long PackFileCount,
+    long LooseFileCount,
+    long OtherFileCount,
+    long PackFileBytes,
+    long LooseFileBytes,
+    long OtherFileBytes,
+    long TotalPhysicalBytes);
+
+public sealed record CloudStorageMetricsDto(
+    bool Ok,
+    CloudStorageSummaryDto Summary,
+    CloudStorageBlockMetricsDto Blocks,
+    CloudStoragePackMetricsDto Packs,
+    CloudStorageFilesystemStatsDto Filesystem);
+
+public sealed record CloudStorageRepairStatsDto(
+    int Scanned,
+    int MissingMarked,
+    int BrokenLooseRefs,
+    int BrokenPackRefs,
+    int Compacted);
+
+public sealed record CloudStorageRepairResultDto(
+    bool Ok,
+    CloudStorageRepairStatsDto Repair,
+    CloudStorageMetricsDto Metrics);
