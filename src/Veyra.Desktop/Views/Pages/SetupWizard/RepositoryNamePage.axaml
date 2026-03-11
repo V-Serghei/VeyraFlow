@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -8,16 +8,17 @@
              x:DataType="vm:RepositoryNameViewModel">
 
     <StackPanel Spacing="12">
-        <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding Title}"/>
-        <TextBlock Opacity="0.8" Text="{Binding Subtitle}" TextWrapping="Wrap"/>
+        <TextBlock Classes="h2" Text="{Binding Title}"/>
+        <TextBlock Classes="muted" Text="{Binding Subtitle}" TextWrapping="Wrap"/>
 
-        <Border Padding="16" Background="#171717" CornerRadius="10" BorderBrush="#262626" BorderThickness="1" Margin="0,6,0,0">
+        <Border Padding="16" Classes="panel" Margin="0,6,0,0">
             <StackPanel Spacing="8">
-                <TextBlock Text="{loc:Tr setup.repository_name}" Opacity="0.85"/>
+                <TextBlock Text="{loc:Tr setup.repository_name}" Classes="label"/>
                 <TextBox Text="{Binding RepositoryName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          Watermark="{loc:Tr setup.repository_name_example}"
-                         Width="460" HorizontalAlignment="Left"/>
+                         HorizontalAlignment="Stretch"/>
             </StackPanel>
         </Border>
     </StackPanel>
 </UserControl>
+

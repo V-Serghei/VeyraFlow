@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeTipsOptInView"
@@ -6,35 +6,46 @@
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
              d:DataContext="{d:DesignInstance vm:WelcomeTipsOptInViewModel, IsDesignTimeCreatable=True}"
              x:DataType="vm:WelcomeTipsOptInViewModel">
-    <Grid Margin="24" ColumnDefinitions="*,420" ColumnSpacing="16">
-        <Border Grid.Column="0" Background="#111821" CornerRadius="14" Padding="24">
-            <StackPanel Spacing="10">
-                <TextBlock Text="{loc:Tr welcome.tips_title}" FontSize="28" FontWeight="SemiBold"/>
-                <TextBlock Text="{loc:Tr welcome.tips_subtitle}" Opacity="0.8" TextWrapping="Wrap"/>
+    <Grid Margin="16" ColumnDefinitions="*,8,360" ColumnSpacing="0">
+        <Border Grid.Column="0" Classes="sidebar" Padding="24" Margin="0,0,12,0" MinWidth="360">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="10">
+                <TextBlock Text="{loc:Tr welcome.tips_title}" Classes="h1"/>
+                <TextBlock Text="{loc:Tr welcome.tips_subtitle}" Classes="muted" TextWrapping="Wrap"/>
 
-                <Border Background="#152638" CornerRadius="10" Padding="14" Margin="0,6,0,0">
+                <Border Classes="card" Padding="14" Margin="0,6,0,0">
                     <StackPanel Spacing="6">
-                        <TextBlock Text="{loc:Tr welcome.tips_include}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr welcome.tips_include}" Classes="label"/>
                         <TextBlock Text="{loc:Tr welcome.tip_context}"/>
                         <TextBlock Text="{loc:Tr welcome.tip_errors}"/>
                         <TextBlock Text="{loc:Tr welcome.tip_actions}"/>
                     </StackPanel>
                 </Border>
-            </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
         </Border>
 
-        <Border Grid.Column="1" Background="#131313" CornerRadius="14" Padding="24">
+        <GridSplitter Grid.Column="1"
+                      Width="8"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Columns"
+                      ResizeBehavior="PreviousAndNext"/>
+
+        <Border Grid.Column="2" Classes="panel" Padding="24" MinWidth="280">
             <StackPanel Spacing="14" VerticalAlignment="Center">
-                <TextBlock Text="{loc:Tr welcome.learning_mode}" FontSize="24" FontWeight="SemiBold"/>
-                <TextBlock Text="{loc:Tr welcome.learning_mode_hint}" Opacity="0.75"/>
+                <TextBlock Text="{loc:Tr welcome.learning_mode}" Classes="h2"/>
+                <TextBlock Text="{loc:Tr welcome.learning_mode_hint}" Classes="muted"/>
 
                 <Grid ColumnDefinitions="*,Auto" Margin="0,8,0,0">
                     <TextBlock Grid.Column="0" Text="{loc:Tr welcome.enable_tips}" VerticalAlignment="Center"/>
                     <CheckBox Grid.Column="1" IsChecked="{Binding EnableTips, Mode=TwoWay}"/>
                 </Grid>
 
-                <Button Content="{loc:Tr common.continue}" Height="40" Command="{Binding ContinueCommand}"/>
+                <Button Content="{loc:Tr common.continue}" Height="40" Command="{Binding ContinueCommand}" Classes="primary"/>
             </StackPanel>
         </Border>
     </Grid>
 </UserControl>
+

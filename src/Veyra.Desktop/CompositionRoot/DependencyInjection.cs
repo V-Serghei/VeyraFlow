@@ -6,6 +6,7 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Sync;
+using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Services.Preview;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -18,6 +19,7 @@ using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.Views.Pages.SetupWizard;
 using Veyra.Desktop.Views.Windows;
+using Veyra.Desktop.Services.Security;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
@@ -45,6 +47,7 @@ public static class DependencyInjection
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
         services.AddScoped<IRepositoryCloudSyncOrchestrator, RepositoryCloudSyncOrchestrator>();
+        services.AddSingleton<IRepositoryFsEventQueueService, RepositoryFsEventQueueService>();
         services.AddSingleton<INativeWordCompareService, NativeWordCompareService>();
         services.AddInfrastructureNative(cfg);
 
@@ -67,9 +70,12 @@ public static class DependencyInjection
 
         services.AddSingleton(schedulerOptions);
         services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
+        services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
+        services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
+        services.AddTransient<ISensitiveActionGuard, SensitiveActionGuard>();
 
         services.AddTransient<WelcomeWindowViewModel>();
         services.AddTransient<WelcomeIntroViewModel>();
@@ -88,6 +94,8 @@ public static class DependencyInjection
         services.AddTransient<CreateRepositoryWindowViewModel>();
         services.AddTransient<SnapshotNameDialogWindowViewModel>();
         services.AddTransient<FileVersionCompareWindowViewModel>();
+        services.AddTransient<ConfirmActionWindowViewModel>();
+        services.AddTransient<PasswordVerificationWindowViewModel>();
 
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
@@ -109,6 +117,12 @@ public static class DependencyInjection
 
         services.AddTransient<FileVersionCompareWindow>(sp =>
             new FileVersionCompareWindow { DataContext = sp.GetRequiredService<FileVersionCompareWindowViewModel>() });
+
+        services.AddTransient<ConfirmActionWindow>(sp =>
+            new ConfirmActionWindow { DataContext = sp.GetRequiredService<ConfirmActionWindowViewModel>() });
+
+        services.AddTransient<PasswordVerificationWindow>(sp =>
+            new PasswordVerificationWindow { DataContext = sp.GetRequiredService<PasswordVerificationWindowViewModel>() });
 
         services.AddTransient<SetupWizardWindow>();
 

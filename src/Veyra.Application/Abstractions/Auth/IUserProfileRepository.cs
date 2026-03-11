@@ -8,7 +8,17 @@ public interface IUserProfileRepository
     Task<UserProfileSessionDto?> GetActiveProfileAsync(CancellationToken ct = default);
     Task<IReadOnlyList<UserProfileSessionDto>> GetProfilesAsync(CancellationToken ct = default);
     Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default);
-    Task SaveOrUpdateProfileAsync(string username, long? cloudUserId, string? accessToken, CancellationToken ct = default);
+    Task SaveOrUpdateProfileAsync(
+        string username,
+        long? cloudUserId,
+        string? accessToken,
+        string? email,
+        long? cloudSessionId,
+        string? refreshToken,
+        DateTime? accessTokenExpiresAtUtc,
+        DateTime? refreshTokenExpiresAtUtc,
+        CancellationToken ct = default);
     Task<bool> SetActiveProfileAsync(string username, CancellationToken ct = default);
+    Task<bool> SetRequirePasswordForSensitiveActionsAsync(bool enabled, CancellationToken ct = default);
     Task SignOutActiveAsync(CancellationToken ct = default);
 }

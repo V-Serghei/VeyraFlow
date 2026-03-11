@@ -1,4 +1,5 @@
 using System;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -12,7 +13,5 @@ public sealed class RepositorySnapshotHistoryEntryViewModel
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? $"snimok_{CreatedAtUtc:yyyyMMdd_HHmmss}" : Title;
     public string DisplayTime => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-    public string ChangedFilesLabel => ChangedFilesCount == 1 ? "1 file changed" : $"{ChangedFilesCount} files changed";
+    public string ChangedFilesLabel => Loc.P("explorer.changed_files", ChangedFilesCount, ChangedFilesCount);
 }
-
-

@@ -1,31 +1,61 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         x:Class="Veyra.Desktop.Views.Windows.InfoWindow"
-        Width="700" Height="470"
+        Width="760" Height="520"
+        MinWidth="560" MinHeight="420"
         WindowStartupLocation="CenterOwner"
-        CanResize="False"
-        Background="#0F1116"
+        CanResize="True"
+        SystemDecorations="Full"
+        Background="{DynamicResource VeyraCanvasBrush}"
         Title="{loc:Tr info.window_title}"
         d:DataContext="{d:DesignInstance vm:InfoWindowViewModel, IsDesignTimeCreatable=True}"
         x:DataType="vm:InfoWindowViewModel">
-    <Border Padding="20" Background="#0F1116">
-        <Border Background="#141922" CornerRadius="14" Padding="20" BorderBrush="#253246" BorderThickness="1">
-            <ScrollViewer>
-                <StackPanel Spacing="12">
-                    <TextBlock Text="{loc:Tr app.brand}" FontSize="28" FontWeight="SemiBold" Foreground="#7DD3FC"/>
-                    <TextBlock Text="{loc:Tr info.subtitle}" FontSize="16" Opacity="0.82"/>
-                    <TextBlock Text="{loc:Tr info.description_body}" TextWrapping="Wrap"/>
-                    <TextBlock Text="{loc:Tr info.feature_scan_modes}"/>
-                    <TextBlock Text="{loc:Tr info.feature_snapshot_history}"/>
-                    <TextBlock Text="{loc:Tr info.feature_sqlite}"/>
-                    <TextBlock Text="{loc:Tr info.feature_arch}"/>
-                    <Button Content="{loc:Tr common.close}" HorizontalAlignment="Right" Width="120" IsDefault="True"
-                            Command="{Binding CloseCommand}"/>
+    <Border Padding="16" Background="{DynamicResource VeyraCanvasBrush}">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="dialog-hero">
+                <StackPanel Spacing="6">
+                    <Border Classes="badge" HorizontalAlignment="Left">
+                        <TextBlock Text="{loc:Tr app.brand}"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource VeyraInfoBrush}"/>
+                    </Border>
+                    <TextBlock Text="{loc:Tr info.subtitle}" Classes="h2"/>
+                    <TextBlock Text="{loc:Tr info.description_body}" Classes="muted" TextWrapping="Wrap"/>
                 </StackPanel>
-            </ScrollViewer>
-        </Border>
+            </Border>
+
+            <Border Grid.Row="1" Classes="dialog-shell" Padding="16">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="12">
+                        <Border Classes="card" Padding="12">
+                            <TextBlock Text="{loc:Tr info.feature_scan_modes}" TextWrapping="Wrap"/>
+                        </Border>
+                        <Border Classes="card" Padding="12">
+                            <TextBlock Text="{loc:Tr info.feature_snapshot_history}" TextWrapping="Wrap"/>
+                        </Border>
+                        <Border Classes="card" Padding="12">
+                            <TextBlock Text="{loc:Tr info.feature_sqlite}" TextWrapping="Wrap"/>
+                        </Border>
+                        <Border Classes="card" Padding="12">
+                            <TextBlock Text="{loc:Tr info.feature_arch}" TextWrapping="Wrap"/>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <Border Grid.Row="2" Classes="toolbar" Padding="10">
+                <Button Content="{loc:Tr common.close}"
+                        HorizontalAlignment="Right"
+                        Width="120"
+                        IsDefault="True"
+                        Command="{Binding CloseCommand}"
+                        Classes="primary"/>
+            </Border>
+        </Grid>
     </Border>
 </Window>
+

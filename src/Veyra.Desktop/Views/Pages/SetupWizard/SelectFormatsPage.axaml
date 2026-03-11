@@ -1,4 +1,4 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -9,11 +9,11 @@
              x:DataType="vm:SelectFormatsViewModel">
     <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
         <StackPanel Spacing="8">
-            <TextBlock FontSize="22" FontWeight="SemiBold" Text="{loc:Tr setup.select_formats}"/>
-            <TextBlock Opacity="0.8" Text="{loc:Tr setup.select_formats_subtitle}"/>
+            <TextBlock Classes="h2" Text="{loc:Tr setup.select_formats}"/>
+            <TextBlock Classes="muted" Text="{loc:Tr setup.select_formats_subtitle}"/>
         </StackPanel>
 
-        <Border Grid.Row="1" Background="#171717" CornerRadius="10" Padding="10" BorderBrush="#262626" BorderThickness="1">
+        <Border Grid.Row="1" Classes="panel" Padding="10">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding AllExtensions}">
                     <ItemsControl.ItemsPanel>
@@ -32,10 +32,11 @@
             </ScrollViewer>
         </Border>
 
-        <Grid Grid.Row="2" ColumnDefinitions="240,Auto,*" ColumnSpacing="8">
+        <Grid Grid.Row="2" ColumnDefinitions="220,Auto,*" ColumnSpacing="8">
             <TextBox Grid.Column="0" Text="{Binding CustomExt, Mode=TwoWay}" Watermark="{loc:Tr setup.add_format_placeholder}"/>
-            <Button Grid.Column="1" Content="{loc:Tr common.add}" Width="100" Command="{Binding AddCustomCommand}"/>
-            <TextBlock Grid.Column="2" VerticalAlignment="Center" Opacity="0.7" Text="{Binding FooterText}"/>
+            <Button Grid.Column="1" Content="{loc:Tr common.add}" Width="100" Command="{Binding AddCustomCommand}" Classes="primary"/>
+            <TextBlock Grid.Column="2" VerticalAlignment="Center" Opacity="0.7" Text="{Binding FooterText}" TextWrapping="Wrap"/>
         </Grid>
     </Grid>
 </UserControl>
+

@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -12,10 +13,10 @@ public sealed class RepositoryPendingChangeViewModel
 
     public string ChangeKindLabel => ChangeKind switch
     {
-        "added" => "Добавлен",
-        "modified" => "Изменен",
-        "deleted" => "Удален",
-        _ => "Изменение"
+        "added" => Loc.T("change_kind.added"),
+        "modified" => Loc.T("change_kind.modified"),
+        "deleted" => Loc.T("change_kind.deleted"),
+        _ => Loc.T("change_kind.changed")
     };
 
     public string ChangeKindColor => ChangeKind switch
@@ -44,9 +45,9 @@ public sealed class RepositoryPendingChangeViewModel
 
     private static string FormatSize(long bytes)
     {
-        if (bytes < 1024) return $"{bytes} Б";
-        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} КБ";
-        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} МБ";
-        return $"{bytes / (1024.0 * 1024 * 1024):F1} ГБ";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }

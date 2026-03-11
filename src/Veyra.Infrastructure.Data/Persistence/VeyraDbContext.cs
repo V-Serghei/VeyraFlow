@@ -26,6 +26,7 @@ public class VeyraDbContext : DbContext
     public DbSet<RepositorySnapshot> RepositorySnapshots { get; set; } = null!;
     public DbSet<RepositorySnapshotEntry> RepositorySnapshotEntries { get; set; } = null!;
     public DbSet<UserProfile> UserProfiles { get; set; } = null!;
+    public DbSet<OperationJournalEntry> OperationJournalEntries { get; set; } = null!;
     public DbSet<RepositorySyncQueueItem> RepositorySyncQueueItems { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -304,6 +305,9 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.Property(e => e.NextAttemptAtUtc).IsRequired();
             entity.Property(e => e.MaxAttempts).HasDefaultValue(5);
+            entity.Property(e => e.UploadCheckpointNextIndex).HasDefaultValue(0);
+            entity.Property(e => e.UploadCheckpointTotal).HasDefaultValue(0);
+            entity.Property(e => e.UploadCheckpointSignature).HasMaxLength(128);
 
             entity.HasOne(e => e.Repository)
                 .WithMany(r => r.SyncQueueItems)
@@ -359,9 +363,31 @@ public class VeyraDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Username).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Email).HasMaxLength(320).IsRequired(false);
             entity.Property(e => e.AccessToken).HasMaxLength(4096).IsRequired(false);
+            entity.Property(e => e.RefreshToken).HasMaxLength(2048).IsRequired(false);
             entity.Property(e => e.CloudUserId).IsRequired(false);
+            entity.Property(e => e.CloudSessionId).IsRequired(false);
+            entity.Property(e => e.AccessTokenExpiresAtUtc).IsRequired(false);
+            entity.Property(e => e.RefreshTokenExpiresAtUtc).IsRequired(false);
+            entity.Property(e => e.RequirePasswordForSensitiveActions).HasDefaultValue(false);
             entity.HasIndex(e => e.Username).IsUnique();
+            entity.HasIndex(e => e.Email).IsUnique();
+        });
+
+        modelBuilder.Entity<OperationJournalEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.OccurredAtUtc).IsRequired();
+            entity.Property(e => e.Level).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Category).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Action).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Username).HasMaxLength(128);
+            entity.Property(e => e.Message).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.Details).HasMaxLength(4096);
+            entity.HasIndex(e => new { e.OccurredAtUtc, e.Id });
+            entity.HasIndex(e => new { e.Category, e.OccurredAtUtc });
+            entity.HasIndex(e => new { e.RepositoryId, e.OccurredAtUtc });
         });
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -21,10 +22,10 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
         get
         {
             var state = IsDeletionMarker
-                ? "deleted"
+                ? Loc.T("common.deleted")
                 : HasContentBlocks
                     ? SizeDisplay
-                    : "no content";
+                    : Loc.T("common.no_content");
 
             return $"{VersionName} | {CreatedAtUtc:yyyy-MM-dd HH:mm:ss} | {state}";
         }
@@ -35,7 +36,7 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
         get
         {
             if (string.IsNullOrWhiteSpace(RelativePath))
-                return "(unknown)";
+                return Loc.T("common.unknown");
 
             var normalized = RelativePath.Replace('\\', '/');
             return Path.GetFileName(normalized);
@@ -59,4 +60,3 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
-

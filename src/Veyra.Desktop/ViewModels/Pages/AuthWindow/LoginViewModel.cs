@@ -15,6 +15,7 @@ public partial class LoginViewModel : ObservableObject
     public event System.Action<bool>? AuthCompleted;
 
     [ObservableProperty] private string _username = string.Empty;
+    [ObservableProperty] private string _email = string.Empty;
     [ObservableProperty] private string _password = string.Empty;
     [ObservableProperty] private string _confirmPassword = string.Empty;
     [ObservableProperty] private string _error = string.Empty;
@@ -98,7 +99,7 @@ public partial class LoginViewModel : ObservableObject
                 return;
             }
 
-            var result = await _mediator.Send(new RegisterCommand(Username, Password));
+            var result = await _mediator.Send(new RegisterCommand(Username, Email, Password));
             if (!result.Success)
             {
                 Error = result.Error ?? Loc.T("login.error_registration_failed");

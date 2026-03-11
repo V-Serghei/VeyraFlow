@@ -11,6 +11,7 @@ using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Application.DTOs;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -19,6 +20,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private const int ContextCollapseThreshold = 14;
     private const int ContextKeepEdgeLines = 3;
     private static readonly Regex WordDiffTokenRegex = new(@"\w+|\s+|[^\w\s]", RegexOptions.Compiled);
+    private readonly LocalizationManager _localization = LocalizationManager.Instance;
     public event Action<bool>? RequestClose;
 
     private Func<SnapshotPendingFileItemViewModel, CancellationToken, Task<PendingFileDiffPreviewDto>>? _previewLoader;
@@ -27,6 +29,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     private IReadOnlyList<TextDiffLineDto> _currentTextLines = Array.Empty<TextDiffLineDto>();
     private IReadOnlyList<TextDiffHunkDto> _currentTextHunks = Array.Empty<TextDiffHunkDto>();
+    private PendingBinaryDiffSummaryDto? _lastBinarySummary;
+    private PendingImageDiffPreviewDto? _lastImagePreview;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -48,7 +52,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private bool _isPreviewLoading;
 
     [ObservableProperty]
-    private string _previewSummary = "Select a changed file to inspect the preview.";
+    private string _previewSummary = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
@@ -75,8 +79,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasPinnedHunkHeader))]
     private string _pinnedHunkHeader = string.Empty;
 
-    [ObservableProperty] private string _leftImageCaption = "Before";
-    [ObservableProperty] private string _rightImageCaption = "After";
+    [ObservableProperty] private string _leftImageCaption = "";
+    [ObservableProperty] private string _rightImageCaption = "";
 
     public ObservableCollection<SnapshotPendingFileItemViewModel> ChangedFiles { get; } = [];
     public ObservableCollection<SnapshotDiffRowItemViewModel> PreviewRows { get; } = [];
@@ -96,6 +100,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         ChangedFiles.CollectionChanged += OnChangedFilesCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
+        _localization.LanguageChanged += OnLanguageChanged;
+        ResetPreview(Loc.T("snapshot.preview.select_changed_file"));
     }
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
@@ -116,19 +122,19 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
 
-    public string WrapToggleLabel => IsWrapEnabled ? "Wrap: On" : "Wrap: Off";
+    public string WrapToggleLabel => IsWrapEnabled ? Loc.T("compare.wrap.on") : Loc.T("compare.wrap.off");
 
     public string ChangedFilesCountLabel => HasChangedFiles
-        ? $"{ChangedFiles.Count} changed file{(ChangedFiles.Count == 1 ? string.Empty : "s") }"
-        : "No changed files detected";
+        ? Loc.P("snapshot.changed_files.count", ChangedFiles.Count, ChangedFiles.Count)
+        : Loc.T("snapshot.changed_files.none");
 
-    public string SelectedChangedFileTitle => SelectedChangedFile?.Name ?? "Select a changed file";
+    public string SelectedChangedFileTitle => SelectedChangedFile?.Name ?? Loc.T("snapshot.selected_file.none_title");
 
     public string SelectedChangedFilePath => SelectedChangedFile?.RelativePath
-        ?? "No changed files detected for this snapshot.";
+        ?? Loc.T("snapshot.selected_file.none_path");
 
     public string SelectedChangedFileHint => SelectedChangedFile?.ComparisonHint
-        ?? "When you select a file, you will see quick comparison metadata here.";
+        ?? Loc.T("snapshot.selected_file.none_hint");
 
     public void Initialize(
         string defaultName,
@@ -148,7 +154,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         SelectedChangedFile = ChangedFiles.FirstOrDefault();
 
         if (SelectedChangedFile is null)
-            ResetPreview("No changed files detected for this snapshot.");
+            ResetPreview(Loc.T("snapshot.preview.none_for_snapshot"));
 
         OnPropertyChanged(nameof(HasChangedFiles));
         OnPropertyChanged(nameof(HasNoChangedFiles));
@@ -160,6 +166,47 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     {
         _previewCts?.Cancel();
         ReleasePreviewResources();
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void RefreshLocalizationState()
+    {
+        OnPropertyChanged(nameof(WrapToggleLabel));
+        OnPropertyChanged(nameof(ChangedFilesCountLabel));
+        OnPropertyChanged(nameof(SelectedChangedFileTitle));
+        OnPropertyChanged(nameof(SelectedChangedFilePath));
+        OnPropertyChanged(nameof(SelectedChangedFileHint));
+
+        var changedFiles = ChangedFiles.ToList();
+        var selectedPath = SelectedChangedFile?.RelativePath;
+        ChangedFiles.Clear();
+        foreach (var changedFile in changedFiles)
+            ChangedFiles.Add(changedFile);
+
+        SelectedChangedFile = string.IsNullOrWhiteSpace(selectedPath)
+            ? ChangedFiles.FirstOrDefault()
+            : ChangedFiles.FirstOrDefault(x => string.Equals(x.RelativePath, selectedPath, StringComparison.OrdinalIgnoreCase));
+
+        RefreshPinnedHunkHeaderFromRows();
+
+        if (SelectedChangedFile is not null && _previewLoader is not null && !IsPreviewLoading)
+        {
+            _ = LoadPreviewForSelectionAsync(SelectedChangedFile);
+            return;
+        }
+
+        if (SelectedChangedFile is null)
+            PreviewSummary = Loc.T("snapshot.preview.select_changed_file");
+
+        if (_lastBinarySummary is not null)
+            ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
+
+        LeftImageCaption = BuildImageSideCaption(Loc.T("common.before"), _lastImagePreview?.BaselineWidth, _lastImagePreview?.BaselineHeight);
+        RightImageCaption = BuildImageSideCaption(Loc.T("common.after"), _lastImagePreview?.CurrentWidth, _lastImagePreview?.CurrentHeight);
     }
 
     partial void OnSelectedChangedFileChanged(SnapshotPendingFileItemViewModel? value)
@@ -180,20 +227,20 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     {
         if (!HasChangedFiles)
         {
-            ErrorMessage = "No file changes detected. Snapshot creation is disabled.";
+            ErrorMessage = Loc.T("snapshot.error.no_changes");
             return;
         }
 
         if (string.IsNullOrWhiteSpace(SnapshotName))
         {
-            ErrorMessage = "Snapshot name is required.";
+            ErrorMessage = Loc.T("snapshot.error.name_required");
             return;
         }
 
         var trimmed = SnapshotName.Trim();
         if (trimmed.Length > 256)
         {
-            ErrorMessage = "Snapshot name is too long (max 256).";
+            ErrorMessage = Loc.T("snapshot.error.name_too_long");
             return;
         }
 
@@ -288,7 +335,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         if (file is null)
         {
-            ResetPreview("Select a changed file to inspect the preview.");
+            ResetPreview(Loc.T("snapshot.preview.select_changed_file"));
             return;
         }
 
@@ -308,7 +355,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         _previewCts = cts;
 
         IsPreviewLoading = true;
-        PreviewSummary = "Building preview...";
+        PreviewSummary = Loc.T("snapshot.preview.building");
         PreviewKind = PendingDiffPreviewKind.None;
 
         try
@@ -327,6 +374,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             {
                 case PendingDiffPreviewKind.Text:
                 {
+                    _lastBinarySummary = null;
+                    _lastImagePreview = null;
                     _currentTextLines = preview.Lines;
                     _currentTextHunks = preview.Hunks;
                     RebuildTextPreviewRows();
@@ -340,25 +389,29 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 }
                 case PendingDiffPreviewKind.Binary:
                 {
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
                     ApplyBinaryMetrics(preview.BinarySummary, null);
                     PreviewKind = PendingDiffPreviewKind.Binary;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                        ? "Binary summary is ready."
+                        ? Loc.T("snapshot.preview.binary_ready")
                         : preview.Message;
                     break;
                 }
                 case PendingDiffPreviewKind.Image:
                 {
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = preview.ImagePreview;
                     await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
                     ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview);
                     PreviewKind = PendingDiffPreviewKind.Image;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                        ? "Image comparison is ready."
+                        ? Loc.T("snapshot.preview.image_ready")
                         : preview.Message;
                     break;
                 }
                 default:
-                    ResetPreview("Preview format is not supported.");
+                    ResetPreview(Loc.T("snapshot.preview.unsupported"));
                     break;
             }
         }
@@ -367,7 +420,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         }
         catch (Exception)
         {
-            ResetPreview("Unable to load diff preview for selected file.");
+            ResetPreview(Loc.T("snapshot.preview.load_failed"));
         }
         finally
         {
@@ -395,8 +448,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     private async Task LoadImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
     {
-        LeftImageCaption = "Before";
-        RightImageCaption = "After";
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
 
         if (imagePreview is null)
             return;
@@ -417,8 +470,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 _tempPreviewFiles.Add(imagePreview.CurrentImagePath);
         }
 
-        LeftImageCaption = BuildImageSideCaption("Before", imagePreview.BaselineWidth, imagePreview.BaselineHeight);
-        RightImageCaption = BuildImageSideCaption("After", imagePreview.CurrentWidth, imagePreview.CurrentHeight);
+        LeftImageCaption = BuildImageSideCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
+        RightImageCaption = BuildImageSideCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
     }
 
     private static string BuildImageSideCaption(string prefix, int? width, int? height)
@@ -438,25 +491,25 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             return;
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Size",
+            Loc.T("metric.size"),
             $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})"));
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "SHA-256",
-            $"before {ShortHash(summary.BaselineHashSha256)} | after {ShortHash(summary.CurrentHashSha256)}"));
+            Loc.T("metric.sha256"),
+            $"{Loc.T("common.before").ToLowerInvariant()} {ShortHash(summary.BaselineHashSha256)} | {Loc.T("common.after").ToLowerInvariant()} {ShortHash(summary.CurrentHashSha256)}"));
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Blocks",
+            Loc.T("metric.blocks"),
             $"{summary.BaselineBlockCount} -> {summary.CurrentBlockCount}, shared {summary.SharedBlockCount}"));
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Dedup / Changed",
+            Loc.T("metric.dedup_changed"),
             $"{FormatRatio(summary.DedupRatio)} / {FormatRatio(summary.ChangedBlockRatio)}"));
 
         if (summary.ByteSimilarityRatio.HasValue)
         {
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-                "Byte similarity",
+                Loc.T("metric.byte_similarity"),
                 $"{summary.ByteSimilarityRatio.Value * 100:F1}%"));
         }
 
@@ -471,25 +524,25 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 : $"{imagePreview.CurrentWidth} x {imagePreview.CurrentHeight}";
 
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-                "Dimensions",
-                $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? " (changed)" : string.Empty)));
+                Loc.T("metric.dimensions"),
+                $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
 
             if (imagePreview.SimilarityRatio.HasValue)
             {
                 PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-                    "Image similarity",
+                    Loc.T("metric.image_similarity"),
                     $"{imagePreview.SimilarityRatio.Value * 100:F1}% (byte-level)"));
             }
         }
     }
 
     private static string FormatRatio(double? value)
-        => value.HasValue ? $"{value.Value * 100:F1}%" : "n/a";
+        => value.HasValue ? $"{value.Value * 100:F1}%" : Loc.T("common.not_available_short");
 
     private static string ShortHash(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
-            return "n/a";
+            return Loc.T("common.not_available_short");
 
         return value.Length <= 16 ? value : $"{value[..8]}...{value[^8..]}";
     }
@@ -522,6 +575,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         PinnedHunkHeader = string.Empty;
         _currentTextLines = Array.Empty<TextDiffLineDto>();
         _currentTextHunks = Array.Empty<TextDiffHunkDto>();
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
     }
 
     private void ReleasePreviewResources()
@@ -538,8 +593,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         LeftImagePreview = null;
         RightImagePreview = null;
 
-        LeftImageCaption = "Before";
-        RightImageCaption = "After";
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
 
         foreach (var tempFile in _tempPreviewFiles)
         {

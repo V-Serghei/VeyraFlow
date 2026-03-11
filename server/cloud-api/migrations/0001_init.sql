@@ -1,9 +1,81 @@
 CREATE TABLE IF NOT EXISTS users (
     id            bigserial PRIMARY KEY,
     username      text NOT NULL UNIQUE,
+    email         text NULL,
     password_hash text NOT NULL,
     created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email text NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email_ci
+    ON users (lower(email))
+    WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS devices (
+    id                 bigserial PRIMARY KEY,
+    user_id            bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_fingerprint text NOT NULL,
+    device_name        text NULL,
+    platform           text NULL,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    last_seen_at       timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(user_id, device_fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id                 bigserial PRIMARY KEY,
+    user_id            bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id          bigint NULL REFERENCES devices(id) ON DELETE SET NULL,
+    refresh_token_hash text NOT NULL,
+    access_expires_at  timestamptz NOT NULL,
+    refresh_expires_at timestamptz NOT NULL,
+    revoked_at         timestamptz NULL,
+    revoke_reason      text NULL,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    last_used_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user_sessions_refresh_hash
+    ON user_sessions(refresh_token_hash);
+
+CREATE INDEX IF NOT EXISTS ix_user_sessions_user_active
+    ON user_sessions(user_id, revoked_at, refresh_expires_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS cloud_block_packs (
+    id            bigserial PRIMARY KEY,
+    relative_path text NOT NULL UNIQUE,
+    state         text NOT NULL DEFAULT 'active',
+    bytes_written bigint NOT NULL DEFAULT 0,
+    block_count   integer NOT NULL DEFAULT 0,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now(),
+    sealed_at     timestamptz NULL
+);
+
+ALTER TABLE cloud_blocks
+    ADD COLUMN IF NOT EXISTS storage_kind text NOT NULL DEFAULT 'loose',
+    ADD COLUMN IF NOT EXISTS pack_id bigint NULL REFERENCES cloud_block_packs(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS pack_offset_bytes bigint NULL,
+    ADD COLUMN IF NOT EXISTS stored_size_bytes bigint NULL;
+
+UPDATE cloud_blocks
+SET storage_kind = COALESCE(NULLIF(storage_kind, ''), 'loose'),
+    stored_size_bytes = COALESCE(stored_size_bytes, length_bytes)
+WHERE storage_kind IS NULL
+   OR btrim(storage_kind) = ''
+   OR stored_size_bytes IS NULL;
+
+CREATE INDEX IF NOT EXISTS ix_cloud_blocks_pack_lookup
+    ON cloud_blocks(pack_id, pack_offset_bytes)
+    WHERE pack_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_cloud_blocks_storage_kind_created
+    ON cloud_blocks(storage_kind, created_at, block_hash);
+
+CREATE INDEX IF NOT EXISTS ix_cloud_block_packs_active
+    ON cloud_block_packs(state, id DESC);
 
 CREATE TABLE IF NOT EXISTS repositories (
     id                      bigserial PRIMARY KEY,
@@ -128,4 +200,63 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 INSERT INTO schema_migrations(version)
 VALUES (1)
 ON CONFLICT (version) DO NOTHING;
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email text NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_users_email_ci
+    ON users (lower(email))
+    WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS devices (
+    id                 bigserial PRIMARY KEY,
+    user_id            bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_fingerprint text NOT NULL,
+    device_name        text NULL,
+    platform           text NULL,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    last_seen_at       timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(user_id, device_fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id                 bigserial PRIMARY KEY,
+    user_id            bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id          bigint NULL REFERENCES devices(id) ON DELETE SET NULL,
+    refresh_token_hash text NOT NULL,
+    access_expires_at  timestamptz NOT NULL DEFAULT now(),
+    refresh_expires_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at         timestamptz NULL,
+    revoke_reason      text NULL,
+    created_at         timestamptz NOT NULL DEFAULT now(),
+    last_used_at       timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE devices
+    ADD COLUMN IF NOT EXISTS device_name text NULL,
+    ADD COLUMN IF NOT EXISTS platform text NULL,
+    ADD COLUMN IF NOT EXISTS last_seen_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE user_sessions
+    ADD COLUMN IF NOT EXISTS device_id bigint NULL REFERENCES devices(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS refresh_token_hash text NULL,
+    ADD COLUMN IF NOT EXISTS access_expires_at timestamptz NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS refresh_expires_at timestamptz NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS revoked_at timestamptz NULL,
+    ADD COLUMN IF NOT EXISTS revoke_reason text NULL,
+    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS last_used_at timestamptz NOT NULL DEFAULT now();
+
+UPDATE user_sessions
+SET refresh_token_hash = md5(id::text || '-' || user_id::text || '-' || now()::text)
+WHERE refresh_token_hash IS NULL OR btrim(refresh_token_hash) = '';
+
+ALTER TABLE user_sessions
+    ALTER COLUMN refresh_token_hash SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user_sessions_refresh_hash
+    ON user_sessions(refresh_token_hash);
+
+CREATE INDEX IF NOT EXISTS ix_user_sessions_user_active
+    ON user_sessions(user_id, revoked_at, refresh_expires_at DESC, id DESC);
 

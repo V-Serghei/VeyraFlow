@@ -31,6 +31,11 @@ public sealed class LoginCommandHandler(
                 session.Username,
                 session.CloudUserId,
                 session.AccessToken,
+                session.Email,
+                session.CloudSessionId,
+                session.RefreshToken,
+                session.AccessTokenExpiresAtUtc,
+                session.RefreshTokenExpiresAtUtc,
                 cancellationToken);
 
             logger.LogInformation("User profile saved locally for {Username}", session.Username);

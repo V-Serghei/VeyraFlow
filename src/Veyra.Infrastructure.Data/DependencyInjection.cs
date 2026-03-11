@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Infrastructure.Data.Auth;
+using Veyra.Infrastructure.Data.Observability;
 using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Data.Setup;
 
@@ -32,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IRepositoryRecoveryService, EfRepositoryRecoveryService>();
         services.AddScoped<IRepositorySnapshotRepository, EfRepositorySnapshotRepository>();
         services.AddScoped<IUserProfileRepository, EfUserProfileRepository>();
+        services.AddScoped<IOperationJournalService, EfOperationJournalService>();
 
         return services;
     }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Net.Mail;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -8,9 +9,13 @@ using MediatR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Sync;
+using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Styling;
 
 namespace Veyra.Desktop.ViewModels.Pages.Settings;
 
@@ -26,6 +31,7 @@ public sealed partial class AppSettingsTabViewModel : ObservableObject
     public string Key { get; }
     public string TitleKey { get; }
     public string SubtitleKey { get; }
+    [ObservableProperty] private bool _isSelected;
 
     public string Title => Loc.T(TitleKey);
     public string Subtitle => Loc.T(SubtitleKey);
@@ -38,9 +44,11 @@ public sealed partial class AppSettingsTabViewModel : ObservableObject
 }
 
 public sealed record AppLanguageOptionItemViewModel(string Code, string DisplayName);
+public sealed record AppThemeOptionItemViewModel(string Code, string DisplayName);
 
 public sealed record AppUserProfileItemViewModel(
     string Username,
+    string EmailText,
     bool IsActive,
     bool HasAccessToken,
     string LastLoginText,
@@ -48,17 +56,30 @@ public sealed record AppUserProfileItemViewModel(
     string CloudUserLabel,
     string TokenStateText);
 
+public sealed record AppOperationJournalItemViewModel(
+    string TimestampText,
+    string Level,
+    string Category,
+    string Action,
+    string ScopeText,
+    string Message);
+
 public sealed partial class AppSettingsViewModel : ObservableObject
 {
     private readonly IUserProfileRepository _userProfiles;
     private readonly IAccessTokenPolicyService _tokenPolicy;
     private readonly IAuthService _auth;
+    private readonly IOperationJournalService _journal;
     private readonly IRepositoryCloudSyncOrchestrator _sync;
+    private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly IMediator _mediator;
     private readonly ILogger<AppSettingsViewModel> _log;
     private readonly LocalizationManager _localization;
+    private readonly ThemeManager _theme;
 
     private bool _suppressLanguageSelectionChanged;
+    private bool _suppressThemeSelectionChanged;
+    private bool _suppressSensitiveActionToggleChanged;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralTabSelected))]
@@ -68,6 +89,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _activeUsername = Loc.T("app_settings.not_signed_in");
+    [ObservableProperty] private string _activeEmail = Loc.T("common.not_available_short");
     [ObservableProperty] private string _activeCloudUserText = Loc.T("common.not_available_short");
     [ObservableProperty] private string _activeSessionTokenState = Loc.T("app_settings.no_token");
     [ObservableProperty] private string _tokenPolicyHint = string.Empty;
@@ -75,6 +97,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SubmitAuthCommand))]
     private string _usernameInput = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SubmitAuthCommand))]
+    private string _emailInput = string.Empty;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SubmitAuthCommand))]
@@ -98,11 +124,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [ObservableProperty] private string _authMessage = string.Empty;
     [ObservableProperty] private bool _isSyncBusy;
     [ObservableProperty] private string _syncMessage = string.Empty;
+    [ObservableProperty] private string _generalMessage = string.Empty;
     [ObservableProperty] private string _cloudApiBaseUrl = string.Empty;
     [ObservableProperty] private int _localRepositoryCount;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEditSensitiveActionVerification))]
+    private bool _hasActiveProfile;
+    [ObservableProperty] private bool _requirePasswordForSensitiveActions;
 
     [ObservableProperty]
     private AppLanguageOptionItemViewModel? _selectedLanguage;
+
+    [ObservableProperty]
+    private AppThemeOptionItemViewModel? _selectedTheme;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasLocalizationIssues))]
@@ -150,12 +184,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     public ObservableCollection<AppUserProfileItemViewModel> Profiles { get; } = [];
     public ObservableCollection<AppLanguageOptionItemViewModel> Languages { get; } = [];
+    public ObservableCollection<AppThemeOptionItemViewModel> Themes { get; } = [];
+    public ObservableCollection<AppOperationJournalItemViewModel> OperationJournalItems { get; } = [];
 
     public AppSettingsViewModel(
         IUserProfileRepository userProfiles,
         IAccessTokenPolicyService tokenPolicy,
         IAuthService auth,
+        IOperationJournalService journal,
         IRepositoryCloudSyncOrchestrator sync,
+        ISensitiveActionGuard sensitiveActionGuard,
         IMediator mediator,
         IConfiguration config,
         ILogger<AppSettingsViewModel> log)
@@ -163,10 +201,13 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _userProfiles = userProfiles;
         _tokenPolicy = tokenPolicy;
         _auth = auth;
+        _journal = journal;
         _sync = sync;
+        _sensitiveActionGuard = sensitiveActionGuard;
         _mediator = mediator;
         _log = log;
         _localization = LocalizationManager.Instance;
+        _theme = ThemeManager.Instance;
 
         CloudApiBaseUrl = config["CloudApi:BaseUrl"]
                           ?? Environment.GetEnvironmentVariable("VEYRA_CLOUDAPI_URL")
@@ -176,7 +217,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         SelectedTab = Tabs.FirstOrDefault();
 
         _localization.LanguageChanged += OnLanguageChanged;
+        _theme.ThemeChanged += OnThemeChanged;
         RebuildLanguageOptions();
+        RebuildThemeOptions();
         UpdateLocalizationDiagnostics();
     }
 
@@ -188,6 +231,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool HasLocalizationMissingSample => !string.IsNullOrWhiteSpace(LocalizationMissingSample);
     public bool HasLocalizationDuplicateSample => !string.IsNullOrWhiteSpace(LocalizationDuplicateSample);
     public bool HasLocalizationExtraSample => !string.IsNullOrWhiteSpace(LocalizationExtraSample);
+    public bool CanEditSensitiveActionVerification => HasActiveProfile;
 
     public bool IsConfirmPasswordVisible => IsRegisterMode;
     public string SubmitAuthLabel => IsRegisterMode ? Loc.T("app_settings.auth_create_account") : Loc.T("auth.sign_in");
@@ -203,6 +247,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             if (!IsRegisterMode)
                 return true;
 
+            if (string.IsNullOrWhiteSpace(EmailInput) || !IsValidEmail(EmailInput))
+                return false;
+
             return !string.IsNullOrWhiteSpace(ConfirmPasswordInput) &&
                    string.Equals(PasswordInput, ConfirmPasswordInput, StringComparison.Ordinal);
         }
@@ -216,6 +263,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _localization.SetLanguage(value.Code);
 
     }
+
+    partial void OnSelectedThemeChanged(AppThemeOptionItemViewModel? value)
+    {
+        if (_suppressThemeSelectionChanged || value is null)
+            return;
+
+        _theme.SetTheme(value.Code);
+    }
+
+    partial void OnRequirePasswordForSensitiveActionsChanged(bool value)
+    {
+        if (_suppressSensitiveActionToggleChanged)
+            return;
+
+        _ = SaveSensitiveActionVerificationSettingAsync(value);
+    }
+
     public async Task LoadAsync()
     {
         try
@@ -223,13 +287,28 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             IsLoading = true;
             AuthMessage = string.Empty;
             SyncMessage = string.Empty;
+            GeneralMessage = string.Empty;
 
             var active = await _userProfiles.GetActiveProfileAsync();
             var activeTokenState = _tokenPolicy.Evaluate(active?.AccessToken);
+            HasActiveProfile = active is not null;
 
             ActiveUsername = active?.Username ?? Loc.T("app_settings.not_signed_in");
+            ActiveEmail = string.IsNullOrWhiteSpace(active?.Email)
+                ? Loc.T("common.not_available_short")
+                : active.Email!;
             ActiveCloudUserText = active?.CloudUserId?.ToString() ?? Loc.T("common.not_available_short");
             ActiveSessionTokenState = activeTokenState.Description;
+
+            _suppressSensitiveActionToggleChanged = true;
+            try
+            {
+                RequirePasswordForSensitiveActions = active?.RequirePasswordForSensitiveActions ?? false;
+            }
+            finally
+            {
+                _suppressSensitiveActionToggleChanged = false;
+            }
 
             var profiles = await _userProfiles.GetProfilesAsync();
             Profiles.Clear();
@@ -237,8 +316,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             {
                 var tokenState = _tokenPolicy.Evaluate(p.AccessToken);
                 var cloudUserText = p.CloudUserId?.ToString() ?? Loc.T("common.not_available_short");
+                var emailText = string.IsNullOrWhiteSpace(p.Email)
+                    ? Loc.T("common.not_available_short")
+                    : p.Email!;
                 Profiles.Add(new AppUserProfileItemViewModel(
                     p.Username,
+                    emailText,
                     string.Equals(p.Username, active?.Username, StringComparison.OrdinalIgnoreCase),
                     !string.IsNullOrWhiteSpace(p.AccessToken),
                     p.LastLoginAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
@@ -249,6 +332,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
             var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
             LocalRepositoryCount = repositories.Count;
+
+            await LoadOperationJournalAsync();
         }
         catch (Exception ex)
         {
@@ -274,6 +359,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             SelectedTab = tab;
     }
 
+    partial void OnSelectedTabChanged(AppSettingsTabViewModel? value)
+    {
+        foreach (var tab in Tabs)
+            tab.IsSelected = ReferenceEquals(tab, value);
+    }
+
     [RelayCommand]
     private void ToggleAuthMode()
     {
@@ -296,8 +387,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             }
 
             var username = UsernameInput.Trim();
+            var email = EmailInput.Trim();
             var session = IsRegisterMode
-                ? await _auth.RegisterAsync(username, PasswordInput)
+                ? await _auth.RegisterAsync(username, email, PasswordInput)
                 : await _auth.LoginAsync(username, PasswordInput);
 
             if (session is null)
@@ -305,19 +397,33 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 AuthMessage = IsRegisterMode
                     ? Loc.T("app_settings.auth_registration_failed")
                     : Loc.T("app_settings.auth_login_failed");
+
+                await AppendJournalAsync(
+                    "warning",
+                    "auth",
+                    IsRegisterMode ? "settings_register" : "settings_login",
+                    AuthMessage,
+                    UsernameInput.Trim());
                 return;
             }
 
             await _userProfiles.SaveOrUpdateProfileAsync(
                 session.Username,
                 session.CloudUserId,
-                session.AccessToken);
+                session.AccessToken,
+                session.Email,
+                session.CloudSessionId,
+                session.RefreshToken,
+                session.AccessTokenExpiresAtUtc,
+                session.RefreshTokenExpiresAtUtc);
 
             var restored = await _sync.RestoreRepositoriesFromCloudAsync();
             await _sync.ProcessPendingQueueAsync();
 
             PasswordInput = string.Empty;
             ConfirmPasswordInput = string.Empty;
+            if (IsRegisterMode)
+                EmailInput = string.Empty;
 
             var tokenText = session.AccessTokenExpiresAtUtc.HasValue
                 ? Loc.F("app_settings.auth_token_expires", session.AccessTokenExpiresAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))
@@ -327,12 +433,25 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 ? Loc.F("app_settings.auth_registration_success", restored, tokenText)
                 : Loc.F("app_settings.auth_login_success", restored, tokenText);
 
+            await AppendJournalAsync(
+                "info",
+                "auth",
+                IsRegisterMode ? "settings_register" : "settings_login",
+                AuthMessage,
+                session.Username);
+
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Auth submit failed in app settings");
             AuthMessage = Loc.T("app_settings.auth_request_failed");
+            await AppendJournalAsync(
+                "error",
+                "auth",
+                IsRegisterMode ? "settings_register" : "settings_login",
+                $"{AuthMessage} {ex.Message}",
+                UsernameInput.Trim());
         }
         finally
         {
@@ -379,14 +498,31 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         try
         {
             IsAuthBusy = true;
+            var activeProfile = await _userProfiles.GetActiveProfileAsync();
+            if (!string.IsNullOrWhiteSpace(activeProfile?.AccessToken))
+            {
+                try
+                {
+                    var cloudLoggedOut = await _auth.LogoutAsync(activeProfile.AccessToken);
+                    if (!cloudLoggedOut)
+                        _log.LogInformation("Cloud logout returned non-success for user {Username}", activeProfile.Username);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Cloud logout failed for user {Username}; continuing local sign-out", activeProfile.Username);
+                }
+            }
+
             await _userProfiles.SignOutActiveAsync();
             AuthMessage = Loc.T("app_settings.signed_out");
+            await AppendJournalAsync("info", "auth", "settings_sign_out", AuthMessage, ActiveUsername);
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Sign-out failed");
             AuthMessage = Loc.T("app_settings.sign_out_failed");
+            await AppendJournalAsync("error", "auth", "settings_sign_out", $"{AuthMessage} {ex.Message}", ActiveUsername);
         }
         finally
         {
@@ -399,17 +535,30 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.T("security.action_cloud_restore_body"));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
             IsSyncBusy = true;
             SyncMessage = string.Empty;
 
             var restored = await _sync.RestoreRepositoriesFromCloudAsync();
             SyncMessage = Loc.F("app_settings.sync_restore_finished", restored);
+            await AppendJournalAsync("info", "sync", "settings_restore_from_cloud", SyncMessage, ActiveUsername);
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Cloud restore failed");
             SyncMessage = Loc.T("app_settings.sync_restore_failed");
+            await AppendJournalAsync("error", "sync", "settings_restore_from_cloud", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
         {
@@ -422,17 +571,30 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.T("security.action_process_queue_body"));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
             IsSyncBusy = true;
             SyncMessage = string.Empty;
 
             await _sync.ProcessPendingQueueAsync();
             SyncMessage = Loc.T("app_settings.sync_queue_processed");
+            await AppendJournalAsync("info", "sync", "settings_process_queue", SyncMessage, ActiveUsername);
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Processing sync queue failed");
             SyncMessage = Loc.T("app_settings.sync_queue_failed");
+            await AppendJournalAsync("error", "sync", "settings_process_queue", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
         {
@@ -445,6 +607,17 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.T("security.action_push_all_body"));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
             IsSyncBusy = true;
             SyncMessage = string.Empty;
 
@@ -455,12 +628,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             await _sync.ProcessPendingQueueAsync();
 
             SyncMessage = Loc.F("app_settings.sync_push_requested", repositories.Count);
+            await AppendJournalAsync("info", "sync", "settings_push_all", SyncMessage, ActiveUsername);
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Push all repositories to cloud failed");
             SyncMessage = Loc.T("app_settings.sync_push_failed");
+            await AppendJournalAsync("error", "sync", "settings_push_all", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
         {
@@ -473,18 +648,52 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         RefreshLocalizationState();
     }
 
+    private void OnThemeChanged(object? sender, EventArgs e)
+    {
+        RebuildThemeOptions();
+    }
+
     private void RefreshLocalizationState()
     {
         foreach (var tab in Tabs)
             tab.RefreshLocalization();
 
         RebuildLanguageOptions();
+        RebuildThemeOptions();
         UpdateLocalizationDiagnostics();
 
         OnPropertyChanged(nameof(SubmitAuthLabel));
         OnPropertyChanged(nameof(ToggleAuthLabel));
 
         _ = LoadAsync();
+    }
+
+    private async Task SaveSensitiveActionVerificationSettingAsync(bool value)
+    {
+        if (!HasActiveProfile)
+        {
+            GeneralMessage = Loc.T("app_settings.sensitive_actions_requires_sign_in");
+            return;
+        }
+
+        try
+        {
+            var updated = await _userProfiles.SetRequirePasswordForSensitiveActionsAsync(value);
+            if (!updated)
+            {
+                GeneralMessage = Loc.T("app_settings.sensitive_actions_save_failed");
+                return;
+            }
+
+            GeneralMessage = value
+                ? Loc.T("app_settings.sensitive_actions_enabled")
+                : Loc.T("app_settings.sensitive_actions_disabled");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to update sensitive action verification setting");
+            GeneralMessage = Loc.T("app_settings.sensitive_actions_save_failed");
+        }
     }
 
     private void UpdateLocalizationDiagnostics()
@@ -530,6 +739,102 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         finally
         {
             _suppressLanguageSelectionChanged = false;
+        }
+    }
+
+    private void RebuildThemeOptions()
+    {
+        _suppressThemeSelectionChanged = true;
+        try
+        {
+            Themes.Clear();
+            foreach (var option in _theme.AvailableThemes)
+            {
+                Themes.Add(new AppThemeOptionItemViewModel(
+                    option.Code,
+                    Loc.T(option.LocalizationKey)));
+            }
+
+            SelectedTheme = Themes.FirstOrDefault(x =>
+                string.Equals(x.Code, _theme.CurrentThemeCode, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            _suppressThemeSelectionChanged = false;
+        }
+    }
+
+    private async Task LoadOperationJournalAsync()
+    {
+        try
+        {
+            var entries = await _journal.GetRecentAsync(120);
+            OperationJournalItems.Clear();
+
+            foreach (var entry in entries)
+            {
+                var scope = entry.RepositoryId.HasValue
+                    ? $"repo:{entry.RepositoryId.Value}"
+                    : string.IsNullOrWhiteSpace(entry.Username)
+                        ? "-"
+                        : entry.Username!;
+
+                OperationJournalItems.Add(new AppOperationJournalItemViewModel(
+                    entry.OccurredAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                    entry.Level,
+                    entry.Category,
+                    entry.Action,
+                    scope,
+                    entry.Message));
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to load operation journal");
+            OperationJournalItems.Clear();
+        }
+    }
+
+    private async Task AppendJournalAsync(
+        string level,
+        string category,
+        string action,
+        string message,
+        string? username)
+    {
+        try
+        {
+            await _journal.AppendAsync(new OperationJournalEntryDto(
+                Id: 0,
+                OccurredAtUtc: DateTime.UtcNow,
+                Level: level,
+                Category: category,
+                Action: action,
+                RepositoryId: null,
+                Username: string.IsNullOrWhiteSpace(username) ? null : username,
+                Message: message,
+                Details: null));
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Skipped appending operation journal entry for action {Action}", action);
+        }
+    }
+
+    private static bool IsValidEmail(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        try
+        {
+            var trimmed = value.Trim();
+            var parsed = new MailAddress(trimmed);
+            return string.Equals(parsed.Address, trimmed, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 }

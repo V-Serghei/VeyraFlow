@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -18,7 +19,10 @@ using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.State;
+using Veyra.Desktop.Services.Sync;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
 
@@ -33,6 +37,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
     private readonly ILogger<RepositoryExplorerViewModel> _log;
+    private readonly IRepositoryFsEventQueueService _fsEventQueue;
+    private readonly IRepositoryExplorerFilterStore _filterStore;
+    private readonly LocalizationManager _localization;
     private readonly Dictionary<string, ExplorerTreeNodeViewModel> _nodeByPath =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _liveSyncExtensions = new(StringComparer.OrdinalIgnoreCase);
@@ -40,10 +47,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private readonly object _liveSyncLock = new();
 
     private IReadOnlyList<RepositoryScanEntryDto> _entries = Array.Empty<RepositoryScanEntryDto>();
+    private readonly List<RepositorySnapshotHistoryEntryViewModel> _snapshotHistorySource = [];
+    private readonly List<RepositorySnapshotFileChangeViewModel> _snapshotFilesSource = [];
     private string? _selectedDirectoryPath;
     private FileSystemWatcher? _liveSyncWatcher;
     private Timer? _liveSyncTimer;
-    private bool _liveSyncPending;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
     private bool _isSyncingSelectionFromSnapshot;
     private bool _isClearingSnapshotFileSelection;
@@ -57,6 +65,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private long? _diffPreviewBeforeVersionId;
     private long? _diffPreviewAfterVersionId;
     private string? _diffPreviewRelativePath;
+    private bool _savedFiltersLoaded;
+    private bool _suppressExplorerFilterApply;
+    private bool _suppressSnapshotFilterApply;
+    private DateTime? _pendingBaselineSnapshotAtUtc;
+    private int _pendingAddedCount;
+    private int _pendingModifiedCount;
+    private int _pendingDeletedCount;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -83,6 +98,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private string? _errorMessage;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
+    [ObservableProperty] private string _selectedEntryTypeFilter = "all";
+    [ObservableProperty] private string _selectedExtensionFilter = "all";
+    [ObservableProperty] private string _selectedModifiedWindowFilter = "all";
+    [ObservableProperty] private string _minSizeMb = string.Empty;
+    [ObservableProperty] private string _maxSizeMb = string.Empty;
+    [ObservableProperty] private bool _isExplorerFiltersVisible;
+    [ObservableProperty] private string _savedExplorerFilterName = string.Empty;
+    [ObservableProperty] private RepositoryExplorerSavedFilterViewModel? _selectedExplorerSavedFilter;
+    [ObservableProperty] private bool _hasExplorerSavedFilters;
     [ObservableProperty] private ExplorerTreeNodeViewModel? _selectedTreeNode;
     [ObservableProperty] private ExplorerItemViewModel? _selectedItem;
 
@@ -156,8 +180,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty] private bool _scanIsIndeterminate;
     [ObservableProperty] private bool _isLiveSyncActive;
 
-    [ObservableProperty] private string _pendingChangesSummary = "No changes since the last snapshot.";
-    [ObservableProperty] private string _lastSnapshotLabel = "No snapshot has been created yet.";
+    [ObservableProperty] private string _pendingChangesSummary = "";
+    [ObservableProperty] private string _lastSnapshotLabel = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoPendingChanges))]
@@ -169,6 +193,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoSnapshotHistory))]
     private bool _hasSnapshotHistory;
+    [ObservableProperty] private string _snapshotHistorySearchQuery = string.Empty;
+    [ObservableProperty] private string _selectedSnapshotTriggerFilter = "all";
+    [ObservableProperty] private string _snapshotHistoryMinChangedFiles = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoSelectedSnapshot))]
@@ -177,6 +204,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty]
     private RepositorySnapshotFileChangeViewModel? _selectedSnapshotFile;
+    [ObservableProperty] private string _snapshotFilesSearchQuery = string.Empty;
+    [ObservableProperty] private string _selectedSnapshotFileChangeKindFilter = "all";
+    [ObservableProperty] private string _selectedSnapshotFileExtensionFilter = "all";
+    [ObservableProperty] private string _snapshotFilesMinSizeDeltaKb = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoSnapshotFiles))]
@@ -190,7 +221,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private bool _isDiffPreviewLoading;
     [ObservableProperty] private string _diffPreviewTitle = string.Empty;
     [ObservableProperty] private string _diffPreviewSummary = string.Empty;
-    [ObservableProperty] private string _comparePairSummary = "Select Before and After versions.";
+    [ObservableProperty] private string _comparePairSummary = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FullPreviewToggleLabel))]
@@ -241,7 +272,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && HasNoDiffPreviewRows;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
     public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
-    public string FullPreviewToggleLabel => IsFullFilePreviewMode ? "Show changes only" : "View full file";
+    public bool HasActiveExplorerFilters => GetActiveExplorerFilterCount() > 0;
+    public string ExplorerFilterButtonLabel => HasActiveExplorerFilters
+        ? Loc.F("explorer.filters_active_button", GetActiveExplorerFilterCount())
+        : Loc.T("explorer.filters_button");
+    public string ExplorerResultsSummary => IsEmpty
+        ? Loc.T("explorer.results_empty")
+        : Loc.F("explorer.results_summary", Items.Count);
+    public string FullPreviewToggleLabel => IsFullFilePreviewMode
+        ? Loc.T("compare.full_preview.show_changes_only")
+        : Loc.T("compare.full_preview.view_full_file");
     public bool CanToggleFullFilePreview => !IsDiffPreviewLoading && _diffPreviewBeforeVersionId is > 0 && _diffPreviewAfterVersionId is > 0;
     public bool CanOpenSelectedFileOnDisk => GetSelectedFileFullPath() is not null;
     public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
@@ -265,11 +305,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool CanToggleFileVersionsView => FileVersions.Count > CollapsedVisibleFileVersions;
 
     public string FileVersionsToggleLabel => ShowAllFileVersions
-        ? $"Show latest {CollapsedVisibleFileVersions}"
-        : $"Show all ({FileVersions.Count})";
+        ? Loc.F("explorer.file_versions.show_latest", CollapsedVisibleFileVersions)
+        : Loc.F("explorer.file_versions.show_all", FileVersions.Count);
 
     public ObservableCollection<ExplorerTreeNodeViewModel> TreeNodes { get; } = [];
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
+    public ObservableCollection<string> EntryTypeFilters { get; } = ["all", "files", "folders"];
+    public ObservableCollection<string> ExtensionFilters { get; } = ["all"];
+    public ObservableCollection<string> ModifiedWindowFilters { get; } = ["all", "24h", "7d", "30d"];
+    public ObservableCollection<RepositoryExplorerSavedFilterViewModel> SavedExplorerFilters { get; } = [];
+    public ObservableCollection<string> SnapshotTriggerFilters { get; } = ["all"];
+    public ObservableCollection<string> SnapshotFileChangeKindFilters { get; } = ["all", "added", "modified", "removed"];
+    public ObservableCollection<string> SnapshotFileExtensionFilters { get; } = ["all"];
     public ObservableCollection<ExplorerFileVersionViewModel> FileVersions { get; } = [];
     public ObservableCollection<ExplorerFileVersionViewModel> VisibleFileVersions { get; } = [];
     public ObservableCollection<ExplorerFileVersionViewModel> ComparableFileVersions { get; } = [];
@@ -281,14 +328,21 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public RepositoryExplorerViewModel(
         IMediator mediator,
         IWindowService windows,
-        ILogger<RepositoryExplorerViewModel> log)
+        ILogger<RepositoryExplorerViewModel> log,
+        IRepositoryFsEventQueueService fsEventQueue,
+        IRepositoryExplorerFilterStore filterStore)
     {
         _mediator = mediator;
         _windows = windows;
         _log = log;
+        _fsEventQueue = fsEventQueue;
+        _filterStore = filterStore;
+        _localization = LocalizationManager.Instance;
         FileVersions.CollectionChanged += OnFileVersionsCollectionChanged;
         ComparableFileVersions.CollectionChanged += OnComparableVersionsCollectionChanged;
         DiffPreviewRows.CollectionChanged += OnDiffPreviewRowsCollectionChanged;
+        _localization.LanguageChanged += OnLanguageChanged;
+        RefreshPendingChangesSummary();
     }
 
     public async Task LoadAsync(int repositoryId)
@@ -299,6 +353,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             CancelPanelLoadRequests();
             IsLoading = true;
             ErrorMessage = null;
+
+            if (!_savedFiltersLoaded)
+            {
+                await LoadSavedExplorerFiltersAsync();
+                _savedFiltersLoaded = true;
+            }
+
             VersionPanelError = null;
             IsVersionActionRunning = false;
             VersionActionMessage = null;
@@ -312,7 +373,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ComparableFileVersions.Clear();
             ShowAllFileVersions = false;
             PendingChanges.Clear();
+            _snapshotHistorySource.Clear();
             SnapshotHistory.Clear();
+            _snapshotFilesSource.Clear();
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
             SelectedSnapshotFile = null;
@@ -336,8 +399,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ResetFullFilePreviewState();
             OnPropertyChanged(nameof(CanToggleFullFilePreview));
             OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
-            PendingChangesSummary = "No changes since the last snapshot.";
-            LastSnapshotLabel = "No snapshot has been created yet.";
+            _pendingBaselineSnapshotAtUtc = null;
+            _pendingAddedCount = 0;
+            _pendingModifiedCount = 0;
+            _pendingDeletedCount = 0;
+            RefreshPendingChangesSummary();
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
@@ -367,7 +433,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ComparableFileVersions.Clear();
             ShowAllFileVersions = false;
             PendingChanges.Clear();
+            _snapshotHistorySource.Clear();
             SnapshotHistory.Clear();
+            _snapshotFilesSource.Clear();
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
             SelectedSnapshotFile = null;
@@ -391,8 +459,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ResetFullFilePreviewState();
             OnPropertyChanged(nameof(CanToggleFullFilePreview));
             OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
-            PendingChangesSummary = "Failed to load pending changes.";
-            LastSnapshotLabel = "No snapshot has been created yet.";
+            PendingChangesSummary = Loc.T("explorer.pending.load_failed");
+            LastSnapshotLabel = Loc.T("explorer.snapshot.none_yet");
             IsEmpty = true;
         }
         finally
@@ -401,7 +469,19 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
-    partial void OnSearchQueryChanged(string value) => ShowItemsForPath(_selectedDirectoryPath);
+    partial void OnSearchQueryChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnSelectedEntryTypeFilterChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnSelectedExtensionFilterChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnSelectedModifiedWindowFilterChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnMinSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnMaxSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
+    partial void OnSnapshotHistorySearchQueryChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSelectedSnapshotTriggerFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSnapshotHistoryMinChangedFilesChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSnapshotFilesSearchQueryChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
+    partial void OnSelectedSnapshotFileChangeKindFilterChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
+    partial void OnSelectedSnapshotFileExtensionFilterChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
+    partial void OnSnapshotFilesMinSizeDeltaKbChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
 
     partial void OnRepositoryPathChanged(string value)
         => OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
@@ -574,6 +654,124 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             fallbackMessage: "Synchronizing index...",
             showErrors: true,
             successMessage: "Index synchronized.");
+    }
+
+    [RelayCommand]
+    private void ToggleExplorerFilters()
+        => IsExplorerFiltersVisible = !IsExplorerFiltersVisible;
+
+    [RelayCommand]
+    private void ClearAdvancedFilters()
+    {
+        _suppressExplorerFilterApply = true;
+        try
+        {
+            SearchQuery = string.Empty;
+            SelectedEntryTypeFilter = "all";
+            SelectedExtensionFilter = "all";
+            SelectedModifiedWindowFilter = "all";
+            MinSizeMb = string.Empty;
+            MaxSizeMb = string.Empty;
+        }
+        finally
+        {
+            _suppressExplorerFilterApply = false;
+        }
+
+        ShowItemsForPath(_selectedDirectoryPath);
+    }
+
+    [RelayCommand]
+    private async Task SaveCurrentExplorerFilterAsync()
+    {
+        var name = (SavedExplorerFilterName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            ErrorMessage = "Enter filter preset name before saving.";
+            return;
+        }
+
+        var preset = BuildCurrentExplorerPreset(name);
+        var existing = SavedExplorerFilters.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            var index = SavedExplorerFilters.IndexOf(existing);
+            SavedExplorerFilters.RemoveAt(index);
+            SavedExplorerFilters.Insert(index, new RepositoryExplorerSavedFilterViewModel(preset));
+        }
+        else
+        {
+            SavedExplorerFilters.Add(new RepositoryExplorerSavedFilterViewModel(preset));
+        }
+
+        SortSavedExplorerFilters();
+        await PersistSavedExplorerFiltersAsync();
+        SelectedExplorerSavedFilter = SavedExplorerFilters.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+        HasExplorerSavedFilters = SavedExplorerFilters.Count > 0;
+        ErrorMessage = null;
+    }
+
+    [RelayCommand]
+    private void ApplyExplorerSavedFilter(RepositoryExplorerSavedFilterViewModel? filter)
+    {
+        var target = filter ?? SelectedExplorerSavedFilter;
+        if (target is null)
+            return;
+
+        ApplyExplorerPreset(target.Preset);
+    }
+
+    [RelayCommand]
+    private async Task DeleteExplorerSavedFilterAsync(RepositoryExplorerSavedFilterViewModel? filter)
+    {
+        var target = filter ?? SelectedExplorerSavedFilter;
+        if (target is null)
+            return;
+
+        SavedExplorerFilters.Remove(target);
+        HasExplorerSavedFilters = SavedExplorerFilters.Count > 0;
+
+        if (ReferenceEquals(SelectedExplorerSavedFilter, target))
+            SelectedExplorerSavedFilter = null;
+
+        await PersistSavedExplorerFiltersAsync();
+    }
+
+    [RelayCommand]
+    private void ClearSnapshotHistoryFilters()
+    {
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SnapshotHistorySearchQuery = string.Empty;
+            SelectedSnapshotTriggerFilter = "all";
+            SnapshotHistoryMinChangedFiles = string.Empty;
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+
+        ApplySnapshotHistoryFilters();
+    }
+
+    [RelayCommand]
+    private void ClearSnapshotFilesFilters()
+    {
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SnapshotFilesSearchQuery = string.Empty;
+            SelectedSnapshotFileChangeKindFilter = "all";
+            SelectedSnapshotFileExtensionFilter = "all";
+            SnapshotFilesMinSizeDeltaKb = string.Empty;
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+
+        ApplySnapshotFilesFilters();
     }
 
     [RelayCommand]
@@ -1478,13 +1676,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         if (ComparableFileVersions.Count == 0)
         {
-            ComparePairSummary = "No comparable versions yet. Create another snapshot for this file.";
+            ComparePairSummary = Loc.T("explorer.compare.no_comparable");
             return;
         }
 
         if (CompareLeftVersion is null && CompareRightVersion is null)
         {
-            ComparePairSummary = "Select Before and After versions.";
+            ComparePairSummary = Loc.T("explorer.compare.select_before_after");
             return;
         }
 
@@ -1492,19 +1690,22 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             if (CompareLeftVersion.FileVersionId == CompareRightVersion.FileVersionId)
             {
-                ComparePairSummary = "Choose two different versions to compare.";
+                ComparePairSummary = Loc.T("explorer.compare.select_two_different");
                 return;
             }
 
             var normalized = NormalizeComparePairByCreatedAt(CompareLeftVersion, CompareRightVersion);
-            ComparePairSummary = $"Before {FormatVersionInline(normalized.Left)} -> after {FormatVersionInline(normalized.Right)}";
+            ComparePairSummary = Loc.F(
+                "explorer.compare.before_after",
+                FormatVersionInline(normalized.Left),
+                FormatVersionInline(normalized.Right));
             return;
         }
 
         var selected = CompareLeftVersion ?? CompareRightVersion;
         ComparePairSummary = selected is null
-            ? "Select Before and After versions."
-            : $"Pick the second version to compare with {FormatVersionInline(selected)}.";
+            ? Loc.T("explorer.compare.select_before_after")
+            : Loc.F("explorer.compare.pick_second", FormatVersionInline(selected));
     }
 
     private static string FormatVersionInline(ExplorerFileVersionViewModel version)
@@ -1553,22 +1754,135 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
 
         HasPendingChanges = PendingChanges.Count > 0;
+        _pendingBaselineSnapshotAtUtc = pending.BaselineSnapshotAtUtc;
+        _pendingAddedCount = pending.AddedCount;
+        _pendingModifiedCount = pending.ModifiedCount;
+        _pendingDeletedCount = pending.DeletedCount;
+        RefreshPendingChangesSummary();
+    }
 
-        if (pending.BaselineSnapshotAtUtc is null)
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void RefreshLocalizationState()
+    {
+        RefreshFilterOptionBindings();
+        RefreshPendingChangesSummary();
+        RefreshComparePairSummary();
+        RefreshPendingChangesBindings();
+        RefreshFileVersionBindings();
+
+        var selectedSnapshotId = SelectedSnapshot?.SnapshotId ?? 0;
+        var selectedSnapshotFilePath = SelectedSnapshotFile?.RelativePath;
+        ApplySnapshotHistoryFilters(selectedSnapshotId);
+        ApplySnapshotFilesFilters(selectedSnapshotFilePath);
+
+        OnPropertyChanged(nameof(FullPreviewToggleLabel));
+        OnPropertyChanged(nameof(FileVersionsToggleLabel));
+        NotifyExplorerChromeStateChanged();
+    }
+
+    private void RefreshFilterOptionBindings()
+    {
+        RebuildStaticFilterOptions(EntryTypeFilters, SelectedEntryTypeFilter, ["all", "files", "folders"], value => SelectedEntryTypeFilter = value);
+        RebuildStaticFilterOptions(ModifiedWindowFilters, SelectedModifiedWindowFilter, ["all", "24h", "7d", "30d"], value => SelectedModifiedWindowFilter = value);
+        RebuildStaticFilterOptions(SnapshotFileChangeKindFilters, SelectedSnapshotFileChangeKindFilter, ["all", "added", "modified", "removed"], value => SelectedSnapshotFileChangeKindFilter = value);
+
+        var selectedTrigger = SelectedSnapshotTriggerFilter;
+        var currentTriggers = SnapshotTriggerFilters.ToList();
+        RebuildStaticFilterOptions(SnapshotTriggerFilters, selectedTrigger, currentTriggers, value => SelectedSnapshotTriggerFilter = value);
+    }
+
+    private void RebuildStaticFilterOptions(
+        ObservableCollection<string> collection,
+        string selected,
+        IEnumerable<string> items,
+        Action<string> restoreSelection)
+    {
+        var values = items.ToList();
+        if (values.Count == 0)
+            return;
+
+        collection.Clear();
+        foreach (var item in values)
+            collection.Add(item);
+
+        restoreSelection(values.Contains(selected, StringComparer.OrdinalIgnoreCase)
+            ? selected
+            : values[0]);
+    }
+
+    private void RefreshPendingChangesSummary()
+    {
+        if (_pendingBaselineSnapshotAtUtc is null)
         {
-            LastSnapshotLabel = "No snapshot has been created yet.";
+            LastSnapshotLabel = Loc.T("explorer.snapshot.none_yet");
             PendingChangesSummary = HasPendingChanges
-                ? $"{PendingChanges.Count} files ready to snapshot"
-                : "No snapshots yet. Create the first snapshot.";
+                ? Loc.P("explorer.pending.ready_to_snapshot", PendingChanges.Count, PendingChanges.Count)
+                : Loc.T("explorer.pending.first_snapshot_hint");
             return;
         }
 
-        var local = pending.BaselineSnapshotAtUtc.Value.ToLocalTime();
-        LastSnapshotLabel = $"Last snapshot {local:yyyy-MM-dd HH:mm:ss}";
+        var local = _pendingBaselineSnapshotAtUtc.Value.ToLocalTime();
+        LastSnapshotLabel = Loc.F("explorer.snapshot.last_at", local);
 
-        PendingChangesSummary = pending.AddedCount + pending.ModifiedCount + pending.DeletedCount == 0
-            ? "No changes since the last snapshot."
-            : $"Changes +{pending.AddedCount} ~{pending.ModifiedCount} -{pending.DeletedCount}";
+        var total = _pendingAddedCount + _pendingModifiedCount + _pendingDeletedCount;
+        PendingChangesSummary = total == 0
+            ? Loc.T("explorer.pending.none_since_snapshot")
+            : Loc.F("explorer.pending.change_counts", _pendingAddedCount, _pendingModifiedCount, _pendingDeletedCount);
+    }
+
+    private void RefreshPendingChangesBindings()
+    {
+        if (PendingChanges.Count == 0)
+            return;
+
+        var items = PendingChanges.ToList();
+        PendingChanges.Clear();
+        foreach (var item in items)
+            PendingChanges.Add(item);
+    }
+
+    private void RefreshFileVersionBindings()
+    {
+        if (FileVersions.Count == 0)
+        {
+            RebuildVisibleFileVersions();
+            return;
+        }
+
+        var selectedVersionId = SelectedVersion?.FileVersionId;
+        var compareLeftId = CompareLeftVersion?.FileVersionId;
+        var compareRightId = CompareRightVersion?.FileVersionId;
+
+        var versions = FileVersions.ToList();
+        FileVersions.Clear();
+        foreach (var version in versions)
+            FileVersions.Add(version);
+
+        SelectedVersion = selectedVersionId is > 0
+            ? FileVersions.FirstOrDefault(x => x.FileVersionId == selectedVersionId.Value)
+            : null;
+
+        ComparableFileVersions.Clear();
+        foreach (var version in FileVersions.Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
+                     .OrderByDescending(v => v.CreatedAtUtc)
+                     .ThenByDescending(v => v.FileVersionId))
+        {
+            ComparableFileVersions.Add(version);
+        }
+
+        CompareLeftVersion = compareLeftId is > 0
+            ? ComparableFileVersions.FirstOrDefault(x => x.FileVersionId == compareLeftId.Value)
+            : null;
+        CompareRightVersion = compareRightId is > 0
+            ? ComparableFileVersions.FirstOrDefault(x => x.FileVersionId == compareRightId.Value)
+            : null;
+
+        RebuildVisibleFileVersions();
+        OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
     }
 
     private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0)
@@ -1582,10 +1896,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             var history = await _mediator.Send(new GetRepositorySnapshotHistoryQuery(RepositoryId, 200));
 
-            SnapshotHistory.Clear();
+            _snapshotHistorySource.Clear();
             foreach (var item in history)
             {
-                SnapshotHistory.Add(new RepositorySnapshotHistoryEntryViewModel
+                _snapshotHistorySource.Add(new RepositorySnapshotHistoryEntryViewModel
                 {
                     SnapshotId = item.SnapshotId,
                     Title = item.Title,
@@ -1595,37 +1909,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 });
             }
 
-            HasSnapshotHistory = SnapshotHistory.Count > 0;
-
             var targetSnapshotId = preferredSnapshotId > 0
                 ? preferredSnapshotId
                 : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
-
-            var selected = targetSnapshotId > 0
-                ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == targetSnapshotId)
-                : null;
-
-            if (selected is null && SnapshotHistory.Count > 0)
-                selected = SnapshotHistory[0];
-
-            SelectedSnapshot = selected;
-            _preferredSnapshotId = selected?.SnapshotId;
-
-            if (selected is null)
-            {
-                SnapshotFiles.Clear();
-                _isClearingSnapshotFileSelection = true;
-                SelectedSnapshotFile = null;
-                _isClearingSnapshotFileSelection = false;
-                HasSnapshotFiles = false;
-                _preferredSnapshotFileRelativePath = null;
-                _preferredSnapshotFileVersionId = null;
-            }
+            RebuildSnapshotTriggerFilters();
+            ApplySnapshotHistoryFilters(targetSnapshotId);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load snapshot history for repository {RepositoryId}", RepositoryId);
+            _snapshotHistorySource.Clear();
             SnapshotHistory.Clear();
+            _snapshotFilesSource.Clear();
             SnapshotFiles.Clear();
             SelectedSnapshot = null;
             _isClearingSnapshotFileSelection = true;
@@ -1648,6 +1943,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var (requestId, ct) = BeginSnapshotFilesLoadRequest();
         var preferredFilePath = _preferredSnapshotFileRelativePath;
 
+        _snapshotFilesSource.Clear();
         SnapshotFiles.Clear();
         _isClearingSnapshotFileSelection = true;
         SelectedSnapshotFile = null;
@@ -1676,7 +1972,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             foreach (var file in files)
             {
-                SnapshotFiles.Add(new RepositorySnapshotFileChangeViewModel
+                _snapshotFilesSource.Add(new RepositorySnapshotFileChangeViewModel
                 {
                     SnapshotId = file.SnapshotId,
                     FileIdentityId = file.FileIdentityId,
@@ -1690,24 +1986,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 });
             }
 
-            HasSnapshotFiles = SnapshotFiles.Count > 0;
-
-            if (HasSnapshotFiles)
-            {
-                var selected = !string.IsNullOrWhiteSpace(preferredFilePath)
-                    ? SnapshotFiles.FirstOrDefault(x => x.RelativePath.Equals(preferredFilePath, StringComparison.OrdinalIgnoreCase))
-                    : null;
-
-                selected ??= SnapshotFiles[0];
-                SelectedSnapshotFile = selected;
-                _preferredSnapshotFileRelativePath = selected.RelativePath;
-                _preferredSnapshotFileVersionId = selected.FileVersionId;
-            }
-            else
-            {
-                _preferredSnapshotFileRelativePath = null;
-                _preferredSnapshotFileVersionId = null;
-            }
+            RebuildSnapshotFileExtensionFilters();
+            ApplySnapshotFilesFilters(preferredFilePath);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1724,6 +2004,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 RepositoryId,
                 snapshotId);
 
+            _snapshotFilesSource.Clear();
             SnapshotFiles.Clear();
             _isClearingSnapshotFileSelection = true;
             SelectedSnapshotFile = null;
@@ -1797,6 +2078,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _preferredSnapshotFileVersionId = previousVersionId;
 
         _entries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(RepositoryId));
+        RebuildExtensionFilters();
         await LoadPendingChangesAsync();
         await LoadSnapshotHistoryAsync(previousSnapshotId);
         if (SelectedSnapshot is not null)
@@ -1966,9 +2248,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 Timeout.Infinite,
                 Timeout.Infinite);
 
-            _liveSyncPending = false;
             _lastLiveSyncUtc = DateTime.MinValue;
             IsLiveSyncActive = true;
+            ArmLiveSyncTimer(250);
         }
         catch (Exception ex)
         {
@@ -1997,29 +2279,27 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _liveSyncTimer?.Dispose();
         _liveSyncTimer = null;
         _liveSyncExtensions.Clear();
-
-        lock (_liveSyncLock)
-        {
-            _liveSyncPending = false;
-        }
     }
 
     private void OnLiveSyncChanged(object sender, FileSystemEventArgs e)
     {
         if (ShouldQueueLiveSync(e.FullPath))
-            QueueLiveSync();
+            _ = QueueLiveSyncEventAsync(e.FullPath, "changed");
     }
 
     private void OnLiveSyncRenamed(object sender, RenamedEventArgs e)
     {
-        if (ShouldQueueLiveSync(e.FullPath) || ShouldQueueLiveSync(e.OldFullPath))
-            QueueLiveSync();
+        if (ShouldQueueLiveSync(e.OldFullPath))
+            _ = QueueLiveSyncEventAsync(e.OldFullPath!, "renamed");
+
+        if (ShouldQueueLiveSync(e.FullPath))
+            _ = QueueLiveSyncEventAsync(e.FullPath, "renamed");
     }
 
     private void OnLiveSyncError(object sender, ErrorEventArgs e)
     {
         _log.LogWarning(e.GetException(), "Live sync watcher error for repository {RepositoryId}", RepositoryId);
-        QueueLiveSync();
+        _ = QueueLiveSyncEventAsync(RepositoryPath, "error");
     }
 
     private bool ShouldQueueLiveSync(string? fullPath)
@@ -2038,69 +2318,101 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return _liveSyncExtensions.Contains(normalized);
     }
 
-    private void QueueLiveSync()
+    private async Task QueueLiveSyncEventAsync(string fullPath, string eventKind)
     {
         if (!IsLiveSyncActive || RepositoryId == 0)
             return;
 
-        lock (_liveSyncLock)
+        try
         {
-            _liveSyncPending = true;
-            try
-            {
-                _liveSyncTimer?.Change(LiveSyncDebounceMs, Timeout.Infinite);
-            }
-            catch (ObjectDisposedException)
-            {
-            }
+            await _fsEventQueue.EnqueueAsync(RepositoryId, fullPath, eventKind);
+            ArmLiveSyncTimer(LiveSyncDebounceMs);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Failed to enqueue live-sync FS event. RepositoryId {RepositoryId}. Path {Path}. Kind {Kind}",
+                RepositoryId,
+                fullPath,
+                eventKind);
         }
     }
 
     private async Task FlushQueuedLiveSyncAsync()
     {
-        bool shouldRun;
-
-        lock (_liveSyncLock)
-        {
-            shouldRun = _liveSyncPending;
-            _liveSyncPending = false;
-        }
-
-        if (!shouldRun || RepositoryId == 0)
+        if (!IsLiveSyncActive || RepositoryId == 0)
             return;
 
         if (IsLoading || IsScanRunning)
         {
-            QueueLiveSync();
+            ArmLiveSyncTimer(LiveSyncDebounceMs);
             return;
         }
 
         var elapsedMs = (DateTime.UtcNow - _lastLiveSyncUtc).TotalMilliseconds;
         if (elapsedMs < LiveSyncMinIntervalMs)
         {
-            lock (_liveSyncLock)
-            {
-                _liveSyncPending = true;
-                try
-                {
-                    _liveSyncTimer?.Change(LiveSyncMinIntervalMs - (int)elapsedMs, Timeout.Infinite);
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-            }
-
+            ArmLiveSyncTimer(LiveSyncMinIntervalMs - (int)elapsedMs);
             return;
         }
 
+        RepositoryFsEventLease lease;
+        try
+        {
+            lease = await _fsEventQueue.LeaseAsync(
+                RepositoryId,
+                maxItems: 256,
+                staleRunningAfter: TimeSpan.FromMinutes(5));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to lease durable FS events for repository {RepositoryId}", RepositoryId);
+            ArmLiveSyncTimer(LiveSyncDebounceMs);
+            return;
+        }
+
+        if (lease.Count == 0)
+            return;
+
         _lastLiveSyncUtc = DateTime.UtcNow;
 
-        await ExecuteScanAsync(
+        var success = await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_live_watcher",
             fallbackMessage: "Synchronizing file changes...",
             showErrors: false,
             successMessage: null);
+
+        try
+        {
+            if (success)
+                await _fsEventQueue.CompleteAsync(RepositoryId, lease.ItemIds);
+            else
+                await _fsEventQueue.RequeueAsync(RepositoryId, lease.ItemIds, "live_sync_scan_failed");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to finalize durable FS event lease for repository {RepositoryId}", RepositoryId);
+        }
+
+        if (await _fsEventQueue.HasPendingAsync(RepositoryId))
+            ArmLiveSyncTimer(success ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
+    }
+
+    private void ArmLiveSyncTimer(int dueMs)
+    {
+        var delay = Math.Max(100, dueMs);
+        lock (_liveSyncLock)
+        {
+            try
+            {
+                _liveSyncTimer?.Change(delay, Timeout.Infinite);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
     }
 
     private static IReadOnlyList<string> NormalizeTrackedExtensions(IEnumerable<string> values)
@@ -2166,17 +2478,412 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         TreeNodes.Add(root);
     }
 
+    private void ApplyExplorerFiltersIfNeeded()
+    {
+        if (_suppressExplorerFilterApply)
+            return;
+
+        ShowItemsForPath(_selectedDirectoryPath);
+    }
+
+    private void ApplySnapshotHistoryFiltersIfNeeded()
+    {
+        if (_suppressSnapshotFilterApply)
+            return;
+
+        ApplySnapshotHistoryFilters();
+    }
+
+    private void ApplySnapshotFilesFiltersIfNeeded()
+    {
+        if (_suppressSnapshotFilterApply)
+            return;
+
+        ApplySnapshotFilesFilters();
+    }
+
+    private void RebuildSnapshotTriggerFilters()
+    {
+        var selected = NormalizeSnapshotTriggerFilter(SelectedSnapshotTriggerFilter);
+        var triggers = _snapshotHistorySource
+            .Select(x => NormalizeSnapshotTriggerFilter(x.Trigger))
+            .Where(x => x != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotTriggerFilters.Clear();
+        SnapshotTriggerFilters.Add("all");
+        foreach (var trigger in triggers)
+            SnapshotTriggerFilters.Add(trigger);
+
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SelectedSnapshotTriggerFilter = SnapshotTriggerFilters.Contains(selected, StringComparer.OrdinalIgnoreCase)
+                ? selected
+                : "all";
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+    }
+
+    private void RebuildSnapshotFileExtensionFilters()
+    {
+        var selected = NormalizeSnapshotFileExtensionFilter(SelectedSnapshotFileExtensionFilter);
+        var ext = _snapshotFilesSource
+            .Select(x => NormalizeSnapshotFileExtensionFilter(Path.GetExtension(x.RelativePath)))
+            .Where(x => x != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotFileExtensionFilters.Clear();
+        SnapshotFileExtensionFilters.Add("all");
+        foreach (var value in ext)
+            SnapshotFileExtensionFilters.Add(value);
+
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SelectedSnapshotFileExtensionFilter = EnsureSnapshotFileExtensionFilterOption(selected);
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+    }
+
+    private string EnsureSnapshotFileExtensionFilterOption(string value)
+    {
+        if (!SnapshotFileExtensionFilters.Contains(value, StringComparer.OrdinalIgnoreCase))
+            SnapshotFileExtensionFilters.Add(value);
+
+        return value;
+    }
+
+    private void ApplySnapshotHistoryFilters(long preferredSnapshotId = 0)
+    {
+        var directives = ParseSnapshotHistoryDirectives(SnapshotHistorySearchQuery.Trim());
+        var textQuery = directives.TextQuery;
+
+        var triggerFilter = NormalizeSnapshotTriggerFilter(SelectedSnapshotTriggerFilter);
+        if (triggerFilter == "all" && !string.IsNullOrWhiteSpace(directives.TriggerFilter))
+            triggerFilter = directives.TriggerFilter;
+
+        var minChangedFiles = ParseNullableInt(SnapshotHistoryMinChangedFiles) ?? directives.MinChangedFiles;
+        if (minChangedFiles < 0)
+            minChangedFiles = null;
+
+        IEnumerable<RepositorySnapshotHistoryEntryViewModel> filtered = _snapshotHistorySource;
+
+        if (!string.IsNullOrWhiteSpace(textQuery))
+        {
+            filtered = filtered.Where(x =>
+                x.DisplayTitle.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.Trigger.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.DisplayTime.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (triggerFilter != "all")
+            filtered = filtered.Where(x => string.Equals(NormalizeSnapshotTriggerFilter(x.Trigger), triggerFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (minChangedFiles is > 0)
+            filtered = filtered.Where(x => x.ChangedFilesCount >= minChangedFiles.Value);
+
+        var rows = filtered
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ThenByDescending(x => x.SnapshotId)
+            .ToList();
+
+        SnapshotHistory.Clear();
+        foreach (var row in rows)
+            SnapshotHistory.Add(row);
+
+        HasSnapshotHistory = SnapshotHistory.Count > 0;
+
+        var targetSnapshotId = preferredSnapshotId > 0
+            ? preferredSnapshotId
+            : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
+
+        var selected = targetSnapshotId > 0
+            ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == targetSnapshotId)
+            : null;
+
+        if (selected is null && SnapshotHistory.Count > 0)
+            selected = SnapshotHistory[0];
+
+        SelectedSnapshot = selected;
+        _preferredSnapshotId = selected?.SnapshotId;
+
+        if (selected is null)
+        {
+            _snapshotFilesSource.Clear();
+            SnapshotFiles.Clear();
+            _isClearingSnapshotFileSelection = true;
+            SelectedSnapshotFile = null;
+            _isClearingSnapshotFileSelection = false;
+            HasSnapshotFiles = false;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
+        }
+    }
+
+    private void ApplySnapshotFilesFilters(string? preferredFilePath = null)
+    {
+        var directives = ParseSnapshotFilesDirectives(SnapshotFilesSearchQuery.Trim());
+        var textQuery = directives.TextQuery;
+
+        var kindFilter = NormalizeSnapshotFileChangeKindFilter(SelectedSnapshotFileChangeKindFilter);
+        if (kindFilter == "all" && !string.IsNullOrWhiteSpace(directives.ChangeKindFilter))
+            kindFilter = directives.ChangeKindFilter;
+
+        var extensionFilter = NormalizeSnapshotFileExtensionFilter(SelectedSnapshotFileExtensionFilter);
+        if (extensionFilter == "all" && !string.IsNullOrWhiteSpace(directives.ExtensionFilter))
+            extensionFilter = EnsureSnapshotFileExtensionFilterOption(directives.ExtensionFilter);
+
+        var minDeltaKb = ParseNullableDouble(SnapshotFilesMinSizeDeltaKb) ?? directives.MinSizeDeltaKb;
+
+        IEnumerable<RepositorySnapshotFileChangeViewModel> filtered = _snapshotFilesSource;
+
+        if (!string.IsNullOrWhiteSpace(textQuery))
+        {
+            filtered = filtered.Where(x =>
+                x.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.RelativePath.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (kindFilter != "all")
+            filtered = filtered.Where(x => string.Equals(NormalizeSnapshotFileChangeKindFilter(x.ChangeKind), kindFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (extensionFilter != "all")
+        {
+            filtered = filtered.Where(x =>
+                string.Equals(
+                    NormalizeSnapshotFileExtensionFilter(Path.GetExtension(x.RelativePath)),
+                    extensionFilter,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (minDeltaKb is > 0)
+        {
+            filtered = filtered.Where(x =>
+            {
+                var deltaBytes = Math.Abs(x.CurrentSizeBytes - x.PreviousSizeBytes);
+                return (deltaBytes / 1024d) >= minDeltaKb.Value;
+            });
+        }
+
+        var rows = filtered
+            .OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotFiles.Clear();
+        foreach (var row in rows)
+            SnapshotFiles.Add(row);
+
+        HasSnapshotFiles = SnapshotFiles.Count > 0;
+
+        if (HasSnapshotFiles)
+        {
+            var selected = !string.IsNullOrWhiteSpace(preferredFilePath)
+                ? SnapshotFiles.FirstOrDefault(x => x.RelativePath.Equals(preferredFilePath, StringComparison.OrdinalIgnoreCase))
+                : null;
+
+            selected ??= !string.IsNullOrWhiteSpace(_preferredSnapshotFileRelativePath)
+                ? SnapshotFiles.FirstOrDefault(x => x.RelativePath.Equals(_preferredSnapshotFileRelativePath, StringComparison.OrdinalIgnoreCase))
+                : null;
+
+            selected ??= SnapshotFiles[0];
+            SelectedSnapshotFile = selected;
+            _preferredSnapshotFileRelativePath = selected.RelativePath;
+            _preferredSnapshotFileVersionId = selected.FileVersionId;
+        }
+        else
+        {
+            _isClearingSnapshotFileSelection = true;
+            SelectedSnapshotFile = null;
+            _isClearingSnapshotFileSelection = false;
+            _preferredSnapshotFileRelativePath = null;
+            _preferredSnapshotFileVersionId = null;
+        }
+    }
+
+    private async Task LoadSavedExplorerFiltersAsync(CancellationToken ct = default)
+    {
+        var presets = await _filterStore.LoadAsync(ct);
+
+        SavedExplorerFilters.Clear();
+        foreach (var preset in presets)
+            SavedExplorerFilters.Add(new RepositoryExplorerSavedFilterViewModel(preset));
+
+        SortSavedExplorerFilters();
+        HasExplorerSavedFilters = SavedExplorerFilters.Count > 0;
+    }
+
+    private async Task PersistSavedExplorerFiltersAsync(CancellationToken ct = default)
+    {
+        var presets = SavedExplorerFilters
+            .Select(v => v.Preset)
+            .ToList();
+
+        await _filterStore.SaveAsync(presets, ct);
+    }
+
+    private RepositoryExplorerFilterPreset BuildCurrentExplorerPreset(string name)
+    {
+        return new RepositoryExplorerFilterPreset
+        {
+            Name = name,
+            SearchQuery = SearchQuery,
+            EntryTypeFilter = NormalizeEntryTypeFilter(SelectedEntryTypeFilter),
+            ExtensionFilter = NormalizeExtensionFilter(SelectedExtensionFilter),
+            ModifiedWindowFilter = NormalizeModifiedWindowFilter(SelectedModifiedWindowFilter),
+            MinSizeMb = MinSizeMb,
+            MaxSizeMb = MaxSizeMb,
+            SavedAtUtc = DateTime.UtcNow
+        };
+    }
+
+    private void SortSavedExplorerFilters()
+    {
+        var sorted = SavedExplorerFilters
+            .OrderByDescending(f => f.SavedAtUtc)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SavedExplorerFilters.Clear();
+        foreach (var item in sorted)
+            SavedExplorerFilters.Add(item);
+    }
+
+    private void ApplyExplorerPreset(RepositoryExplorerFilterPreset preset)
+    {
+        _suppressExplorerFilterApply = true;
+        try
+        {
+            SearchQuery = preset.SearchQuery;
+            SelectedEntryTypeFilter = NormalizeEntryTypeFilter(preset.EntryTypeFilter);
+            SelectedExtensionFilter = EnsureExtensionFilterOption(NormalizeExtensionFilter(preset.ExtensionFilter));
+            SelectedModifiedWindowFilter = NormalizeModifiedWindowFilter(preset.ModifiedWindowFilter);
+            MinSizeMb = preset.MinSizeMb;
+            MaxSizeMb = preset.MaxSizeMb;
+            SavedExplorerFilterName = preset.Name;
+        }
+        finally
+        {
+            _suppressExplorerFilterApply = false;
+        }
+
+        ShowItemsForPath(_selectedDirectoryPath);
+    }
+
+    private void RebuildExtensionFilters()
+    {
+        var selected = NormalizeExtensionFilter(SelectedExtensionFilter);
+
+        var extensions = _entries
+            .Where(e => !e.IsDirectory && !string.IsNullOrWhiteSpace(e.Extension))
+            .Select(e => NormalizeExtensionFilter(e.Extension ?? string.Empty))
+            .Where(e => e != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(e => e, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        ExtensionFilters.Clear();
+        ExtensionFilters.Add("all");
+        foreach (var ext in extensions)
+            ExtensionFilters.Add(ext);
+
+        SelectedExtensionFilter = EnsureExtensionFilterOption(selected);
+    }
+
+    private string EnsureExtensionFilterOption(string value)
+    {
+        if (!ExtensionFilters.Contains(value, StringComparer.OrdinalIgnoreCase))
+            ExtensionFilters.Add(value);
+
+        return value;
+    }
+
     private void ShowItemsForPath(string? directoryRelativePath)
     {
         IEnumerable<RepositoryScanEntryDto> visible = _entries.Where(e =>
             string.Equals(NormalizeParent(e.ParentRelativePath), NormalizeParent(directoryRelativePath), StringComparison.OrdinalIgnoreCase));
 
-        var query = SearchQuery.Trim();
-        if (!string.IsNullOrWhiteSpace(query))
+        var directives = ParseSearchDirectives(SearchQuery.Trim());
+
+        var textQuery = directives.TextQuery;
+        var entryTypeFilter = NormalizeEntryTypeFilter(SelectedEntryTypeFilter);
+        if (entryTypeFilter == "all" && !string.IsNullOrWhiteSpace(directives.EntryTypeFilter))
+            entryTypeFilter = directives.EntryTypeFilter;
+
+        var extensionFilter = NormalizeExtensionFilter(SelectedExtensionFilter);
+        if (extensionFilter == "all" && !string.IsNullOrWhiteSpace(directives.ExtensionFilter))
+            extensionFilter = EnsureExtensionFilterOption(directives.ExtensionFilter);
+
+        var modifiedWindowFilter = NormalizeModifiedWindowFilter(SelectedModifiedWindowFilter);
+        if (modifiedWindowFilter == "all" && !string.IsNullOrWhiteSpace(directives.ModifiedWindowFilter))
+            modifiedWindowFilter = directives.ModifiedWindowFilter;
+
+        var minSizeMb = ParseNullableDouble(MinSizeMb) ?? directives.MinSizeMb;
+        var maxSizeMb = ParseNullableDouble(MaxSizeMb) ?? directives.MaxSizeMb;
+
+        if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
+            (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
+
+        if (!string.IsNullOrWhiteSpace(textQuery))
         {
             visible = visible.Where(e =>
-                e.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                e.RelativePath.Contains(query, StringComparison.OrdinalIgnoreCase));
+                e.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                e.RelativePath.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (entryTypeFilter != "all")
+        {
+            visible = entryTypeFilter switch
+            {
+                "files" => visible.Where(e => !e.IsDirectory),
+                "folders" => visible.Where(e => e.IsDirectory),
+                _ => visible
+            };
+        }
+
+        if (extensionFilter != "all")
+        {
+            visible = visible.Where(e =>
+                !e.IsDirectory &&
+                string.Equals(NormalizeExtensionFilter(e.Extension ?? string.Empty), extensionFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (modifiedWindowFilter != "all")
+        {
+            var threshold = modifiedWindowFilter switch
+            {
+                "24h" => DateTime.UtcNow.AddHours(-24),
+                "7d" => DateTime.UtcNow.AddDays(-7),
+                "30d" => DateTime.UtcNow.AddDays(-30),
+                _ => DateTime.MinValue
+            };
+
+            if (threshold > DateTime.MinValue)
+                visible = visible.Where(e => e.LastWriteUtc >= threshold);
+        }
+
+        if (minSizeMb is > 0)
+        {
+            visible = visible.Where(e =>
+                !e.IsDirectory &&
+                (e.SizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
+        }
+
+        if (maxSizeMb is > 0)
+        {
+            visible = visible.Where(e =>
+                !e.IsDirectory &&
+                (e.SizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
         }
 
         var rows = visible
@@ -2190,6 +2897,34 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             Items.Add(row);
 
         IsEmpty = Items.Count == 0;
+        NotifyExplorerChromeStateChanged();
+    }
+
+    private int GetActiveExplorerFilterCount()
+    {
+        var count = 0;
+
+        if (!string.IsNullOrWhiteSpace(SearchQuery))
+            count++;
+        if (!string.Equals(SelectedEntryTypeFilter, "all", StringComparison.OrdinalIgnoreCase))
+            count++;
+        if (!string.Equals(SelectedExtensionFilter, "all", StringComparison.OrdinalIgnoreCase))
+            count++;
+        if (!string.Equals(SelectedModifiedWindowFilter, "all", StringComparison.OrdinalIgnoreCase))
+            count++;
+        if (!string.IsNullOrWhiteSpace(MinSizeMb))
+            count++;
+        if (!string.IsNullOrWhiteSpace(MaxSizeMb))
+            count++;
+
+        return count;
+    }
+
+    private void NotifyExplorerChromeStateChanged()
+    {
+        OnPropertyChanged(nameof(HasActiveExplorerFilters));
+        OnPropertyChanged(nameof(ExplorerFilterButtonLabel));
+        OnPropertyChanged(nameof(ExplorerResultsSummary));
     }
 
     private static string? GetParentRelativePath(string relativePath)
@@ -2562,6 +3297,293 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return "equal";
     }
 
+    private static SearchDirectives ParseSearchDirectives(string rawQuery)
+    {
+        if (string.IsNullOrWhiteSpace(rawQuery))
+            return SearchDirectives.Empty;
+
+        var directives = SearchDirectives.Empty;
+        var plainTokens = new List<string>();
+
+        var tokens = rawQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var token in tokens)
+        {
+            var normalized = token.Trim();
+            var lower = normalized.ToLowerInvariant();
+
+            if (lower.StartsWith("tag:", StringComparison.Ordinal) || lower.StartsWith("ext:", StringComparison.Ordinal))
+            {
+                var value = lower.StartsWith("tag:", StringComparison.Ordinal)
+                    ? normalized[4..]
+                    : normalized[4..];
+                var ext = NormalizeExtensionFilter(value);
+                if (ext != "all")
+                    directives = directives with { ExtensionFilter = ext };
+                continue;
+            }
+
+            if (lower.StartsWith("type:", StringComparison.Ordinal))
+            {
+                var value = NormalizeEntryTypeFilter(normalized[5..]);
+                if (value != "all")
+                    directives = directives with { EntryTypeFilter = value };
+                continue;
+            }
+
+            if (lower.StartsWith("modified:", StringComparison.Ordinal))
+            {
+                var value = NormalizeModifiedWindowFilter(normalized[9..]);
+                if (value != "all")
+                    directives = directives with { ModifiedWindowFilter = value };
+                continue;
+            }
+
+            if (TryParseSizeDirective(lower, out var isMin, out var sizeMb))
+            {
+                directives = isMin
+                    ? directives with { MinSizeMb = sizeMb }
+                    : directives with { MaxSizeMb = sizeMb };
+                continue;
+            }
+
+            plainTokens.Add(normalized);
+        }
+
+        directives = directives with { TextQuery = string.Join(' ', plainTokens) };
+        return directives;
+    }
+
+    private static bool TryParseSizeDirective(string token, out bool isMin, out double sizeMb)
+    {
+        isMin = false;
+        sizeMb = 0;
+        string? payload = null;
+
+        if (token.StartsWith("size>=", StringComparison.Ordinal))
+        {
+            payload = token[6..];
+            isMin = true;
+        }
+        else if (token.StartsWith("size>", StringComparison.Ordinal))
+        {
+            payload = token[5..];
+            isMin = true;
+        }
+        else if (token.StartsWith("size<=", StringComparison.Ordinal))
+        {
+            payload = token[6..];
+            isMin = false;
+        }
+        else if (token.StartsWith("size<", StringComparison.Ordinal))
+        {
+            payload = token[5..];
+            isMin = false;
+        }
+
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        payload = payload.TrimEnd('m', 'b');
+        if (!double.TryParse(payload, NumberStyles.Float, CultureInfo.InvariantCulture, out sizeMb))
+            return false;
+
+        return sizeMb > 0;
+    }
+
+    private static double? ParseNullableDouble(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (!double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            return null;
+
+        return parsed > 0 ? parsed : null;
+    }
+
+    private static string NormalizeEntryTypeFilter(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "file" => "files",
+            "dir" => "folders",
+            "directory" => "folders",
+            "files" => "files",
+            "folders" => "folders",
+            _ => "all"
+        };
+    }
+
+    private static string NormalizeExtensionFilter(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == "all")
+            return "all";
+
+        return normalized.StartsWith('.') ? normalized : "." + normalized;
+    }
+
+    private static string NormalizeModifiedWindowFilter(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "1d" => "24h",
+            "24h" => "24h",
+            "7d" => "7d",
+            "30d" => "30d",
+            _ => "all"
+        };
+    }
+
+    private static SearchSnapshotHistoryDirectives ParseSnapshotHistoryDirectives(string rawQuery)
+    {
+        if (string.IsNullOrWhiteSpace(rawQuery))
+            return SearchSnapshotHistoryDirectives.Empty;
+
+        var directives = SearchSnapshotHistoryDirectives.Empty;
+        var plainTokens = new List<string>();
+
+        var tokens = rawQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var token in tokens)
+        {
+            var normalized = token.Trim();
+            var lower = normalized.ToLowerInvariant();
+
+            if (lower.StartsWith("trigger:", StringComparison.Ordinal))
+            {
+                var trigger = NormalizeSnapshotTriggerFilter(normalized[8..]);
+                if (trigger != "all")
+                    directives = directives with { TriggerFilter = trigger };
+                continue;
+            }
+
+            if (TryParseChangedDirective(lower, out var minChanged))
+            {
+                directives = directives with { MinChangedFiles = minChanged };
+                continue;
+            }
+
+            plainTokens.Add(normalized);
+        }
+
+        directives = directives with { TextQuery = string.Join(' ', plainTokens) };
+        return directives;
+    }
+
+    private static SearchSnapshotFileDirectives ParseSnapshotFilesDirectives(string rawQuery)
+    {
+        if (string.IsNullOrWhiteSpace(rawQuery))
+            return SearchSnapshotFileDirectives.Empty;
+
+        var directives = SearchSnapshotFileDirectives.Empty;
+        var plainTokens = new List<string>();
+
+        var tokens = rawQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var token in tokens)
+        {
+            var normalized = token.Trim();
+            var lower = normalized.ToLowerInvariant();
+
+            if (lower.StartsWith("kind:", StringComparison.Ordinal))
+            {
+                var kind = NormalizeSnapshotFileChangeKindFilter(normalized[5..]);
+                if (kind != "all")
+                    directives = directives with { ChangeKindFilter = kind };
+                continue;
+            }
+
+            if (lower.StartsWith("tag:", StringComparison.Ordinal) || lower.StartsWith("ext:", StringComparison.Ordinal))
+            {
+                var ext = NormalizeSnapshotFileExtensionFilter(normalized[4..]);
+                if (ext != "all")
+                    directives = directives with { ExtensionFilter = ext };
+                continue;
+            }
+
+            if (TryParseSizeDirective(lower, out var isMin, out var sizeKb))
+            {
+                if (isMin)
+                    directives = directives with { MinSizeDeltaKb = sizeKb };
+                continue;
+            }
+
+            plainTokens.Add(normalized);
+        }
+
+        directives = directives with { TextQuery = string.Join(' ', plainTokens) };
+        return directives;
+    }
+
+    private static bool TryParseChangedDirective(string token, out int minChanged)
+    {
+        minChanged = 0;
+        string? payload = null;
+
+        if (token.StartsWith("changed>=", StringComparison.Ordinal))
+            payload = token[9..];
+        else if (token.StartsWith("changed>", StringComparison.Ordinal))
+            payload = token[8..];
+        else if (token.StartsWith("files>=", StringComparison.Ordinal))
+            payload = token[7..];
+        else if (token.StartsWith("files>", StringComparison.Ordinal))
+            payload = token[6..];
+
+        if (string.IsNullOrWhiteSpace(payload))
+            return false;
+
+        return int.TryParse(payload, NumberStyles.Integer, CultureInfo.InvariantCulture, out minChanged)
+               && minChanged >= 0;
+    }
+
+    private static int? ParseNullableInt(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (!int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return null;
+
+        return parsed >= 0 ? parsed : null;
+    }
+
+    private static string NormalizeSnapshotTriggerFilter(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '_');
+        return string.IsNullOrWhiteSpace(normalized) || normalized == "all"
+            ? "all"
+            : normalized;
+    }
+
+    private static string NormalizeSnapshotFileChangeKindFilter(string value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "add" => "added",
+            "added" => "added",
+            "modify" => "modified",
+            "modified" => "modified",
+            "remove" => "removed",
+            "removed" => "removed",
+            "delete" => "removed",
+            "deleted" => "removed",
+            _ => "all"
+        };
+    }
+
+    private static string NormalizeSnapshotFileExtensionFilter(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized == "all")
+            return "all";
+
+        return normalized.StartsWith('.') ? normalized : "." + normalized;
+    }
+
     private static string FormatLastActivity(DateTime utc)
     {
         var delta = DateTime.UtcNow - utc;
@@ -2576,6 +3598,47 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private readonly record struct SearchDirectives(
+        string TextQuery,
+        string EntryTypeFilter,
+        string ExtensionFilter,
+        string ModifiedWindowFilter,
+        double? MinSizeMb,
+        double? MaxSizeMb)
+    {
+        public static SearchDirectives Empty => new(
+            TextQuery: string.Empty,
+            EntryTypeFilter: string.Empty,
+            ExtensionFilter: string.Empty,
+            ModifiedWindowFilter: string.Empty,
+            MinSizeMb: null,
+            MaxSizeMb: null);
+    }
+
+    private readonly record struct SearchSnapshotHistoryDirectives(
+        string TextQuery,
+        string TriggerFilter,
+        int? MinChangedFiles)
+    {
+        public static SearchSnapshotHistoryDirectives Empty => new(
+            TextQuery: string.Empty,
+            TriggerFilter: string.Empty,
+            MinChangedFiles: null);
+    }
+
+    private readonly record struct SearchSnapshotFileDirectives(
+        string TextQuery,
+        string ChangeKindFilter,
+        string ExtensionFilter,
+        double? MinSizeDeltaKb)
+    {
+        public static SearchSnapshotFileDirectives Empty => new(
+            TextQuery: string.Empty,
+            ChangeKindFilter: string.Empty,
+            ExtensionFilter: string.Empty,
+            MinSizeDeltaKb: null);
     }
 
     private string BuildSuggestedBundleFileName()

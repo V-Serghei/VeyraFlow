@@ -378,6 +378,57 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.ToTable("FileVersionTextDiffLines");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.OperationJournalEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category", "OccurredAtUtc");
+
+                    b.HasIndex("OccurredAtUtc", "Id");
+
+                    b.HasIndex("RepositoryId", "OccurredAtUtc");
+
+                    b.ToTable("OperationJournalEntries");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
                 {
                     b.Property<int>("Id")
@@ -678,6 +729,20 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("UploadCheckpointNextIndex")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("UploadCheckpointSignature")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UploadCheckpointTotal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.HasKey("Id");
 
                     b.HasIndex("RepositoryId", "SnapshotId", "OperationType")
@@ -768,10 +833,20 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasMaxLength(4096)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("AccessTokenExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CloudSessionId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("CloudUserId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsActive")
@@ -779,6 +854,18 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.Property<DateTime>("LastLoginAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("RefreshToken")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RefreshTokenExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequirePasswordForSensitiveActions")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -789,6 +876,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
 
                     b.HasIndex("Username")
                         .IsUnique();

@@ -13,11 +13,11 @@ public sealed class RegisterCommandHandler(
 {
     public async Task<OperationResult> Handle(RegisterCommand request, CancellationToken cancellationToken)
     {
-        logger.LogInformation("Attempting to register user {Username}", request.Username);
+        logger.LogInformation("Attempting to register user {Username} with email {Email}", request.Username, request.Email);
 
         try
         {
-            var session = await authService.RegisterAsync(request.Username, request.Password, cancellationToken);
+            var session = await authService.RegisterAsync(request.Username, request.Email, request.Password, cancellationToken);
             if (session is null)
             {
                 logger.LogWarning("Registration failed for user {Username}", request.Username);
@@ -28,6 +28,11 @@ public sealed class RegisterCommandHandler(
                 session.Username,
                 session.CloudUserId,
                 session.AccessToken,
+                session.Email,
+                session.CloudSessionId,
+                session.RefreshToken,
+                session.AccessTokenExpiresAtUtc,
+                session.RefreshTokenExpiresAtUtc,
                 cancellationToken);
 
             logger.LogInformation("User {Username} registered and saved locally", session.Username);

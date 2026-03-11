@@ -17,6 +17,7 @@ using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries.Repository;
 using Veyra.Application.Services.Diff;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Preview;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -27,9 +28,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly ILogger<FileVersionCompareWindowViewModel> _log;
     private readonly INativeWordCompareService _nativeWordCompare;
+    private readonly LocalizationManager _localization = LocalizationManager.Instance;
     private readonly List<string> _tempPreviewFiles = [];
-    private const string WordDesktopRequiredMessage =
-        "Microsoft Word Desktop is not installed. For high-fidelity document comparison, install Microsoft Word 2016, 2019, 2021, or Microsoft 365 Desktop.";
     private CancellationTokenSource? _previewCts;
     private FileVersionCompareListItemViewModel? _leftVersion;
     private FileVersionCompareListItemViewModel? _rightVersion;
@@ -39,6 +39,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private int _repositoryId;
     private string _repositoryPath = string.Empty;
     private string _relativePath = string.Empty;
+    private string _displayName = string.Empty;
 
     public event Action? RequestClose;
 
@@ -47,10 +48,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private string? _errorMessage;
 
     [ObservableProperty]
-    private string _windowTitle = "Compare file versions";
+    private string _windowTitle = string.Empty;
 
     [ObservableProperty]
-    private string _instructionText = "Left click selects LEFT side. Right click selects RIGHT side.";
+    private string _instructionText = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoVersions))]
@@ -82,15 +83,15 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
     private Bitmap? _rightImagePreview;
 
-    [ObservableProperty] private string _leftImageCaption = "Before";
-    [ObservableProperty] private string _rightImageCaption = "After";
+    [ObservableProperty] private string _leftImageCaption = string.Empty;
+    [ObservableProperty] private string _rightImageCaption = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
     private bool _isWrapEnabled;
 
-    [ObservableProperty] private string _selectedPairSummary = "Select versions in the left panel.";
-    [ObservableProperty] private string _previewSummary = "Choose two versions to build preview.";
+    [ObservableProperty] private string _selectedPairSummary = string.Empty;
+    [ObservableProperty] private string _previewSummary = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
@@ -136,6 +137,69 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
         WordPreviewRows.CollectionChanged += OnWordPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
+        _localization.LanguageChanged += OnLanguageChanged;
+        RefreshLocalizationState();
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void RefreshLocalizationState()
+    {
+        WindowTitle = BuildWindowTitle();
+        InstructionText = Loc.T("compare.instructions");
+        OnPropertyChanged(nameof(FullPreviewToggleLabel));
+        OnPropertyChanged(nameof(WrapToggleLabel));
+        OnPropertyChanged(nameof(NativeWordCompareHint));
+        OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
+
+        RefreshVersionsBindings();
+        RefreshSelectedPairSummary();
+
+        if (_leftVersion is not null && _rightVersion is not null && !IsPreviewLoading)
+        {
+            if (IsFullFilePreviewMode)
+                _ = LoadFullFilePreviewAsync();
+            else
+                _ = LoadPreviewAsync(CancellationToken.None);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(PreviewSummary))
+                PreviewSummary = Loc.T("compare.choose_versions");
+            LeftImageCaption = BuildImageCaption(Loc.T("common.before"), null, null);
+            RightImageCaption = BuildImageCaption(Loc.T("common.after"), null, null);
+        }
+    }
+
+    private string BuildWindowTitle()
+    {
+        return string.IsNullOrWhiteSpace(_displayName)
+            ? Loc.T("compare.window_title")
+            : Loc.F("compare.window_title_with_name", _displayName);
+    }
+
+    private void RefreshVersionsBindings()
+    {
+        if (Versions.Count == 0)
+            return;
+
+        var leftId = _leftVersion?.FileVersionId;
+        var rightId = _rightVersion?.FileVersionId;
+        var versions = Versions.ToList();
+        Versions.Clear();
+        foreach (var version in versions)
+            Versions.Add(version);
+
+        _leftVersion = leftId is > 0
+            ? Versions.FirstOrDefault(x => x.FileVersionId == leftId.Value)
+            : null;
+        _rightVersion = rightId is > 0
+            ? Versions.FirstOrDefault(x => x.FileVersionId == rightId.Value)
+            : null;
+        ApplySelectionStates();
     }
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
@@ -167,8 +231,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
            && _leftVersion is not null
            && _rightVersion is not null;
 
-    public string FullPreviewToggleLabel => IsFullFilePreviewMode ? "Show changes only" : "View full file";
-    public string WrapToggleLabel => IsWrapEnabled ? "Wrap: On" : "Wrap: Off";
+    public string FullPreviewToggleLabel => IsFullFilePreviewMode
+        ? Loc.T("compare.full_preview.show_changes_only")
+        : Loc.T("compare.full_preview.view_full_file");
+    public string WrapToggleLabel => IsWrapEnabled ? Loc.T("compare.wrap.on") : Loc.T("compare.wrap.off");
 
     public bool CanOpenSourceFileOnDisk => GetSourceFilePath() is not null;
 
@@ -185,12 +251,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         => IsWordDocument && _nativeWordCompare.IsAvailable;
 
     public string NativeWordCompareHint => _nativeWordCompare.IsAvailable
-        ? "Open selected versions in Microsoft Word compare window (content-focused)."
-        : WordDesktopRequiredMessage;
+        ? Loc.T("compare.native_word.hint")
+        : Loc.T("compare.native_word.required");
 
     public string NativeWordCompareFormattingHint => _nativeWordCompare.IsAvailable
-        ? "Open selected versions in Microsoft Word compare window with formatting/style changes."
-        : WordDesktopRequiredMessage;
+        ? Loc.T("compare.native_word.hint_formatting")
+        : Loc.T("compare.native_word.required");
 
     public async Task InitializeAsync(
         int repositoryId,
@@ -208,12 +274,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var displayName = string.IsNullOrWhiteSpace(fileDisplayName)
             ? Path.GetFileName(_relativePath)
             : fileDisplayName;
+        _displayName = displayName ?? string.Empty;
 
-        WindowTitle = string.IsNullOrWhiteSpace(displayName)
-            ? "Compare file versions"
-            : $"Compare versions - {displayName}";
+        WindowTitle = BuildWindowTitle();
 
-        SelectedPairSummary = "Loading file versions...";
+        SelectedPairSummary = Loc.T("compare.loading_versions");
         ErrorMessage = null;
         IsVersionListLoading = true;
 
@@ -245,8 +310,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (Versions.Count == 0)
             {
-                SelectedPairSummary = "No versions found for this file.";
-                PreviewSummary = "Create at least one snapshot to compare versions.";
+                SelectedPairSummary = Loc.T("compare.no_versions");
+                PreviewSummary = Loc.T("compare.create_snapshot_to_compare");
                 return;
             }
 
@@ -273,8 +338,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 "Failed to initialize version compare window. RepositoryId {RepositoryId}. Path {Path}",
                 repositoryId,
                 _relativePath);
-            ErrorMessage = "Failed to load version comparison data.";
-            SelectedPairSummary = "Unable to load file versions.";
+            ErrorMessage = Loc.T("compare.load_failed");
+            SelectedPairSummary = Loc.T("compare.unable_to_load_versions");
         }
         finally
         {
@@ -295,7 +360,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         if (!item.IsSelectable)
         {
-            ErrorMessage = "Selected version cannot be compared.";
+            ErrorMessage = Loc.T("compare.version.not_comparable");
             return;
         }
 
@@ -342,13 +407,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var fullPath = GetSourceFilePath();
         if (string.IsNullOrWhiteSpace(fullPath))
         {
-            ErrorMessage = "Source file path is unavailable.";
+            ErrorMessage = Loc.T("compare.source_file.unavailable");
             return;
         }
 
         if (!File.Exists(fullPath))
         {
-            ErrorMessage = "Source file is missing on disk.";
+            ErrorMessage = Loc.T("compare.source_file.missing");
             return;
         }
 
@@ -361,13 +426,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var fullPath = GetSourceFilePath();
         if (string.IsNullOrWhiteSpace(fullPath))
         {
-            ErrorMessage = "Source file path is unavailable.";
+            ErrorMessage = Loc.T("compare.source_file.unavailable");
             return;
         }
 
         if (!File.Exists(fullPath))
         {
-            ErrorMessage = "Source file is missing on disk.";
+            ErrorMessage = Loc.T("compare.source_file.missing");
             return;
         }
 
@@ -381,11 +446,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [RelayCommand]
     private Task OpenNativeWordCompareAsync()
-        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.ContentOnly, "Opened native Microsoft Word compare (content-focused).");
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.ContentOnly, Loc.T("compare.native_word.opened_content"));
 
     [RelayCommand]
     private Task OpenNativeWordCompareWithFormattingAsync()
-        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.WithFormatting, "Opened native Microsoft Word compare with formatting changes.");
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.WithFormatting, Loc.T("compare.native_word.opened_formatting"));
 
     private async Task OpenNativeWordCompareCoreAsync(NativeWordCompareOptions options, string successMessage)
     {
@@ -394,7 +459,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         if (!_nativeWordCompare.IsAvailable)
         {
-            ErrorMessage = WordDesktopRequiredMessage;
+            ErrorMessage = Loc.T("compare.native_word.required");
             return;
         }
 
@@ -421,7 +486,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!leftRestore.Success || string.IsNullOrWhiteSpace(leftRestore.Value))
             {
-                ErrorMessage = leftRestore.Error ?? "Failed to prepare LEFT version for Word compare.";
+                ErrorMessage = leftRestore.Error ?? Loc.T("compare.native_word.prepare_left_failed");
                 return;
             }
 
@@ -434,14 +499,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!rightRestore.Success || string.IsNullOrWhiteSpace(rightRestore.Value))
             {
-                ErrorMessage = rightRestore.Error ?? "Failed to prepare RIGHT version for Word compare.";
+                ErrorMessage = rightRestore.Error ?? Loc.T("compare.native_word.prepare_right_failed");
                 return;
             }
 
             var launch = await _nativeWordCompare.OpenCompareAsync(leftRestore.Value, rightRestore.Value, options);
             if (!launch.Success)
             {
-                ErrorMessage = launch.ErrorMessage ?? "Unable to open Microsoft Word native compare.";
+                ErrorMessage = launch.ErrorMessage ?? Loc.T("compare.native_word.open_failed");
                 return;
             }
 
@@ -455,7 +520,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 _leftVersion.FileVersionId,
                 _rightVersion.FileVersionId);
 
-            ErrorMessage = "Failed to launch Microsoft Word compare.";
+            ErrorMessage = Loc.T("compare.native_word.launch_failed");
         }
         finally
         {
@@ -485,19 +550,19 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         if (_leftVersion is null || _rightVersion is null)
         {
-            ResetPreview("Pick both LEFT and RIGHT versions.");
+            ResetPreview(Loc.T("compare.preview.pick_both"));
             return;
         }
 
         if (_leftVersion.FileVersionId == _rightVersion.FileVersionId)
         {
-            ResetPreview("Select two different versions.");
+            ResetPreview(Loc.T("compare.preview.select_two_different"));
             return;
         }
 
         ErrorMessage = null;
         IsPreviewLoading = true;
-        PreviewSummary = $"Building preview for {_leftVersion.VersionName} -> {_rightVersion.VersionName}...";
+        PreviewSummary = Loc.F("compare.preview.building", _leftVersion.VersionName, _rightVersion.VersionName);
         PreviewKind = PendingDiffPreviewKind.None;
         ResetFullPreviewState();
         ReleasePreviewResources();
@@ -513,7 +578,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                ResetPreview(result.Error ?? "Unable to build preview for selected versions.");
+                ResetPreview(result.Error ?? Loc.T("compare.preview.build_failed"));
                 return;
             }
 
@@ -534,7 +599,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     if (IsNativeWordPreferredForPreview)
                     {
                         PreviewKind = PendingDiffPreviewKind.Text;
-                        PreviewSummary = "For DOCX/DOCM use native Microsoft Word compare for accurate layout, tables, images and formatting.";
+                        PreviewSummary = Loc.T("compare.preview.use_word_native");
                         break;
                     }
 
@@ -564,7 +629,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     ApplyBinaryMetrics(preview.BinarySummary, null);
                     PreviewKind = PendingDiffPreviewKind.Binary;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                        ? "Binary comparison is ready."
+                        ? Loc.T("compare.preview.binary_ready")
                         : preview.Message;
                     break;
 
@@ -573,12 +638,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview);
                     PreviewKind = PendingDiffPreviewKind.Image;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                        ? "Image comparison is ready."
+                        ? Loc.T("compare.preview.image_ready")
                         : preview.Message;
                     break;
 
                 default:
-                    ResetPreview("Preview format is not supported.");
+                    ResetPreview(Loc.T("compare.preview.unsupported"));
                     break;
             }
         }
@@ -591,7 +656,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 "Failed to load file-version preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
                 _leftVersion.FileVersionId,
                 _rightVersion.FileVersionId);
-            ResetPreview("Unable to load preview for selected versions.");
+            ResetPreview(Loc.T("compare.preview.load_failed"));
         }
         finally
         {
@@ -613,7 +678,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         FullPreviewBeforeText = string.Empty;
         FullPreviewAfterText = string.Empty;
         FullPreviewSummary = string.Empty;
-        PreviewSummary = $"Loading full file content for {_leftVersion.VersionName} -> {_rightVersion.VersionName}...";
+        PreviewSummary = Loc.F("compare.full_preview.loading", _leftVersion.VersionName, _rightVersion.VersionName);
         ErrorMessage = null;
 
         try
@@ -630,28 +695,34 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             if (before.Success && before.Value is not null)
             {
                 FullPreviewBeforeText = before.Value.Content;
-                summaryParts.Add($"Before: {FormatBytes(before.Value.SizeBytes)}{(before.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.before_size",
+                    FormatBytes(before.Value.SizeBytes),
+                    before.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
             }
             else
             {
-                FullPreviewBeforeText = $"Unable to load before version.{Environment.NewLine}{Environment.NewLine}{before.Error}";
-                summaryParts.Add("Before unavailable");
+                FullPreviewBeforeText = $"{Loc.T("compare.full_preview.before_unavailable")}.{Environment.NewLine}{Environment.NewLine}{before.Error}";
+                summaryParts.Add(Loc.T("compare.full_preview.before_unavailable_short"));
             }
 
             if (after.Success && after.Value is not null)
             {
                 FullPreviewAfterText = after.Value.Content;
-                summaryParts.Add($"After: {FormatBytes(after.Value.SizeBytes)}{(after.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.after_size",
+                    FormatBytes(after.Value.SizeBytes),
+                    after.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
             }
             else
             {
-                FullPreviewAfterText = $"Unable to load after version.{Environment.NewLine}{Environment.NewLine}{after.Error}";
-                summaryParts.Add("After unavailable");
+                FullPreviewAfterText = $"{Loc.T("compare.full_preview.after_unavailable")}.{Environment.NewLine}{Environment.NewLine}{after.Error}";
+                summaryParts.Add(Loc.T("compare.full_preview.after_unavailable_short"));
             }
 
             FullPreviewSummary = string.Join(" | ", summaryParts);
             PreviewKind = PendingDiffPreviewKind.Text;
-            PreviewSummary = "Full-file preview mode is ready.";
+            PreviewSummary = Loc.T("compare.full_preview.ready");
         }
         catch (Exception ex)
         {
@@ -662,8 +733,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             FullPreviewBeforeText = string.Empty;
             FullPreviewAfterText = string.Empty;
-            FullPreviewSummary = "Failed to load full file preview.";
-            PreviewSummary = "Unable to load full file preview.";
+            FullPreviewSummary = Loc.T("compare.full_preview.failed");
+            PreviewSummary = Loc.T("compare.full_preview.load_failed");
         }
         finally
         {
@@ -686,7 +757,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     {
         if (_leftVersion is null && _rightVersion is null)
         {
-            SelectedPairSummary = "Select versions in the list to compare.";
+            SelectedPairSummary = Loc.T("compare.selected.select_from_list");
             return;
         }
 
@@ -694,24 +765,29 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         {
             var selected = _leftVersion ?? _rightVersion;
             SelectedPairSummary = selected is null
-                ? "Select versions in the list to compare."
-                : $"{selected.VersionName} selected. Pick the second side.";
+                ? Loc.T("compare.selected.select_from_list")
+                : Loc.F("compare.selected.pick_second_side", selected.VersionName);
             return;
         }
 
         if (_leftVersion.FileVersionId == _rightVersion.FileVersionId)
         {
-            SelectedPairSummary = "Select two different versions.";
+            SelectedPairSummary = Loc.T("compare.selected.select_two_different");
             return;
         }
 
-        SelectedPairSummary = $"LEFT {_leftVersion.VersionName} ({_leftVersion.CreatedAtDisplay})  vs  RIGHT {_rightVersion.VersionName} ({_rightVersion.CreatedAtDisplay})";
+        SelectedPairSummary = Loc.F(
+            "compare.selected.left_right",
+            _leftVersion.VersionName,
+            _leftVersion.CreatedAtDisplay,
+            _rightVersion.VersionName,
+            _rightVersion.CreatedAtDisplay);
     }
 
     private async Task LoadImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
     {
-        LeftImageCaption = "Before";
-        RightImageCaption = "After";
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
 
         if (imagePreview is null)
             return;
@@ -728,8 +804,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             TrackTempFile(imagePreview.CurrentImagePath, imagePreview.IsCurrentTempFile);
         }
 
-        LeftImageCaption = BuildImageCaption("Before", imagePreview.BaselineWidth, imagePreview.BaselineHeight);
-        RightImageCaption = BuildImageCaption("After", imagePreview.CurrentWidth, imagePreview.CurrentHeight);
+        LeftImageCaption = BuildImageCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
+        RightImageCaption = BuildImageCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
     }
 
     private void ApplyBinaryMetrics(PendingBinaryDiffSummaryDto? summary, PendingImageDiffPreviewDto? imagePreview)
@@ -740,24 +816,24 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             return;
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Size",
+            Loc.T("metric.size"),
             $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})"));
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Blocks",
+            Loc.T("metric.blocks"),
             $"{summary.BaselineBlockCount} -> {summary.CurrentBlockCount}, shared {summary.SharedBlockCount}"));
 
         var dedupRatio = summary.DedupRatio ?? ComputeDedupRatio(summary);
         var changedRatio = summary.ChangedBlockRatio ?? ComputeChangedBlockRatio(summary, dedupRatio);
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Dedup / Changed",
+            Loc.T("metric.dedup_changed"),
             $"{FormatRatio(dedupRatio)} / {FormatRatio(changedRatio)}"));
 
         if (summary.ByteSimilarityRatio.HasValue)
         {
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-                "Byte similarity",
+                Loc.T("metric.byte_similarity"),
                 $"{summary.ByteSimilarityRatio.Value * 100:F1}%"));
         }
 
@@ -765,16 +841,16 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             return;
 
         var before = imagePreview.BaselineWidth is null || imagePreview.BaselineHeight is null
-            ? "n/a"
+            ? Loc.T("common.not_available_short")
             : $"{imagePreview.BaselineWidth} x {imagePreview.BaselineHeight}";
 
         var after = imagePreview.CurrentWidth is null || imagePreview.CurrentHeight is null
-            ? "n/a"
+            ? Loc.T("common.not_available_short")
             : $"{imagePreview.CurrentWidth} x {imagePreview.CurrentHeight}";
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
-            "Dimensions",
-            $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? " (changed)" : string.Empty)));
+            Loc.T("metric.dimensions"),
+            $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
     }
 
     private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
@@ -957,8 +1033,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         LeftImagePreview = null;
         RightImagePreview = null;
 
-        LeftImageCaption = "Before";
-        RightImageCaption = "After";
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
 
         foreach (var path in _tempPreviewFiles)
             TryDelete(path);
@@ -1047,7 +1123,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         => count <= 0 ? $"{Math.Max(0, startLine)}" : $"{Math.Max(0, startLine)},{count}";
 
     private static string FormatRatio(double? value)
-        => value.HasValue ? $"{value.Value * 100:F1}%" : "n/a";
+        => value.HasValue ? $"{value.Value * 100:F1}%" : Loc.T("common.not_available_short");
 
     private static double? ComputeDedupRatio(PendingBinaryDiffSummaryDto summary)
     {

@@ -1,3 +1,4 @@
+using System.IO;
 using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Abstractions.Sync;
@@ -23,10 +24,15 @@ public interface ICloudSyncService
     Task UploadBlockAsync(
         string accessToken,
         string blockHash,
-        ReadOnlyMemory<byte> content,
+        Stream content,
+        long? contentLength = null,
         CancellationToken ct = default);
 
-    Task<byte[]?> DownloadBlockAsync(string accessToken, string blockHash, CancellationToken ct = default);
+    Task<bool> DownloadBlockToFileAsync(
+        string accessToken,
+        string blockHash,
+        string targetPath,
+        CancellationToken ct = default);
 }
 
 

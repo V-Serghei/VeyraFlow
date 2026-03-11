@@ -314,25 +314,46 @@ public sealed class EfRepositoryIntegrityService(
     {
         try
         {
-            var remotePayload = await cloudSync.DownloadBlockAsync(accessToken, blockHash, ct);
-            if (remotePayload is null || remotePayload.Length == 0)
-                return false;
-
             var directory = Path.GetDirectoryName(localPath);
             if (!string.IsNullOrWhiteSpace(directory))
                 Directory.CreateDirectory(directory);
 
-            await File.WriteAllBytesAsync(localPath, remotePayload, ct);
-
-            if (blockHash.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+            var tempPath = localPath + "." + Guid.NewGuid().ToString("N") + ".repair";
+            try
             {
-                var expected = blockHash[ManagedHashPrefix.Length..].Trim().ToLowerInvariant();
-                var actual = await ComputeFileSha256Async(localPath, ct);
-                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                var restored = await cloudSync.DownloadBlockToFileAsync(accessToken, blockHash, tempPath, ct);
+                if (!restored)
                     return false;
-            }
 
-            return true;
+                var fileInfo = new FileInfo(tempPath);
+                if (!fileInfo.Exists || fileInfo.Length == 0)
+                    return false;
+
+                if (blockHash.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var expected = blockHash[ManagedHashPrefix.Length..].Trim().ToLowerInvariant();
+                    var actual = await ComputeFileSha256Async(tempPath, ct);
+                    if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                        return false;
+                }
+
+                File.Move(tempPath, localPath, overwrite: true);
+                return true;
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPath);
+                    }
+                    catch
+                    {
+                        // Best-effort cleanup of interrupted repair downloads.
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {

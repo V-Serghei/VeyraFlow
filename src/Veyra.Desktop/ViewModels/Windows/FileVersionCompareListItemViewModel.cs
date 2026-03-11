@@ -1,5 +1,6 @@
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -19,7 +20,7 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
 
     public string VersionName => $"v{FileVersionId}";
     public string CreatedAtDisplay => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-    public string SizeDisplay => IsDeletionMarker ? "deleted" : FormatSize(SizeBytes);
+    public string SizeDisplay => IsDeletionMarker ? Loc.T("common.deleted") : FormatSize(SizeBytes);
 
     public bool IsSelectable => HasContentBlocks && !IsDeletionMarker;
 
@@ -28,12 +29,12 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
         get
         {
             if (IsDeletionMarker)
-                return "deleted marker";
+                return Loc.T("compare.version.deleted_marker");
 
             if (!HasContentBlocks)
-                return "no content blocks";
+                return Loc.T("compare.version.no_content_blocks");
 
-            return "ready";
+            return Loc.T("compare.version.ready");
         }
     }
 
@@ -42,8 +43,8 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
     public string SelectionBadge => (IsSelectedLeft, IsSelectedRight) switch
     {
         (true, true) => "L/R",
-        (true, false) => "LEFT",
-        (false, true) => "RIGHT",
+        (true, false) => Loc.T("compare.side.left_short"),
+        (false, true) => Loc.T("compare.side.right_short"),
         _ => string.Empty
     };
 
@@ -74,8 +75,8 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
     };
 
     public string HintLabel => IsSelectable
-        ? "Left-click: pick LEFT side, Right-click: pick RIGHT side"
-        : "This version cannot be compared.";
+        ? Loc.T("compare.version.select_hint")
+        : Loc.T("compare.version.not_comparable");
 
     partial void OnIsSelectedLeftChanged(bool value)
         => RaiseSelectionChanged();

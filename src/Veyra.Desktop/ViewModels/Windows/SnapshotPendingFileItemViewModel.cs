@@ -1,4 +1,5 @@
 using System;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -12,10 +13,10 @@ public sealed class SnapshotPendingFileItemViewModel
 
     public string ChangeKindLabel => ChangeKind switch
     {
-        "added" => "+ Added",
-        "modified" => "~ Modified",
-        "deleted" => "- Deleted",
-        _ => "Changed"
+        "added" => Loc.T("snapshot.change_kind.added"),
+        "modified" => Loc.T("snapshot.change_kind.modified"),
+        "deleted" => Loc.T("snapshot.change_kind.deleted"),
+        _ => Loc.T("change_kind.changed")
     };
 
     public string SizeDeltaLabel => ChangeKind switch
@@ -40,20 +41,20 @@ public sealed class SnapshotPendingFileItemViewModel
 
             return ChangeKind switch
             {
-                "added" => "New file in this snapshot.",
-                "deleted" => "File will be marked as deleted in this snapshot.",
-                "modified" => $"Size delta vs previous version: {sign}{FormatBytes(Math.Abs(delta))}",
-                _ => "Change detected."
+                "added" => Loc.T("snapshot.hint.added"),
+                "deleted" => Loc.T("snapshot.hint.deleted"),
+                "modified" => Loc.F("snapshot.hint.modified", $"{sign}{FormatBytes(Math.Abs(delta))}"),
+                _ => Loc.T("snapshot.hint.changed")
             };
         }
     }
 
     public string DiffPreviewPlaceholder => ChangeKind switch
     {
-        "added" => "Diff preview placeholder: file has no previous version in repository history.",
-        "deleted" => "Diff preview placeholder: file content is absent in current snapshot.",
-        "modified" => "Select this file to build side-by-side preview against the latest saved version.",
-        _ => "Diff preview placeholder is unavailable for this change type."
+        "added" => Loc.T("snapshot.placeholder.added"),
+        "deleted" => Loc.T("snapshot.placeholder.deleted"),
+        "modified" => Loc.T("snapshot.placeholder.modified"),
+        _ => Loc.T("snapshot.placeholder.unavailable")
     };
 
     private static string FormatBytes(long bytes)
@@ -64,5 +65,3 @@ public sealed class SnapshotPendingFileItemViewModel
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
-
-

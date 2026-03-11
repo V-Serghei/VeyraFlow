@@ -359,11 +359,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .Select(g => new
             {
                 Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
-                    || q.Status == RepositorySyncQueueItem.StatusRunning
-                    || q.Status == RepositorySyncQueueItem.StatusRetry),
+                    || q.Status == RepositorySyncQueueItem.StatusRunning),
+                Running = g.Count(q => q.Status == RepositorySyncQueueItem.StatusRunning),
+                Retry = g.Count(q => q.Status == RepositorySyncQueueItem.StatusRetry),
                 Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict
                     || q.Status == RepositorySyncQueueItem.StatusFailed
-                    || q.Status == RepositorySyncQueueItem.StatusDeadLetter)
+                    || q.Status == RepositorySyncQueueItem.StatusDeadLetter),
+                DeadLetter = g.Count(q => q.Status == RepositorySyncQueueItem.StatusDeadLetter),
+                Failed = g.Count(q => q.Status == RepositorySyncQueueItem.StatusFailed),
+                Completed = g.Count(q => q.Status == RepositorySyncQueueItem.StatusCompleted)
             })
             .FirstOrDefaultAsync(ct);
 
@@ -380,7 +384,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repo.TotalSizeBytes,
             repo.LastScannedAt,
             MapRetentionPolicy(repo),
-            MapCloudSyncStatus(repo, queueStats?.Pending ?? 0, queueStats?.Conflict ?? 0));
+            MapCloudSyncStatus(
+                repo,
+                queueStats?.Pending ?? 0,
+                queueStats?.Conflict ?? 0,
+                queueStats?.Running ?? 0,
+                queueStats?.Retry ?? 0,
+                queueStats?.DeadLetter ?? 0,
+                queueStats?.Failed ?? 0,
+                queueStats?.Completed ?? 0));
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -404,7 +416,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
         var repoIds = repos.Select(r => r.Id).ToList();
         var queueStatsByRepo = repoIds.Count == 0
-            ? new Dictionary<int, (int Pending, int Conflict)>()
+            ? new Dictionary<int, (int Pending, int Conflict, int Running, int Retry, int DeadLetter, int Failed, int Completed)>()
             : await db.Set<RepositorySyncQueueItem>()
                 .Where(q => repoIds.Contains(q.RepositoryId))
                 .GroupBy(q => q.RepositoryId)
@@ -412,18 +424,25 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 {
                     RepositoryId = g.Key,
                     Pending = g.Count(q => q.Status == RepositorySyncQueueItem.StatusPending
-                        || q.Status == RepositorySyncQueueItem.StatusRunning
-                        || q.Status == RepositorySyncQueueItem.StatusRetry),
+                        || q.Status == RepositorySyncQueueItem.StatusRunning),
+                    Running = g.Count(q => q.Status == RepositorySyncQueueItem.StatusRunning),
+                    Retry = g.Count(q => q.Status == RepositorySyncQueueItem.StatusRetry),
                     Conflict = g.Count(q => q.Status == RepositorySyncQueueItem.StatusConflict
                         || q.Status == RepositorySyncQueueItem.StatusFailed
-                        || q.Status == RepositorySyncQueueItem.StatusDeadLetter)
+                        || q.Status == RepositorySyncQueueItem.StatusDeadLetter),
+                    DeadLetter = g.Count(q => q.Status == RepositorySyncQueueItem.StatusDeadLetter),
+                    Failed = g.Count(q => q.Status == RepositorySyncQueueItem.StatusFailed),
+                    Completed = g.Count(q => q.Status == RepositorySyncQueueItem.StatusCompleted)
                 })
-                .ToDictionaryAsync(x => x.RepositoryId, x => (x.Pending, x.Conflict), ct);
+                .ToDictionaryAsync(
+                    x => x.RepositoryId,
+                    x => (x.Pending, x.Conflict, x.Running, x.Retry, x.DeadLetter, x.Failed, x.Completed),
+                    ct);
 
         return repos.Select(r =>
         {
             if (!queueStatsByRepo.TryGetValue(r.Id, out var queue))
-                queue = (0, 0);
+                queue = (0, 0, 0, 0, 0, 0, 0);
 
             var pending = queue.Pending;
             var conflict = queue.Conflict;
@@ -441,7 +460,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 r.TotalSizeBytes,
                 r.LastScannedAt,
                 MapRetentionPolicy(r),
-                MapCloudSyncStatus(r, pending, conflict));
+                MapCloudSyncStatus(
+                    r,
+                    pending,
+                    conflict,
+                    queue.Running,
+                    queue.Retry,
+                    queue.DeadLetter,
+                    queue.Failed,
+                    queue.Completed));
         }).ToList();
     }
 
@@ -541,7 +568,15 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repository.RetentionLastStatus);
     }
 
-    private static RepositoryCloudSyncStatusDto MapCloudSyncStatus(Repository repository, int pendingCount, int conflictCount)
+    private static RepositoryCloudSyncStatusDto MapCloudSyncStatus(
+        Repository repository,
+        int pendingCount,
+        int conflictCount,
+        int runningCount,
+        int retryCount,
+        int deadLetterCount,
+        int failedCount,
+        int completedCount)
     {
         return new RepositoryCloudSyncStatusDto(
             ConflictStrategy: RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy),
@@ -553,7 +588,12 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             LastStatus: repository.CloudSyncLastStatus,
             LastError: repository.CloudSyncLastError,
             PendingQueueCount: pendingCount,
-            ConflictQueueCount: conflictCount);
+            ConflictQueueCount: conflictCount,
+            RunningQueueCount: runningCount,
+            RetryQueueCount: retryCount,
+            DeadLetterQueueCount: deadLetterCount,
+            FailedQueueCount: failedCount,
+            CompletedQueueCount: completedCount);
     }
 
     private static IReadOnlyList<string> ParseTriggerFilters(string? csv)

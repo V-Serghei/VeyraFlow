@@ -27,18 +27,18 @@ public partial class SnapshotNameDialogWindow : Window
                 this,
                 ownerWindow,
                 maximizeToWorkingArea: false,
-                frameMarginDip: 24d,
-                minWidthDip: 640d,
-                minHeightDip: 480d);
+                frameMarginDip: 8d,
+                minWidthDip: 760d,
+                minHeightDip: 540d);
 
             Dispatcher.UIThread.Post(() =>
                 WindowLayoutHelper.FitToWorkingArea(
                     this,
                     ownerWindow,
                     maximizeToWorkingArea: false,
-                    frameMarginDip: 24d,
-                    minWidthDip: 640d,
-                    minHeightDip: 480d),
+                    frameMarginDip: 8d,
+                    minWidthDip: 760d,
+                    minHeightDip: 540d),
                 DispatcherPriority.Background);
 
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");

@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -11,25 +11,53 @@
         Title="{loc:Tr main.window_title}"
         Width="1280" Height="820"
         MinWidth="980" MinHeight="640"
-        Background="#0D0D0D" Foreground="#EEEEEE"
+        Background="{DynamicResource VeyraCanvasBrush}" Foreground="{DynamicResource VeyraTextPrimaryBrush}"
         WindowStartupLocation="CenterScreen">
 
-    <DockPanel>
-        <Border DockPanel.Dock="Top" Padding="18,12" Background="#0A0A0A" BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="◈" FontSize="18" Foreground="#3B82F6" VerticalAlignment="Center"/>
-                    <TextBlock Text="{loc:Tr main.product_name}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+    <Grid RowDefinitions="Auto,*" Margin="16" RowSpacing="12">
+        <Border Grid.Row="0" Classes="toolbar" Padding="14,12">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Classes="badge" Padding="10,6">
+                        <TextBlock Text="&#x25C8;"
+                                   FontSize="16"
+                                   Foreground="{DynamicResource VeyraAccentBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{loc:Tr main.product_name}" FontSize="17" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr main.product_subtitle}" Classes="muted" FontSize="11"/>
+                    </StackPanel>
                 </StackPanel>
 
-                <TextBlock Grid.Column="1" VerticalAlignment="Center" Opacity="0.6"
-                           Text="{loc:Tr main.product_subtitle}" HorizontalAlignment="Center"/>
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Classes="muted"
+                           Text="{loc:Tr app.brand}"/>
 
-                <Button Grid.Column="2" Content="⚙" Width="38" Height="34"
-                        Command="{Binding OpenGlobalSettingsCommand}"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Content="{Binding LanguageToggleLabel}"
+                            MinWidth="56"
+                            Height="36"
+                            FontWeight="SemiBold"
+                            Command="{Binding ToggleLanguageCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_language}"
+                            Classes="subtle"/>
+                    <Button Content="{Binding ThemeToggleGlyph}"
+                            Command="{Binding ToggleThemeCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_theme}"
+                            Classes="subtle icon"/>
+                    <Button Content="&#xE713;"
+                            ToolTip.Tip="{loc:Tr common.settings}"
+                            Command="{Binding OpenGlobalSettingsCommand}"
+                            Classes="subtle icon"/>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <ContentControl Content="{Binding CurrentPage}"/>
-    </DockPanel>
+        <ContentControl Grid.Row="1" Content="{Binding CurrentPage}"/>
+    </Grid>
 </Window>
+

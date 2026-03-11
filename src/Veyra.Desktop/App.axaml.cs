@@ -12,6 +12,7 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Persistence;
 using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Styling;
 using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Native;
 using AvaloniaApplication = Avalonia.Application;
@@ -28,6 +29,8 @@ public partial class App : AvaloniaApplication
 
     public override void OnFrameworkInitializationCompleted()
     {
+        ThemeManager.Instance.ApplyCurrentTheme();
+
         var dbPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "VeyraFlow", "veyra.db");

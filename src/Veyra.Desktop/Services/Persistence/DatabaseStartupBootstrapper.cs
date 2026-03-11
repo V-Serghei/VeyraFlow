@@ -14,6 +14,11 @@ internal static class DatabaseStartupBootstrapper
     private const string SoftDeleteCascadeMigrationId = "20260309133000_AddSoftDeleteCascadeModel";
     private const string RepositoryRetentionMigrationId = "20260309180000_AddRepositoryRetentionPolicy";
     private const string UserProfileSessionMigrationId = "20260309193000_AddUserProfileSessionColumns";
+    private const string UserProfileEmailMigrationId = "20260311101500_AddUserProfileEmail";
+    private const string OperationJournalMigrationId = "20260311103000_AddOperationJournalEntries";
+    private const string UserProfileTokenLifecycleMigrationId = "20260311124500_AddUserProfileTokenLifecycle";
+    private const string SyncUploadCheckpointMigrationId = "20260311141000_AddRepositorySyncUploadCheckpoint";
+    private const string SensitiveActionVerificationMigrationId = "20260311193000_AddUserProfileSensitiveActionVerification";
     private const string EfProductVersion = "10.0.2";
 
     public static void Initialize(VeyraDbContext db)
@@ -23,6 +28,11 @@ internal static class DatabaseStartupBootstrapper
         BackfillSoftDeleteMigrationHistoryIfNeeded(db);
         BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
         BackfillUserProfileSessionMigrationHistoryIfNeeded(db);
+        BackfillUserProfileEmailMigrationHistoryIfNeeded(db);
+        BackfillOperationJournalMigrationHistoryIfNeeded(db);
+        BackfillUserProfileTokenLifecycleMigrationHistoryIfNeeded(db);
+        BackfillSyncUploadCheckpointMigrationHistoryIfNeeded(db);
+        BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(db);
         db.Database.Migrate();
         EnsureRepositorySnapshotTitleColumn(db);
         BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
@@ -32,10 +42,18 @@ internal static class DatabaseStartupBootstrapper
         EnsureSoftDeleteCascadeColumns(db);
         EnsureRepositoryRetentionColumns(db);
         EnsureUserProfileSessionColumns(db);
+        EnsureRepositorySyncQueueCheckpointColumns(db);
+        EnsureOperationJournalSchema(db);
+        EnsureSensitiveActionVerificationColumn(db);
         BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
         BackfillSoftDeleteMigrationHistoryIfNeeded(db);
         BackfillRepositoryRetentionMigrationHistoryIfNeeded(db);
         BackfillUserProfileSessionMigrationHistoryIfNeeded(db);
+        BackfillUserProfileEmailMigrationHistoryIfNeeded(db);
+        BackfillOperationJournalMigrationHistoryIfNeeded(db);
+        BackfillUserProfileTokenLifecycleMigrationHistoryIfNeeded(db);
+        BackfillSyncUploadCheckpointMigrationHistoryIfNeeded(db);
+        BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(db);
         db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
         db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
     }
@@ -375,6 +393,154 @@ internal static class DatabaseStartupBootstrapper
         }
     }
 
+    private static void BackfillUserProfileEmailMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            if (!SqliteHasColumn(connection, "UserProfiles", "Email"))
+                return;
+
+            EnsureMigrationHistoryRow(connection, UserProfileEmailMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void BackfillOperationJournalMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            if (!SqliteTableExists(connection, "OperationJournalEntries"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("OperationJournalEntries", "OccurredAtUtc"),
+                ("OperationJournalEntries", "Level"),
+                ("OperationJournalEntries", "Category"),
+                ("OperationJournalEntries", "Action"),
+                ("OperationJournalEntries", "Message")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, OperationJournalMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void BackfillUserProfileTokenLifecycleMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("UserProfiles", "CloudSessionId"),
+                ("UserProfiles", "RefreshToken"),
+                ("UserProfiles", "AccessTokenExpiresAtUtc"),
+                ("UserProfiles", "RefreshTokenExpiresAtUtc")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, UserProfileTokenLifecycleMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void BackfillSyncUploadCheckpointMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            var requiredColumns = new (string Table, string Column)[]
+            {
+                ("RepositorySyncQueueItems", "UploadCheckpointNextIndex"),
+                ("RepositorySyncQueueItems", "UploadCheckpointTotal"),
+                ("RepositorySyncQueueItems", "UploadCheckpointSignature")
+            };
+
+            foreach (var (table, column) in requiredColumns)
+            {
+                if (!SqliteHasColumn(connection, table, column))
+                    return;
+            }
+
+            EnsureMigrationHistoryRow(connection, SyncUploadCheckpointMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
     private static void EnsureUserProfileSessionColumns(VeyraDbContext db)
     {
         if (!db.Database.IsSqlite())
@@ -390,6 +556,70 @@ internal static class DatabaseStartupBootstrapper
         {
             EnsureSqliteColumnExists(connection, "UserProfiles", "CloudUserId", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "UserProfiles", "AccessToken", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "Email", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "CloudSessionId", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "RefreshToken", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "AccessTokenExpiresAtUtc", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "UserProfiles", "RefreshTokenExpiresAtUtc", "TEXT NULL");
+
+            using var createIdx = connection.CreateCommand();
+            createIdx.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_UserProfiles_Email\" ON \"UserProfiles\" (\"Email\");";
+            createIdx.ExecuteNonQuery();
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureOperationJournalSchema(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            using (var createTable = connection.CreateCommand())
+            {
+                createTable.CommandText = @"
+CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
+    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_OperationJournalEntries"" PRIMARY KEY AUTOINCREMENT,
+    ""OccurredAtUtc"" TEXT NOT NULL,
+    ""Level"" TEXT NOT NULL,
+    ""Category"" TEXT NOT NULL,
+    ""Action"" TEXT NOT NULL,
+    ""RepositoryId"" INTEGER NULL,
+    ""Username"" TEXT NULL,
+    ""Message"" TEXT NOT NULL,
+    ""Details"" TEXT NULL
+);";
+                createTable.ExecuteNonQuery();
+            }
+
+            using (var idx1 = connection.CreateCommand())
+            {
+                idx1.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_OperationJournalEntries_OccurredAtUtc_Id\" ON \"OperationJournalEntries\" (\"OccurredAtUtc\", \"Id\");";
+                idx1.ExecuteNonQuery();
+            }
+
+            using (var idx2 = connection.CreateCommand())
+            {
+                idx2.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_OperationJournalEntries_Category_OccurredAtUtc\" ON \"OperationJournalEntries\" (\"Category\", \"OccurredAtUtc\");";
+                idx2.ExecuteNonQuery();
+            }
+
+            using (var idx3 = connection.CreateCommand())
+            {
+                idx3.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_OperationJournalEntries_RepositoryId_OccurredAtUtc\" ON \"OperationJournalEntries\" (\"RepositoryId\", \"OccurredAtUtc\");";
+                idx3.ExecuteNonQuery();
+            }
         }
         finally
         {
@@ -652,6 +882,80 @@ WHERE ""StorageFormatVersion"" < 2
                 createIdx8.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_FileVersionTextDiffLines_HunkId_InHunkSequence\" ON \"FileVersionTextDiffLines\" (\"HunkId\", \"InHunkSequence\");";
                 createIdx8.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureRepositorySyncQueueCheckpointColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "RepositorySyncQueueItems", "UploadCheckpointNextIndex", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "RepositorySyncQueueItems", "UploadCheckpointTotal", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "RepositorySyncQueueItems", "UploadCheckpointSignature", "TEXT NULL");
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureSensitiveActionVerificationColumn(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "UserProfiles", "RequirePasswordForSensitiveActions", "INTEGER NOT NULL DEFAULT 0");
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            if (!SqliteTableExists(connection, "__EFMigrationsHistory"))
+                return;
+
+            if (!SqliteHasColumn(connection, "UserProfiles", "RequirePasswordForSensitiveActions"))
+                return;
+
+            EnsureMigrationHistoryRow(connection, SensitiveActionVerificationMigrationId);
         }
         finally
         {

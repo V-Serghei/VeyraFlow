@@ -3,6 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 
@@ -15,19 +18,42 @@ public sealed class CloudSyncHttpService : ICloudSyncService
     private const string IdempotencyKeyHeader = "X-Idempotency-Key";
 
     private readonly HttpClient _http;
+    private readonly ILogger<CloudSyncHttpService> _log;
+    private readonly CloudSyncFaultInjectionOptions _fault;
+    private int _listCalls;
+    private int _pushCalls;
+    private int _uploadCalls;
+    private int _downloadCalls;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public CloudSyncHttpService(HttpClient http)
+    public CloudSyncHttpService(
+        HttpClient http,
+        IConfiguration configuration,
+        ILogger<CloudSyncHttpService> log)
     {
         _http = http;
+        _log = log;
+        _fault = CloudSyncFaultInjectionOptions.FromConfiguration(configuration);
+
+        if (_fault.Enabled)
+        {
+            _log.LogWarning(
+                "Cloud sync fault-injection is enabled. NetworkDropEvery {NetworkDropEvery}. TimeoutEvery {TimeoutEvery}. DuplicateAckOnPush {DuplicateAck}. StaleRemoteHeadOnList {StaleRemoteHead}.",
+                _fault.NetworkDropEvery,
+                _fault.TimeoutEvery,
+                _fault.DuplicateAckOnPush,
+                _fault.StaleRemoteHeadOnList);
+        }
     }
 
     public async Task<IReadOnlyList<CloudRepositoryHeaderDto>> GetRepositoriesAsync(string accessToken, CancellationToken ct = default)
     {
+        MaybeInjectFault("list_repositories", Interlocked.Increment(ref _listCalls));
+
         using var req = BuildRequest(HttpMethod.Get, "/api/sync/repositories", accessToken);
         using var resp = await _http.SendAsync(req, ct);
 
@@ -40,7 +66,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         if (payload is null || !payload.Ok || payload.Repositories is null)
             return [];
 
-        return payload.Repositories
+        var repositories = payload.Repositories
             .Select(r => new CloudRepositoryHeaderDto(
                 r.RepositoryId,
                 r.Name ?? string.Empty,
@@ -52,6 +78,24 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 r.LatestSnapshotFileCount,
                 r.LatestSnapshotEntryCount))
             .ToList();
+
+        if (_fault.StaleRemoteHeadOnList)
+        {
+            repositories = repositories
+                .Select(r => new CloudRepositoryHeaderDto(
+                    r.RepositoryId,
+                    r.Name,
+                    r.Description,
+                    r.LatestSnapshotId is > 1 ? r.LatestSnapshotId - 1 : r.LatestSnapshotId,
+                    r.LatestSnapshotCreatedAtUtc,
+                    r.LatestSnapshotTitle,
+                    r.LatestSnapshotTrigger,
+                    r.LatestSnapshotFileCount,
+                    r.LatestSnapshotEntryCount))
+                .ToList();
+        }
+
+        return repositories;
     }
 
     public async Task<CloudSnapshotPackageDto?> GetLatestSnapshotAsync(
@@ -125,6 +169,8 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         string? idempotencyKey = null,
         CancellationToken ct = default)
     {
+        MaybeInjectFault("push_snapshot", Interlocked.Increment(ref _pushCalls));
+
         var requestPayload = new PushSnapshotRequest
         {
             Repository = new PushRepositoryMeta
@@ -174,6 +220,127 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             }).ToList()
         };
 
+        var first = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, idempotencyKey, ct);
+        if (first is null)
+            return null;
+
+        if (_fault.DuplicateAckOnPush && !string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            var replay = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, idempotencyKey, ct);
+            if (replay is not null && !first.MissingBlockHashes.SequenceEqual(replay.MissingBlockHashes, StringComparer.OrdinalIgnoreCase))
+            {
+                _log.LogWarning(
+                    "Fault-injection duplicate-ack replay mismatch for repository {RepositoryId}. FirstMissing {FirstCount}. ReplayMissing {ReplayCount}.",
+                    repositoryId,
+                    first.MissingBlockHashes.Count,
+                    replay.MissingBlockHashes.Count);
+            }
+        }
+
+        return first;
+    }
+
+    public async Task<bool> BlockExistsAsync(string accessToken, string blockHash, CancellationToken ct = default)
+    {
+        using var req = BuildRequest(HttpMethod.Head, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
+        using var resp = await _http.SendAsync(req, ct);
+
+        return resp.StatusCode == HttpStatusCode.OK;
+    }
+
+    public async Task UploadBlockAsync(
+        string accessToken,
+        string blockHash,
+        Stream content,
+        long? contentLength = null,
+        CancellationToken ct = default)
+    {
+        MaybeInjectFault("upload_block", Interlocked.Increment(ref _uploadCalls));
+
+        using var req = BuildRequest(HttpMethod.Post, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
+        req.Content = new StreamContent(content);
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        if (contentLength is > 0)
+            req.Content.Headers.ContentLength = contentLength.Value;
+
+        using var resp = await _http.SendAsync(req, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task<bool> DownloadBlockToFileAsync(
+        string accessToken,
+        string blockHash,
+        string targetPath,
+        CancellationToken ct = default)
+    {
+        MaybeInjectFault("download_block", Interlocked.Increment(ref _downloadCalls));
+
+        using var req = BuildRequest(HttpMethod.Get, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (resp.StatusCode == HttpStatusCode.NotFound)
+            return false;
+
+        resp.EnsureSuccessStatusCode();
+
+        var directory = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var tempPath = targetPath + "." + Guid.NewGuid().ToString("N") + ".download";
+        try
+        {
+            await using var remoteStream = await resp.Content.ReadAsStreamAsync(ct);
+            await using (var fileStream = new FileStream(
+                             tempPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             bufferSize: 128 * 1024,
+                             options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await remoteStream.CopyToAsync(fileStream, ct);
+                await fileStream.FlushAsync(ct);
+            }
+
+            File.Move(tempPath, targetPath, overwrite: true);
+            return true;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Best-effort cleanup of interrupted download artifacts.
+                }
+            }
+        }
+    }
+
+    private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken, string? idempotencyKey = null)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.TryAddWithoutValidation(SyncProtocolHeader, SyncProtocolVersion);
+
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            request.Headers.TryAddWithoutValidation(IdempotencyKeyHeader, idempotencyKey.Trim());
+
+        return request;
+    }
+
+    private async Task<CloudPushResultDto?> SendPushSnapshotRequestAsync(
+        string accessToken,
+        int repositoryId,
+        PushSnapshotRequest requestPayload,
+        string? idempotencyKey,
+        CancellationToken ct)
+    {
         using var req = BuildRequest(HttpMethod.Post, $"/api/sync/repositories/{repositoryId}/snapshots", accessToken, idempotencyKey);
         req.Content = JsonContent.Create(requestPayload);
 
@@ -190,50 +357,51 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         return new CloudPushResultDto(payload.Ok, payload.MissingBlockHashes ?? []);
     }
 
-    public async Task<bool> BlockExistsAsync(string accessToken, string blockHash, CancellationToken ct = default)
+    private void MaybeInjectFault(string operation, int callNumber)
     {
-        using var req = BuildRequest(HttpMethod.Head, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
-        using var resp = await _http.SendAsync(req, ct);
+        if (!_fault.Enabled || callNumber <= 0)
+            return;
 
-        return resp.StatusCode == HttpStatusCode.OK;
+        if (_fault.NetworkDropEvery > 0 && callNumber % _fault.NetworkDropEvery == 0)
+        {
+            throw new HttpRequestException(
+                $"Fault injection: simulated network drop on '{operation}' call #{callNumber}.",
+                inner: null,
+                statusCode: HttpStatusCode.ServiceUnavailable);
+        }
+
+        if (_fault.TimeoutEvery > 0 && callNumber % _fault.TimeoutEvery == 0)
+        {
+            throw new TaskCanceledException(
+                $"Fault injection: simulated timeout on '{operation}' call #{callNumber}.");
+        }
     }
 
-    public async Task UploadBlockAsync(
-        string accessToken,
-        string blockHash,
-        ReadOnlyMemory<byte> content,
-        CancellationToken ct = default)
+    private sealed class CloudSyncFaultInjectionOptions
     {
-        using var req = BuildRequest(HttpMethod.Post, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
-        req.Content = new ByteArrayContent(content.ToArray());
-        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        public bool Enabled { get; init; }
+        public int NetworkDropEvery { get; init; }
+        public int TimeoutEvery { get; init; }
+        public bool DuplicateAckOnPush { get; init; }
+        public bool StaleRemoteHeadOnList { get; init; }
 
-        using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
-    }
+        public static CloudSyncFaultInjectionOptions FromConfiguration(IConfiguration cfg)
+        {
+            var enabled = cfg.GetValue<bool?>("CloudSync:FaultInjection:Enabled") ?? false;
 
-    public async Task<byte[]?> DownloadBlockAsync(string accessToken, string blockHash, CancellationToken ct = default)
-    {
-        using var req = BuildRequest(HttpMethod.Get, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
-        using var resp = await _http.SendAsync(req, ct);
-
-        if (resp.StatusCode == HttpStatusCode.NotFound)
-            return null;
-
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadAsByteArrayAsync(ct);
-    }
-
-    private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken, string? idempotencyKey = null)
-    {
-        var request = new HttpRequestMessage(method, path);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Headers.TryAddWithoutValidation(SyncProtocolHeader, SyncProtocolVersion);
-
-        if (!string.IsNullOrWhiteSpace(idempotencyKey))
-            request.Headers.TryAddWithoutValidation(IdempotencyKeyHeader, idempotencyKey.Trim());
-
-        return request;
+            return new CloudSyncFaultInjectionOptions
+            {
+                Enabled = enabled,
+                NetworkDropEvery = enabled
+                    ? Math.Clamp(cfg.GetValue<int?>("CloudSync:FaultInjection:NetworkDropEvery") ?? 0, 0, 1000)
+                    : 0,
+                TimeoutEvery = enabled
+                    ? Math.Clamp(cfg.GetValue<int?>("CloudSync:FaultInjection:TimeoutEvery") ?? 0, 0, 1000)
+                    : 0,
+                DuplicateAckOnPush = enabled && (cfg.GetValue<bool?>("CloudSync:FaultInjection:DuplicateAckOnPush") ?? false),
+                StaleRemoteHeadOnList = enabled && (cfg.GetValue<bool?>("CloudSync:FaultInjection:StaleRemoteHeadOnList") ?? false)
+            };
+        }
     }
 
     private sealed class ListRepositoriesResponse

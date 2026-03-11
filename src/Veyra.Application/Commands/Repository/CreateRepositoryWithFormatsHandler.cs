@@ -21,7 +21,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
         {
             var path = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                return OperationResult<int>.Fail("Указанная директория не существует.");
+                return OperationResult<int>.Fail("Specified directory does not exist.");
 
             var name = string.IsNullOrWhiteSpace(request.Name)
                 ? Path.GetFileName(path.TrimEnd('\\', '/'))
@@ -29,7 +29,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             var formats = NormalizeFormats(request.Formats);
             if (formats.Count == 0)
-                return OperationResult<int>.Fail("Не выбран ни один формат.");
+                return OperationResult<int>.Fail("No tracking formats were selected.");
 
             log.LogInformation(
                 "Creating repository. Name {Name}. Path {Path}. Formats {FormatCount}",
@@ -42,7 +42,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 5,
                 0,
                 0,
-                "Подготовка репозитория"));
+                "Preparing repository"));
 
             await setup.AddWatchedDirectoryAsync(path, ct);
             await repositories.EnsureRepositoriesForAllDirectoriesAsync(ct);
@@ -51,7 +51,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
             var repo = allRepos.FirstOrDefault(r => PathEquals(r.DirectoryPath, path));
 
             if (repo is null)
-                return OperationResult<int>.Fail("Не удалось создать репозиторий для директории.");
+                return OperationResult<int>.Fail("Failed to create repository for the selected directory.");
 
             await repositories.UpdateRepositoryAsync(repo.Id, name, request.Description, ct);
 
@@ -60,7 +60,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 10,
                 0,
                 0,
-                "Привязка форматов"));
+                "Applying tracking formats"));
 
             var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
             var missingGlobal = formats
@@ -91,9 +91,11 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 12,
                 0,
                 0,
-                "Сканирование директории"));
+                "Scanning directory"));
 
             var reportedPercent = 12;
+            var lastFilesProcessed = 0;
+            var lastFilesTotal = 0;
 
             var scanProgress = new Progress<RepositoryScanProgressDto>(p =>
             {
@@ -102,12 +104,14 @@ public sealed class CreateRepositoryWithFormatsHandler(
                     mapped = reportedPercent;
 
                 reportedPercent = mapped;
+                lastFilesProcessed = Math.Max(lastFilesProcessed, p.FilesProcessed);
+                lastFilesTotal = Math.Max(lastFilesTotal, p.FilesTotal);
 
                 request.Progress?.Report(new RepositoryCreationProgressDto(
                     p.Stage,
                     mapped,
-                    p.FilesProcessed,
-                    p.FilesTotal,
+                    lastFilesProcessed,
+                    lastFilesTotal,
                     p.Message));
             });
 
@@ -122,18 +126,18 @@ public sealed class CreateRepositoryWithFormatsHandler(
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
                 Math.Max(reportedPercent, 99),
-                0,
-                0,
-                "Применение системной конфигурации"));
+                lastFilesProcessed,
+                lastFilesTotal,
+                "Applying system configuration"));
 
             await native.ApplySetupAsync(ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "done",
                 100,
-                0,
-                0,
-                "Репозиторий создан"));
+                lastFilesProcessed,
+                lastFilesTotal,
+                "Repository created"));
 
             log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
             return OperationResult<int>.Ok(repo.Id);
@@ -174,4 +178,3 @@ public sealed class CreateRepositoryWithFormatsHandler(
             .ToList();
     }
 }
-

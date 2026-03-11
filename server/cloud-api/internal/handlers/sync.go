@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	stdhash "hash"
 	"io"
 	"net/http"
 	"os"
@@ -206,17 +207,51 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 	}
 
 	reader := http.MaxBytesReader(w, r.Body, maxPushPayloadBytes)
-	rawBody, readErr := io.ReadAll(reader)
+	if err = os.MkdirAll(h.blockStoreDir, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to prepare request staging directory"})
+		return
+	}
+
+	stagedBody, err := os.CreateTemp(h.blockStoreDir, "push-snapshot-*.json")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to allocate request staging file"})
+		return
+	}
+	stagedBodyPath := stagedBody.Name()
+	defer func() {
+		_ = stagedBody.Close()
+		_ = os.Remove(stagedBodyPath)
+	}()
+
+	requestHasher := sha256.New()
+	written, readErr := io.Copy(io.MultiWriter(stagedBody, requestHasher), reader)
 	if readErr != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read request body"})
 		return
 	}
+	if written <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "request body is empty"})
+		return
+	}
+	if err = stagedBody.Sync(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to stage request body"})
+		return
+	}
+	if _, err = stagedBody.Seek(0, io.SeekStart); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to rewind request body"})
+		return
+	}
 
-	requestDigest := sha256.Sum256(rawBody)
-	requestSHA := strings.ToLower(hex.EncodeToString(requestDigest[:]))
+	requestSHA := strings.ToLower(hex.EncodeToString(requestHasher.Sum(nil)))
 
 	var req pushSnapshotRequest
-	if err = json.Unmarshal(rawBody, &req); err != nil {
+	decoder := json.NewDecoder(stagedBody)
+	if err = decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
+		return
+	}
+	var trailing json.RawMessage
+	if err = decoder.Decode(&trailing); err != io.EOF {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
 		return
 	}
@@ -430,7 +465,11 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb);
 
 	missing := make([]string, 0)
 	if len(allHashes) > 0 {
-		rows, qErr := tx.Query(r.Context(), `SELECT block_hash FROM cloud_blocks WHERE block_hash = ANY($1)`, allHashes)
+		rows, qErr := tx.Query(r.Context(), `
+SELECT block_hash
+FROM cloud_blocks
+WHERE block_hash = ANY($1)
+  AND COALESCE(NULLIF(storage_kind, ''), 'loose') <> 'missing'`, allHashes)
 		if qErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "block lookup failed"})
 			return
@@ -673,7 +712,12 @@ func (h *Handler) HeadBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_blocks WHERE block_hash = $1)`, hash).Scan(&exists); err != nil {
+	if err := h.db.QueryRow(r.Context(), `
+SELECT EXISTS(
+    SELECT 1
+    FROM cloud_blocks
+    WHERE block_hash = $1
+      AND COALESCE(NULLIF(storage_kind, ''), 'loose') <> 'missing')`, hash).Scan(&exists); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -702,45 +746,69 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if existing, exists, err := h.loadBlockRecord(r.Context(), hash); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to query block metadata"})
+		return
+	} else if exists {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size_bytes": existing.LengthBytes})
+		return
+	}
+
 	reader := http.MaxBytesReader(w, r.Body, 32*1024*1024)
-	body, err := io.ReadAll(reader)
+	if err := os.MkdirAll(h.blockStoreDir, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to prepare block store"})
+		return
+	}
+
+	staged, err := os.CreateTemp(h.blockStoreDir, "upload-*.block")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to allocate temporary block storage"})
+		return
+	}
+	stagedPath := staged.Name()
+	defer func() {
+		_ = staged.Close()
+		_ = os.Remove(stagedPath)
+	}()
+
+	var writer io.Writer = staged
+	var digestWriter stdhash.Hash
+	if strings.HasPrefix(strings.ToLower(hash), "sha256-") {
+		digestWriter = sha256.New()
+		writer = io.MultiWriter(staged, digestWriter)
+	}
+
+	sizeBytes, err := io.Copy(writer, reader)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read request body"})
 		return
 	}
 
-	if strings.HasPrefix(strings.ToLower(hash), "sha256-") {
+	if err = staged.Sync(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to stage block payload"})
+		return
+	}
+
+	if digestWriter != nil {
 		expected := strings.TrimPrefix(strings.ToLower(hash), "sha256-")
-		sum := sha256.Sum256(body)
-		actual := strings.ToLower(hex.EncodeToString(sum[:]))
+		actual := strings.ToLower(hex.EncodeToString(digestWriter.Sum(nil)))
 		if expected != actual {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "sha256 mismatch"})
 			return
 		}
 	}
 
-	path := h.blockPath(hash)
-	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to prepare block directory"})
+	if err = staged.Close(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to finalize staged block payload"})
 		return
 	}
 
-	if err = os.WriteFile(path, body, 0o644); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block"})
+	if err = h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
 		return
 	}
 
-	if _, err = h.db.Exec(r.Context(), `
-INSERT INTO cloud_blocks(block_hash, length_bytes, created_at)
-VALUES($1, $2, now())
-ON CONFLICT (block_hash)
-DO UPDATE SET length_bytes = EXCLUDED.length_bytes;
-`, hash, len(body)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block metadata"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size_bytes": len(body)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size_bytes": sizeBytes})
 }
 
 func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
@@ -760,8 +828,45 @@ func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	record, exists, err := h.loadBlockRecord(r.Context(), hash)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to query block metadata"})
+		return
+	}
+	if !exists || strings.EqualFold(record.StorageKind, "missing") {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "block not found"})
+		return
+	}
+
+	if strings.EqualFold(record.StorageKind, "pack") && record.PackRelativePath != "" {
+		packPath := h.blockPackPath(record.PackRelativePath)
+		file, err := os.Open(packPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "block pack not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to read packed block"})
+			return
+		}
+		defer file.Close()
+
+		if _, err = file.Seek(record.PackOffsetBytes, io.SeekStart); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to seek packed block"})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", record.StoredSizeBytes))
+		w.WriteHeader(http.StatusOK)
+		if _, err = io.CopyN(w, file, record.StoredSizeBytes); err != nil {
+			return
+		}
+		return
+	}
+
 	path := h.blockPath(hash)
-	body, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "block not found"})
@@ -770,11 +875,18 @@ func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to read block"})
 		return
 	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to stat block"})
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	_, _ = io.Copy(w, file)
 }
 
 func ensureSyncProtocol(w http.ResponseWriter, r *http.Request) bool {

@@ -9,8 +9,8 @@
              x:DataType="settings:AppSettingsViewModel"
              Background="{DynamicResource VeyraCanvasBrush}">
 
-    <DockPanel Margin="24,18">
-        <Border DockPanel.Dock="Top" Classes="card" Padding="16" Margin="0,0,0,12">
+    <DockPanel Margin="16">
+        <Border DockPanel.Dock="Top" Classes="hero" Padding="18" Margin="0,0,0,12">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                     <Button Content="{loc:Tr common.back}" Command="{Binding BackCommand}" Classes="subtle"/>
@@ -24,14 +24,14 @@
                                TextWrapping="Wrap"/>
                 </StackPanel>
 
-                <Border Grid.Column="2" Background="#18324B" CornerRadius="8" Padding="10,6" VerticalAlignment="Center">
-                    <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="#9AD0FF"/>
+                <Border Grid.Column="2" Classes="badge" VerticalAlignment="Center">
+                    <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
                 </Border>
             </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="300,*" ColumnSpacing="12">
-            <Border Grid.Column="0" Classes="card" Padding="10">
+        <Grid ColumnDefinitions="280,8,*" ColumnSpacing="0">
+            <Border Grid.Column="0" Classes="card" Padding="10" MinWidth="220">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Tabs}">
                         <ItemsControl.ItemTemplate>
@@ -39,6 +39,7 @@
                                 <Button Margin="0,0,0,8"
                                         Padding="12,10"
                                         Classes="subtle"
+                                        Classes.primary="{Binding IsSelected}"
                                         Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).SelectTabCommand}"
                                         CommandParameter="{Binding .}">
                                     <StackPanel Spacing="2" HorizontalAlignment="Left">
@@ -52,7 +53,14 @@
                 </ScrollViewer>
             </Border>
 
-            <Border Grid.Column="1" Classes="card" Padding="16">
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"/>
+
+            <Border Grid.Column="2" Classes="card" Padding="16" Margin="12,0,0,0" MinWidth="420">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="14">
                         <TextBlock Text="{Binding SelectedTab.Title}" FontSize="20" FontWeight="SemiBold"/>
@@ -64,6 +72,10 @@
                                 <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.active_username}" Opacity="0.8"/>
                                     <TextBlock Grid.Column="1" Text="{Binding ActiveUsername}" FontWeight="SemiBold"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.active_email}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding ActiveEmail}" FontWeight="SemiBold"/>
                                 </Grid>
                                 <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_user_id}" Opacity="0.8"/>
@@ -90,17 +102,18 @@
                                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                                                     <StackPanel Grid.Column="0" Spacing="2">
                                                         <TextBlock Text="{Binding Username}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding EmailText}" Opacity="0.75"/>
                                                         <TextBlock Text="{Binding LastLoginText}" Opacity="0.75"/>
                                                         <TextBlock Text="{Binding CloudUserLabel}" Opacity="0.75"/>
                                                         <TextBlock Text="{Binding TokenStateText}" Opacity="0.75" TextWrapping="Wrap"/>
                                                         <TextBlock Text="{loc:Tr app_settings.token_available}"
-                                                                   Foreground="#86EFAC"
+                                                                   Foreground="{DynamicResource VeyraSuccessBrush}"
                                                                    IsVisible="{Binding HasAccessToken}"/>
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="1" Spacing="6" HorizontalAlignment="Right">
                                                         <TextBlock Text="{loc:Tr app_settings.active}"
                                                                    IsVisible="{Binding IsActive}"
-                                                                   Foreground="#9AD0FF"
+                                                                   Foreground="{DynamicResource VeyraInfoBrush}"
                                                                    HorizontalAlignment="Right"/>
                                                         <Button Content="{loc:Tr app_settings.activate}"
                                                                 Classes="subtle"
@@ -121,11 +134,15 @@
                                     <Button Grid.Column="1" Content="{Binding ToggleAuthLabel}" Command="{Binding ToggleAuthModeCommand}" Classes="subtle"/>
                                 </Grid>
 
+                                <TextBox Text="{Binding EmailInput, Mode=TwoWay}"
+                                         Watermark="{loc:Tr auth.email}"
+                                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
+
                                 <TextBox Text="{Binding PasswordInput, Mode=TwoWay}" PasswordChar="*" Watermark="{loc:Tr auth.password}"/>
                                 <TextBox Text="{Binding ConfirmPasswordInput, Mode=TwoWay}"
-                                             PasswordChar="*"
-                                             Watermark="{loc:Tr auth.confirm_password}"
-                                             IsVisible="{Binding IsConfirmPasswordVisible}"/>
+                                         PasswordChar="*"
+                                         Watermark="{loc:Tr auth.confirm_password}"
+                                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
 
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button Content="{Binding SubmitAuthLabel}"
@@ -136,7 +153,7 @@
 
                                 <TextBlock Text="{Binding AuthMessage}"
                                            IsVisible="{Binding AuthMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                                           Foreground="#9AD0FF"
+                                           Foreground="{DynamicResource VeyraInfoBrush}"
                                            TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -177,7 +194,7 @@
 
                                 <TextBlock Text="{Binding SyncMessage}"
                                            IsVisible="{Binding SyncMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                                           Foreground="#9AD0FF"
+                                           Foreground="{DynamicResource VeyraInfoBrush}"
                                            TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
@@ -186,6 +203,21 @@
                             <StackPanel Spacing="10">
                                 <TextBlock Text="{loc:Tr app_settings.general_title}" FontSize="16" FontWeight="SemiBold"/>
                                 <TextBlock Text="{loc:Tr app_settings.general_subtitle}" Opacity="0.75" TextWrapping="Wrap"/>
+
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.theme_label}" Opacity="0.8"/>
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding Themes}"
+                                              SelectedItem="{Binding SelectedTheme, Mode=TwoWay}">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppThemeOptionItemViewModel">
+                                                <TextBlock Text="{Binding DisplayName}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                </Grid>
+
+                                <TextBlock Text="{loc:Tr app_settings.theme_hint}" Opacity="0.72" TextWrapping="Wrap"/>
 
                                 <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.language_label}" Opacity="0.8"/>
@@ -201,6 +233,25 @@
                                 </Grid>
 
                                 <TextBlock Text="{loc:Tr app_settings.language_hint}" Opacity="0.72" TextWrapping="Wrap"/>
+
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.sensitive_actions_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.sensitive_actions_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                        <CheckBox Content="{loc:Tr app_settings.sensitive_actions_checkbox}"
+                                                  IsChecked="{Binding RequirePasswordForSensitiveActions, Mode=TwoWay}"
+                                                  IsEnabled="{Binding CanEditSensitiveActionVerification}"/>
+                                        <TextBlock Text="{loc:Tr app_settings.sensitive_actions_requires_sign_in}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding CanEditSensitiveActionVerification, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                        <TextBlock Text="{Binding GeneralMessage}"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding GeneralMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
 
                                 <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="6">
@@ -229,10 +280,10 @@
                                         </Grid>
 
                                         <TextBlock Text="{Binding LocalizationHealthText}"
-                                                   Foreground="#86EFAC"
+                                                   Foreground="{DynamicResource VeyraSuccessBrush}"
                                                    IsVisible="{Binding HasLocalizationIssues, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
                                         <TextBlock Text="{Binding LocalizationHealthText}"
-                                                   Foreground="#F59E0B"
+                                                   Foreground="{DynamicResource VeyraWarningBrush}"
                                                    IsVisible="{Binding HasLocalizationIssues}"/>
 
                                         <TextBlock Text="{loc:Tr app_settings.localization_sample_missing_label}"
@@ -260,6 +311,30 @@
                                                    IsVisible="{Binding HasLocalizationExtraSample}"/>
                                     </StackPanel>
                                 </Border>
+
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <ItemsControl ItemsSource="{Binding OperationJournalItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="settings:AppOperationJournalItemViewModel">
+                                                    <Border Classes="card" Padding="8" Margin="0,0,0,6">
+                                                        <Grid ColumnDefinitions="150,68,92,220,90,*" ColumnSpacing="8">
+                                                            <TextBlock Grid.Column="0" Text="{Binding TimestampText}" Classes="muted"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding Level}" FontWeight="SemiBold"/>
+                                                            <TextBlock Grid.Column="2" Text="{Binding Category}" Classes="muted"/>
+                                                            <TextBlock Grid.Column="3" Text="{Binding Action}" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock Grid.Column="4" Text="{Binding ScopeText}" Classes="muted"/>
+                                                            <TextBlock Grid.Column="5" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -268,3 +343,4 @@
         </Grid>
     </DockPanel>
 </UserControl>
+

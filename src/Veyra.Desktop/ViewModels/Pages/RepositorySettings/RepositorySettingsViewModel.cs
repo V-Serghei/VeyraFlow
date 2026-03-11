@@ -17,7 +17,11 @@ using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.ViewModels.Windows;
+using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.RepositorySettings;
 
@@ -26,9 +30,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
     private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
+    private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly ILogger<RepositorySettingsViewModel> _log;
+    private readonly LocalizationManager _localization = LocalizationManager.Instance;
 
     private CancellationTokenSource? _retentionCts;
+    private RepositoryRetentionPolicyDto? _lastAppliedRetentionPolicy;
+    private RepositoryCloudSyncStatusDto? _lastAppliedCloudSyncStatus;
 
     public event Action? BackRequested;
     public event Func<int, Task>? RepositoryUpdated;
@@ -48,15 +56,15 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionMaxTotalSizeMb = string.Empty;
     [ObservableProperty] private string _retentionTriggerFilter = string.Empty;
     [ObservableProperty] private int _retentionRunIntervalMinutes = 60;
-    [ObservableProperty] private string _retentionLastRunText = "Never";
-    [ObservableProperty] private string _retentionLastStatusText = "-";
+    [ObservableProperty] private string _retentionLastRunText = "";
+    [ObservableProperty] private string _retentionLastStatusText = "";
 
     [ObservableProperty] private string _syncConflictStrategy = RepositorySyncConflictStrategies.LastWriteWins;
     [ObservableProperty] private string _syncRetryMaxAttempts = "5";
     [ObservableProperty] private string _syncRetryBaseDelaySeconds = "30";
-    [ObservableProperty] private string _cloudSyncStatusText = "-";
-    [ObservableProperty] private string _cloudSyncLastSyncText = "Never";
-    [ObservableProperty] private string _cloudSyncQueueText = "pending: 0, conflicts: 0";
+    [ObservableProperty] private string _cloudSyncStatusText = "";
+    [ObservableProperty] private string _cloudSyncLastSyncText = "";
+    [ObservableProperty] private string _cloudSyncQueueText = "";
     [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
     [ObservableProperty] private bool _isSyncNowRunning;
     [ObservableProperty] private bool _isBundleOperationRunning;
@@ -82,12 +90,16 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         IMediator mediator,
         IWindowService windows,
         IRepositoryCloudSyncOrchestrator cloudSync,
+        ISensitiveActionGuard sensitiveActionGuard,
         ILogger<RepositorySettingsViewModel> log)
     {
         _mediator = mediator;
         _windows = windows;
         _cloudSync = cloudSync;
+        _sensitiveActionGuard = sensitiveActionGuard;
         _log = log;
+        _localization.LanguageChanged += OnLanguageChanged;
+        RefreshLocalizationState();
     }
 
     public async Task LoadAsync(int repositoryId)
@@ -100,7 +112,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
-                ErrorMessage = "Repository was not found.";
+                ErrorMessage = Loc.T("repo_settings.error_not_found");
                 return;
             }
 
@@ -129,7 +141,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load repository settings for {RepositoryId}", repositoryId);
-            ErrorMessage = "Failed to load repository settings.";
+            ErrorMessage = Loc.T("repo_settings.error_load_failed");
         }
         finally
         {
@@ -147,7 +159,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var res = await owner.StorageProvider.OpenFolderPickerAsync(
             new Avalonia.Platform.Storage.FolderPickerOpenOptions
             {
-                Title = "Select repository directory",
+                Title = Loc.T("repo_settings.picker_select_directory"),
                 AllowMultiple = false
             });
 
@@ -224,7 +236,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? "Failed to save repository settings.";
+                ErrorMessage = result.Error ?? Loc.T("repo_settings.error_save_failed");
                 return;
             }
 
@@ -238,7 +250,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to save repository settings for {RepositoryId}", RepositoryId);
-            ErrorMessage = "Failed to save repository settings.";
+            ErrorMessage = Loc.T("repo_settings.error_save_failed");
         }
         finally
         {
@@ -254,6 +266,17 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         try
         {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.F("security.action_cloud_sync_body", RepositoryName));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
             IsSyncNowRunning = true;
             ErrorMessage = null;
 
@@ -265,7 +288,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to run cloud sync for repository {RepositoryId}", RepositoryId);
-            ErrorMessage = "Cloud sync failed.";
+            ErrorMessage = Loc.T("repo_settings.error_sync_failed");
         }
         finally
         {
@@ -282,19 +305,19 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            ErrorMessage = "Unable to open file picker window.";
+            ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
             return;
         }
 
         var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Export repository bundle",
+            Title = Loc.T("repo_settings.bundle_export_title"),
             SuggestedFileName = BuildSuggestedBundleFileName(),
             DefaultExtension = "zip",
             ShowOverwritePrompt = true,
             FileTypeChoices =
             [
-                new FilePickerFileType("Veyra bundle")
+                new FilePickerFileType(Loc.T("repo_settings.bundle_file_type"))
                 {
                     Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
                 }
@@ -306,10 +329,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             return;
 
         await RunBundleOperationAsync(
-            startedMessage: "Exporting repository bundle...",
+            startedMessage: Loc.T("repo_settings.bundle_exporting"),
             operation: async () => await _mediator.Send(new ExportRepositoryBundleCommand(RepositoryId, bundlePath)),
             onSuccess: result =>
-                $"{result.Summary}\nBundle: {result.BundlePath}\nSize: {FormatSize(result.BundleSizeBytes)}");
+                $"{result.Summary}\n{Loc.T("repo_settings.bundle_path_label")}: {result.BundlePath}\n{Loc.T("common.size")}: {FormatSize(result.BundleSizeBytes)}");
     }
 
     [RelayCommand(CanExecute = nameof(CanRunBundleOperations))]
@@ -321,17 +344,17 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            ErrorMessage = "Unable to open file picker window.";
+            ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
             return;
         }
 
         var bundleSelection = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Import repository bundle",
+            Title = Loc.T("repo_settings.bundle_import_title"),
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType("Veyra bundle")
+                new FilePickerFileType(Loc.T("repo_settings.bundle_file_type"))
                 {
                     Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
                 }
@@ -352,7 +375,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         var targetDirectorySelection = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select target directory for imported repository",
+            Title = Loc.T("repo_settings.bundle_import_target_title"),
             AllowMultiple = false
         });
 
@@ -361,7 +384,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             return;
 
         await RunBundleOperationAsync(
-            startedMessage: "Importing repository bundle...",
+            startedMessage: Loc.T("repo_settings.bundle_importing"),
             operation: async () => await _mediator.Send(new ImportRepositoryBundleCommand(
                 bundlePath,
                 targetDirectory,
@@ -370,9 +393,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             {
                 var warningText = result.Warnings.Count == 0
                     ? string.Empty
-                    : "\nWarnings:\n" + string.Join('\n', result.Warnings);
+                    : $"\n{Loc.T("repo_settings.bundle_warnings")}:\n" + string.Join('\n', result.Warnings);
 
-                return $"{result.Summary}\nImported repository id: {result.RepositoryId}{warningText}";
+                return $"{result.Summary}\n{Loc.T("repo_settings.bundle_imported_repository_id")}: {result.RepositoryId}{warningText}";
             });
     }
 
@@ -381,6 +404,20 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     {
         try
         {
+            if (!await ConfirmRepositoryDeletionAsync())
+                return;
+
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_delete_repository"),
+                Loc.F("security.action_delete_repository_body", RepositoryName));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
             IsLoading = true;
             ErrorMessage = null;
 
@@ -390,7 +427,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to delete repository {RepositoryId}", RepositoryId);
-            ErrorMessage = "Failed to delete repository.";
+            ErrorMessage = Loc.T("repo_settings.error_delete_failed");
         }
         finally
         {
@@ -481,7 +518,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var result = await operation();
             if (!result.Success || result.Value is null)
             {
-                var message = result.Error ?? "Bundle operation failed.";
+                var message = result.Error ?? Loc.T("repo_settings.error_bundle_failed");
                 ErrorMessage = message;
                 BundleOperationMessage = message;
                 return;
@@ -492,7 +529,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Bundle operation failed for repository {RepositoryId}", RepositoryId);
-            ErrorMessage = "Bundle operation failed.";
+            ErrorMessage = Loc.T("repo_settings.error_bundle_failed");
             BundleOperationMessage = ErrorMessage;
         }
         finally
@@ -509,7 +546,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             IsRetentionRunning = true;
             RetentionResultText = string.Empty;
-            RetentionProgressText = "Running...";
+            RetentionProgressText = Loc.T("repo_settings.retention_running");
             ErrorMessage = null;
 
             _retentionCts?.Dispose();
@@ -526,12 +563,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                RetentionResultText = result.Error ?? "Failed to run retention.";
+                RetentionResultText = result.Error ?? Loc.T("repo_settings.retention_failed");
                 return;
             }
 
             RetentionResultText = result.Value.Summary;
-            RetentionProgressText = "Completed.";
+            RetentionProgressText = Loc.T("repo_settings.retention_completed");
 
             if (!dryRun)
             {
@@ -540,13 +577,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            RetentionProgressText = "Operation cancelled.";
-            RetentionResultText = "Retention run was cancelled.";
+            RetentionProgressText = Loc.T("repo_settings.retention_cancelled");
+            RetentionResultText = Loc.T("repo_settings.retention_cancelled_result");
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to run retention for repository {RepositoryId}", RepositoryId);
-            RetentionResultText = "Retention failed with an exception.";
+            RetentionResultText = Loc.T("repo_settings.retention_failed_exception");
             RetentionProgressText = string.Empty;
         }
         finally
@@ -559,6 +596,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     private void ApplyRetentionPolicy(RepositoryRetentionPolicyDto policy)
     {
+        _lastAppliedRetentionPolicy = policy;
         RetentionEnabled = policy.Enabled;
         RetentionMaxAgeDays = policy.MaxAgeDays?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
         RetentionMaxSnapshots = policy.MaxSnapshots?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
@@ -569,24 +607,23 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             ? string.Empty
             : string.Join(", ", policy.TriggerFilters);
         RetentionRunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60);
-        RetentionLastRunText = policy.LastRunAtUtc is null
-            ? "Never"
-            : policy.LastRunAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+        RetentionLastRunText = FormatNeverOrDate(policy.LastRunAtUtc);
         RetentionLastStatusText = string.IsNullOrWhiteSpace(policy.LastStatus)
-            ? "-"
+            ? Loc.T("common.not_available_short")
             : policy.LastStatus;
     }
 
     private void ApplyCloudSyncStatus(RepositoryCloudSyncStatusDto? status)
     {
+        _lastAppliedCloudSyncStatus = status;
         if (status is null)
         {
             SyncConflictStrategy = RepositorySyncConflictStrategies.LastWriteWins;
             SyncRetryMaxAttempts = "5";
             SyncRetryBaseDelaySeconds = "30";
-            CloudSyncStatusText = "-";
-            CloudSyncLastSyncText = "Never";
-            CloudSyncQueueText = "pending: 0, conflicts: 0";
+            CloudSyncStatusText = Loc.T("dashboard.sync.idle");
+            CloudSyncLastSyncText = Loc.T("common.never");
+            CloudSyncQueueText = FormatCloudQueueSummary(0, 0, 0, 0, 0);
             CloudSyncErrorText = string.Empty;
             return;
         }
@@ -595,10 +632,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         SyncRetryMaxAttempts = status.RetryMaxAttempts.ToString(CultureInfo.InvariantCulture);
         SyncRetryBaseDelaySeconds = status.RetryBaseDelaySeconds.ToString(CultureInfo.InvariantCulture);
         CloudSyncStatusText = FormatCloudSyncStatus(status.LastStatus);
-        CloudSyncLastSyncText = status.LastSyncedAtUtc is null
-            ? "Never"
-            : status.LastSyncedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        CloudSyncQueueText = $"pending: {status.PendingQueueCount}, conflicts: {status.ConflictQueueCount}";
+        CloudSyncLastSyncText = FormatNeverOrDate(status.LastSyncedAtUtc);
+        CloudSyncQueueText = FormatCloudQueueSummary(
+            status.PendingQueueCount,
+            status.RunningQueueCount,
+            status.RetryQueueCount,
+            status.ConflictQueueCount,
+            status.DeadLetterQueueCount);
         CloudSyncErrorText = status.LastError ?? string.Empty;
     }
 
@@ -632,23 +672,75 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private static string FormatCloudSyncStatus(string? status)
     {
         if (string.IsNullOrWhiteSpace(status))
-            return "Idle";
+            return Loc.T("dashboard.sync.idle");
 
         var normalized = status.Trim().ToLowerInvariant();
         return normalized switch
         {
-            "queued" => "Queued",
-            "syncing" => "Syncing",
-            "offline_retry" => "Offline, retry scheduled",
-            "retrying" => "Retrying",
-            "auth_required" => "Authorization required",
-            "conflict" => "Conflict detected",
-            "failed" => "Failed",
-            "skipped" => "No upload needed",
+            "queued" => Loc.T("dashboard.sync.queued"),
+            "syncing" => Loc.T("dashboard.sync.syncing"),
+            "offline_retry" => Loc.T("dashboard.sync.offline_retry"),
+            "retrying" => Loc.T("dashboard.sync.retrying"),
+            "auth_required" => Loc.T("dashboard.sync.auth_required"),
+            "conflict" => Loc.T("dashboard.sync.conflict"),
+            "failed" => Loc.T("dashboard.sync.failed"),
+            "skipped" => Loc.T("dashboard.sync.skipped"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => status,
             _ => status.Replace('_', ' ')
         };
     }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void RefreshLocalizationState()
+    {
+        var selectedStrategy = SyncConflictStrategy;
+        SyncConflictStrategies.Clear();
+        foreach (var strategy in RepositorySyncConflictStrategies.All)
+            SyncConflictStrategies.Add(strategy);
+        SyncConflictStrategy = RepositorySyncConflictStrategies.All.Contains(selectedStrategy, StringComparer.OrdinalIgnoreCase)
+            ? selectedStrategy
+            : RepositorySyncConflictStrategies.LastWriteWins;
+
+        if (_lastAppliedRetentionPolicy is not null)
+            ApplyRetentionPolicy(_lastAppliedRetentionPolicy);
+        else
+            RetentionLastRunText = Loc.T("common.never");
+
+        ApplyCloudSyncStatus(_lastAppliedCloudSyncStatus);
+    }
+
+    private static string FormatNeverOrDate(DateTime? value)
+        => value is null
+            ? Loc.T("common.never")
+            : value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string FormatCloudQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
+        => Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+
+    private async Task<bool> ConfirmRepositoryDeletionAsync()
+    {
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+            return false;
+
+        var window = _windows.Create<ConfirmActionWindow>();
+        if (window.DataContext is ConfirmActionWindowViewModel vm)
+        {
+            vm.Configure(
+                Loc.T("repo_settings.delete_confirm_title"),
+                Loc.F("repo_settings.delete_confirm_body", RepositoryName),
+                Loc.T("repo_settings.delete_confirm_warning"),
+                Loc.T("repo_settings.delete_confirm_button"));
+        }
+
+        await _windows.ShowDialogAsync(window, owner);
+        return window.DataContext is ConfirmActionWindowViewModel resultVm && resultVm.IsConfirmed;
+    }
+
     private string BuildSuggestedBundleFileName()
     {
         var safeName = string.IsNullOrWhiteSpace(RepositoryName)

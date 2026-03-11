@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -16,9 +17,9 @@ public sealed class RepositorySnapshotFileChangeViewModel
 
     public string ChangeKindLabel => ChangeKind switch
     {
-        "added" => "+ Added",
-        "modified" => "~ Modified",
-        "deleted" => "- Deleted",
+        "added" => Loc.T("snapshot.change_kind.added"),
+        "modified" => Loc.T("snapshot.change_kind.modified"),
+        "deleted" => Loc.T("snapshot.change_kind.deleted"),
         _ => ChangeKind
     };
 
@@ -38,6 +39,3 @@ public sealed class RepositorySnapshotFileChangeViewModel
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 }
-
-
-

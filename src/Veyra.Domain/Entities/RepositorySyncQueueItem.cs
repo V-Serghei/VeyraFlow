@@ -30,6 +30,9 @@ public class RepositorySyncQueueItem
 
     public long? ObservedRemoteSnapshotId { get; set; }
     public string? LastError { get; set; }
+    public int UploadCheckpointNextIndex { get; set; }
+    public int UploadCheckpointTotal { get; set; }
+    public string? UploadCheckpointSignature { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

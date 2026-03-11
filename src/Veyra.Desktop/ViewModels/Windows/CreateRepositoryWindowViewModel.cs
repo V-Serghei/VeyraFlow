@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -42,6 +42,8 @@ public sealed partial class RepositoryFormatOptionViewModel : ObservableObject
     }
 }
 
+public sealed record RepositoryCreationLogItemViewModel(string TimestampText, string Message);
+
 public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 {
     private readonly IMediator _mediator;
@@ -49,6 +51,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     private readonly ILogger<CreateRepositoryWindowViewModel> _log;
 
     private int _stepIndex;
+    private string? _lastProgressLogSignature;
 
     public event Action? RequestClose;
 
@@ -69,18 +72,25 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
+    [NotifyPropertyChangedFor(nameof(FilesFoundCount))]
     private int _filesProcessed;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
+    [NotifyPropertyChangedFor(nameof(FilesFoundCount))]
     private int _filesTotal;
 
     [ObservableProperty] private bool _isProgressIndeterminate;
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
-    public string FilesProgressLabel => FilesTotal > 0 ? $"{FilesProcessed} / {FilesTotal}" : FilesProcessed.ToString();
+    public int FilesFoundCount => Math.Max(FilesProcessed, FilesTotal);
+    public string FilesProgressLabel => FilesFoundCount.ToString();
+    public int SelectedFormatCount => Formats.Count(f => f.IsSelected);
+    public int TrackedFolderCount => string.IsNullOrWhiteSpace(DirectoryPath) ? 0 : 1;
+    public bool HasProgressLog => ProgressLogItems.Count > 0;
 
     public ObservableCollection<RepositoryFormatOptionViewModel> Formats { get; } = [];
+    public ObservableCollection<RepositoryCreationLogItemViewModel> ProgressLogItems { get; } = [];
 
     public IRelayCommand BackCommand { get; }
     public IAsyncRelayCommand NextCommand { get; }
@@ -160,7 +170,13 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     }
 
     partial void OnRepositoryNameChanged(string value) => RefreshCommands();
-    partial void OnDirectoryPathChanged(string value) => RefreshCommands();
+
+    partial void OnDirectoryPathChanged(string value)
+    {
+        OnPropertyChanged(nameof(TrackedFolderCount));
+        RefreshCommands();
+    }
+
     partial void OnIsBusyChanged(bool value) => RefreshCommands();
     partial void OnCustomFormatChanged(string value) => RefreshCommands();
 
@@ -232,13 +248,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
         if (!Formats.Any(x => x.Format.Equals(normalized, StringComparison.OrdinalIgnoreCase)))
         {
-            var vm = new RepositoryFormatOptionViewModel(normalized, true);
-            vm.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(RepositoryFormatOptionViewModel.IsSelected))
-                    RefreshCommands();
-            };
-
+            var vm = CreateFormatOption(normalized, true);
             Formats.Add(vm);
         }
         else
@@ -248,6 +258,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
 
         CustomFormat = string.Empty;
+        OnPropertyChanged(nameof(SelectedFormatCount));
         RefreshCommands();
     }
 
@@ -263,6 +274,10 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             FilesProcessed = 0;
             FilesTotal = 0;
             IsProgressIndeterminate = true;
+            _lastProgressLogSignature = null;
+            ProgressLogItems.Clear();
+            OnPropertyChanged(nameof(HasProgressLog));
+            AppendProgressLog(Loc.T("create_repo.progress_start"), 0);
             await Task.Yield();
 
             var progress = new Progress<RepositoryCreationProgressDto>(p =>
@@ -276,6 +291,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 FilesProcessed = p.FilesProcessed;
                 FilesTotal = p.FilesTotal;
                 IsProgressIndeterminate = p.FilesTotal <= 0 && p.Percent < 100;
+                AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
             });
 
             var result = await Task.Run(() => _mediator.Send(new CreateRepositoryWithFormatsCommand(
@@ -290,6 +306,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 ErrorMessage = result.Error ?? Loc.T("create_repo.error_create_failed");
                 ProgressMessage = Loc.T("create_repo.error_progress_label");
                 IsProgressIndeterminate = false;
+                AppendProgressLog(ErrorMessage, FilesFoundCount);
                 return;
             }
 
@@ -297,6 +314,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             ProgressMessage = Loc.T("create_repo.success_progress_label");
             IsProgressIndeterminate = false;
             IsCompleted = true;
+            AppendProgressLog(Loc.T("create_repo.success_progress_label"), FilesFoundCount);
             RefreshCommands();
         }
         catch (Exception ex)
@@ -305,6 +323,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             ErrorMessage = Loc.T("create_repo.error_unhandled");
             ProgressMessage = Loc.T("create_repo.error_progress_label");
             IsProgressIndeterminate = false;
+            AppendProgressLog(ErrorMessage, FilesFoundCount);
         }
         finally
         {
@@ -348,14 +367,53 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                      ".json", ".xml", ".cs", ".js", ".ts", ".java", ".py", ".md"
                  })
         {
-            var vm = new RepositoryFormatOptionViewModel(ext, true);
-            vm.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(RepositoryFormatOptionViewModel.IsSelected))
-                    RefreshCommands();
-            };
-
-            Formats.Add(vm);
+            Formats.Add(CreateFormatOption(ext, true));
         }
+
+        OnPropertyChanged(nameof(SelectedFormatCount));
+    }
+
+    private RepositoryFormatOptionViewModel CreateFormatOption(string ext, bool isSelected)
+    {
+        var vm = new RepositoryFormatOptionViewModel(ext, isSelected);
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(RepositoryFormatOptionViewModel.IsSelected))
+            {
+                OnPropertyChanged(nameof(SelectedFormatCount));
+                RefreshCommands();
+            }
+        };
+
+        return vm;
+    }
+
+    private void AppendProgressLog(string? message, int filesFound)
+    {
+        var trimmed = (message ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+            return;
+
+        var signature = filesFound > 0
+            ? $"{trimmed}|{filesFound}"
+            : trimmed;
+
+        if (string.Equals(_lastProgressLogSignature, signature, StringComparison.Ordinal))
+            return;
+
+        _lastProgressLogSignature = signature;
+
+        var finalMessage = filesFound > 0
+            ? $"{trimmed} - {filesFound} {Loc.T("create_repo.files_found_suffix")}"
+            : trimmed;
+
+        ProgressLogItems.Add(new RepositoryCreationLogItemViewModel(
+            DateTime.Now.ToString("HH:mm:ss"),
+            finalMessage));
+
+        while (ProgressLogItems.Count > 120)
+            ProgressLogItems.RemoveAt(0);
+
+        OnPropertyChanged(nameof(HasProgressLog));
     }
 }

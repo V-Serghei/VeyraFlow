@@ -9,10 +9,10 @@
         x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
         x:Name="Root"
         x:DataType="windows:SnapshotNameDialogWindowViewModel"
-        Width="1220"
-        Height="790"
-        MinWidth="900"
-        MinHeight="620"
+        Width="1180"
+        Height="760"
+        MinWidth="860"
+        MinHeight="580"
         WindowStartupLocation="CenterOwner"
         SystemDecorations="Full"
         CanResize="True"
@@ -46,11 +46,8 @@
             </Grid>
         </Border>
 
-        <ScrollViewer Grid.Row="1"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
-            <Grid ColumnDefinitions="360,*" ColumnSpacing="12">
-                <Border Grid.Column="0" Classes="dialog-shell">
+        <Grid Grid.Row="1" ColumnDefinitions="320,8,*" ColumnSpacing="0">
+            <Border Grid.Column="0" Classes="dialog-shell" MinWidth="240">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
                         <TextBlock Grid.Row="0" Text="{loc:Tr snapshot_dialog.changed_files}" FontSize="18" FontWeight="SemiBold"/>
                         <TextBlock Grid.Row="1" Classes="muted" Text="{Binding ChangedFilesCountLabel}"/>
@@ -70,7 +67,7 @@
                                     <DataTemplate x:DataType="windows:SnapshotPendingFileItemViewModel">
                                         <Border Classes="list-item">
                                             <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="4">
-                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold" Foreground="#9ADBFF"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
                                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
                                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.85"/>
 
@@ -86,9 +83,16 @@
                             </ListBox>
                         </Grid>
                     </Grid>
-                </Border>
+            </Border>
 
-                <Border Grid.Column="1" Classes="dialog-shell">
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"/>
+
+            <Border Grid.Column="2" Classes="dialog-shell" Margin="12,0,0,0" MinWidth="360">
                     <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                             <StackPanel Spacing="4">
@@ -108,20 +112,20 @@
                         </Grid>
 
                         <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" IsVisible="{Binding IsTextPreview}">
-                            <Border Grid.Column="0" Background="#1F4A3A" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="{loc:Tr diff.added}" Foreground="#98FFD2" FontWeight="SemiBold" FontSize="11"/>
+                            <Border Grid.Column="0" Background="{DynamicResource VeyraDiffAddBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.added}" Foreground="{DynamicResource VeyraDiffAddFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
-                            <Border Grid.Column="1" Background="#4A2530" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="{loc:Tr diff.removed}" Foreground="#FFB1BC" FontWeight="SemiBold" FontSize="11"/>
+                            <Border Grid.Column="1" Background="{DynamicResource VeyraDiffRemoveBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.removed}" Foreground="{DynamicResource VeyraDiffRemoveFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
-                            <Border Grid.Column="2" Background="#30455F" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="{loc:Tr diff.modified}" Foreground="#D6E6FF" FontWeight="SemiBold" FontSize="11"/>
+                            <Border Grid.Column="2" Background="{DynamicResource VeyraDiffModifiedBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.modified}" Foreground="{DynamicResource VeyraDiffModifiedFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
-                            <Border Grid.Column="3" Background="#213B5A" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="{loc:Tr diff.context}" Foreground="#C2D9F3" FontWeight="SemiBold" FontSize="11"/>
+                            <Border Grid.Column="3" Background="{DynamicResource VeyraDiffContextBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.context}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
-                            <Border Grid.Column="4" Background="#2A4665" CornerRadius="8" Padding="8,4">
-                                <TextBlock Text="{loc:Tr snapshot_dialog.scroll_synced}" Foreground="#C7E1FF" FontWeight="SemiBold" FontSize="11"/>
+                            <Border Grid.Column="4" Background="{DynamicResource VeyraDiffContextBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr snapshot_dialog.scroll_synced}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Button Grid.Column="6"
                                     Content="{Binding WrapToggleLabel}"
@@ -135,17 +139,17 @@
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsTextPreview}">
                                 <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
                                     <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
-                                        <Border Grid.Column="0" Background="#1E3858" CornerRadius="8" Padding="8,4">
+                                        <Border Grid.Column="0" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="8,4">
                                             <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
                                         </Border>
-                                        <Border Grid.Column="1" Background="#1E3858" CornerRadius="8" Padding="8,4">
+                                        <Border Grid.Column="1" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="8,4">
                                             <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
                                         </Border>
                                     </Grid>
 
                                     <Border Grid.Row="1"
-                                            Background="#1C3655"
-                                            BorderBrush="#4A78A8"
+                                            Background="{DynamicResource VeyraDiffPinnedBgBrush}"
+                                            BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="8"
                                             Padding="8,4"
@@ -154,7 +158,7 @@
                                                    FontFamily="Cascadia Code,Consolas,Monospace"
                                                    FontWeight="SemiBold"
                                                    FontSize="12"
-                                                   Foreground="#BBD9FF"/>
+                                                   Foreground="{DynamicResource VeyraDiffPinnedFgBrush}"/>
                                     </Border>
                                     <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
                                         <ScrollViewer x:Name="LeftDiffScrollViewer"
@@ -167,8 +171,8 @@
                                                     <DataTemplate x:DataType="windows:SnapshotDiffRowItemViewModel">
                                                         <StackPanel Spacing="4" Margin="0,0,0,4">
                                                             <Border IsVisible="{Binding IsHunkHeader}"
-                                                                    Background="#1A3654"
-                                                                    BorderBrush="#4A78A8"
+                                                                    Background="{DynamicResource VeyraDiffHunkBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
                                                                     BorderThickness="1"
                                                                     CornerRadius="8"
                                                                     Padding="8,4">
@@ -178,7 +182,7 @@
                                                                                FontFamily="Cascadia Code,Consolas,Monospace"
                                                                                FontSize="12"
                                                                                FontWeight="SemiBold"
-                                                                               Foreground="#A8D1FF"/>
+                                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
                                                                     <Button Grid.Column="1"
                                                                             Content="{loc:Tr snapshot_dialog.pin}"
                                                                             Classes="subtle"
@@ -188,8 +192,8 @@
                                                             </Border>
 
                                                             <Border IsVisible="{Binding IsContextFoldRow}"
-                                                                    Background="#17344F"
-                                                                    BorderBrush="#3F6D97"
+                                                                    Background="{DynamicResource VeyraDiffFoldBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffFoldBorderBrush}"
                                                                     BorderThickness="1"
                                                                     CornerRadius="8"
                                                                     Padding="8,4">
@@ -206,7 +210,7 @@
                                                                 <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
                                                                     <TextBlock Grid.Column="0"
                                                                                Text="{Binding LeftGutter}"
-                                                                               Foreground="#A4BEDA"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
                                                                                FontFamily="Cascadia Code,Consolas,Monospace"
                                                                                FontSize="12"/>
                                                                     <TextBlock Grid.Column="1"
@@ -217,7 +221,7 @@
                                                                                FontSize="12"/>
                                                                     <TextBlock Grid.Column="2"
                                                                                Text="{Binding KindLabel}"
-                                                                               Foreground="#9BC1E8"
+                                                                               Foreground="{DynamicResource VeyraDiffMarkerBrush}"
                                                                                FontSize="10"
                                                                                FontWeight="SemiBold"
                                                                                VerticalAlignment="Center"/>
@@ -244,8 +248,8 @@
                                                     <DataTemplate x:DataType="windows:SnapshotDiffRowItemViewModel">
                                                         <StackPanel Spacing="4" Margin="0,0,0,4">
                                                             <Border IsVisible="{Binding IsHunkHeader}"
-                                                                    Background="#1A3654"
-                                                                    BorderBrush="#4A78A8"
+                                                                    Background="{DynamicResource VeyraDiffHunkBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
                                                                     BorderThickness="1"
                                                                     CornerRadius="8"
                                                                     Padding="8,4">
@@ -253,12 +257,12 @@
                                                                            FontFamily="Cascadia Code,Consolas,Monospace"
                                                                            FontSize="12"
                                                                            FontWeight="SemiBold"
-                                                                           Foreground="#A8D1FF"/>
+                                                                           Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
                                                             </Border>
 
                                                             <Border IsVisible="{Binding IsContextFoldRow}"
-                                                                    Background="#17344F"
-                                                                    BorderBrush="#3F6D97"
+                                                                    Background="{DynamicResource VeyraDiffFoldBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffFoldBorderBrush}"
                                                                     BorderThickness="1"
                                                                     CornerRadius="8"
                                                                     Padding="8,4">
@@ -273,7 +277,7 @@
                                                                 <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
                                                                     <TextBlock Grid.Column="0"
                                                                                Text="{Binding RightGutter}"
-                                                                               Foreground="#A4BEDA"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
                                                                                FontFamily="Cascadia Code,Consolas,Monospace"
                                                                                FontSize="12"/>
                                                                     <TextBlock Grid.Column="1"
@@ -284,7 +288,7 @@
                                                                                FontSize="12"/>
                                                                     <TextBlock Grid.Column="2"
                                                                                Text="{Binding KindLabel}"
-                                                                               Foreground="#9BC1E8"
+                                                                               Foreground="{DynamicResource VeyraDiffMarkerBrush}"
                                                                                FontSize="10"
                                                                                FontWeight="SemiBold"
                                                                                VerticalAlignment="Center"/>
@@ -313,7 +317,7 @@
                                                     <TextBlock Grid.Column="0"
                                                                Text="{Binding Label}"
                                                                FontWeight="SemiBold"
-                                                               Foreground="#A8D1FF"/>
+                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
                                                     <TextBlock Grid.Column="1"
                                                                Text="{Binding Value}"
                                                                TextWrapping="Wrap"/>
@@ -333,7 +337,7 @@
                                                     <TextBlock Grid.Column="0"
                                                                Text="{Binding Label}"
                                                                FontWeight="SemiBold"
-                                                               Foreground="#A8D1FF"/>
+                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
                                                     <TextBlock Grid.Column="1"
                                                                Text="{Binding Value}"
                                                                TextWrapping="Wrap"/>
@@ -343,14 +347,14 @@
                                     </ItemsControl>
 
                                     <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding HasImagePreviews}">
-                                        <Border Grid.Column="0" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
+                                        <Border Grid.Column="0" Background="{DynamicResource VeyraSurfaceSoftBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
                                                 <Image Grid.Row="1" Source="{Binding LeftImagePreview}" Stretch="Uniform"/>
                                             </Grid>
                                         </Border>
 
-                                        <Border Grid.Column="1" Background="#0B172A" BorderBrush="#2D4864" BorderThickness="1" CornerRadius="10" Padding="8">
+                                        <Border Grid.Column="1" Background="{DynamicResource VeyraSurfaceSoftBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{Binding RightImageCaption}" FontWeight="SemiBold"/>
                                                 <Image Grid.Row="1" Source="{Binding RightImagePreview}" Stretch="Uniform"/>
@@ -373,14 +377,13 @@
                             </Border>
                         </Grid>
                     </Grid>
-                </Border>
-            </Grid>
-        </ScrollViewer>
+            </Border>
+        </Grid>
 
         <Border Grid.Row="2"
                 Classes="dialog-shell"
-                Background="#0F2138"
-                BorderBrush="#3A5E84"
+                Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                BorderBrush="{DynamicResource VeyraBorderBrush}"
                 Padding="12">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
                 <TextBlock Grid.Column="0"
@@ -403,4 +406,5 @@
         </Border>
     </Grid>
 </Window>
+
 

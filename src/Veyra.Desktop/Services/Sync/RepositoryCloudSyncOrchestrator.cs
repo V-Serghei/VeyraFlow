@@ -24,6 +24,7 @@ namespace Veyra.Desktop.Services.Sync;
 public sealed class RepositoryCloudSyncOrchestrator(
     VeyraDbContext db,
     ICloudSyncService cloudSync,
+    IAuthService authService,
     IUserProfileRepository userProfiles,
     IAccessTokenPolicyService tokenPolicy,
     IRepositoryRepository repositories,
@@ -35,8 +36,10 @@ public sealed class RepositoryCloudSyncOrchestrator(
 {
     private const string ManagedHashPrefix = "sha256-";
     private const string PushOperationType = RepositorySyncQueueItem.OperationPushSnapshot;
+    private static readonly TimeSpan RunningLeaseTimeout = TimeSpan.FromMinutes(5);
 
     private readonly SemaphoreSlim _queueGate = new(1, 1);
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly string _clientInstanceId = ResolveClientInstanceId(configuration);
 
     public async Task TryPushLatestSnapshotAsync(int repositoryId, CancellationToken ct = default)
@@ -82,6 +85,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
         await _queueGate.WaitAsync(ct);
         try
         {
+            await RecoverStaleRunningQueueItemsAsync(ct);
+
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
@@ -194,7 +199,21 @@ public sealed class RepositoryCloudSyncOrchestrator(
             return null;
 
         var tokenState = tokenPolicy.Evaluate(activeProfile.AccessToken);
-        if (!tokenState.CanUseForSync)
+        if (tokenState.CanUseForSync)
+        {
+            if (tokenState.State == AccessTokenValidityState.ExpiringSoon)
+            {
+                log.LogInformation(
+                    "Cloud sync operation '{Operation}' for user {Username} uses token that is expiring soon. {Reason}",
+                    operationName,
+                    activeProfile.Username,
+                    tokenState.Description);
+            }
+
+            return activeProfile.AccessToken;
+        }
+
+        if (string.IsNullOrWhiteSpace(activeProfile.RefreshToken))
         {
             log.LogWarning(
                 "Skipping cloud sync operation '{Operation}'. User {Username}. TokenState {TokenState}. Reason {Reason}",
@@ -205,16 +224,105 @@ public sealed class RepositoryCloudSyncOrchestrator(
             return null;
         }
 
-        if (tokenState.State == AccessTokenValidityState.ExpiringSoon)
+        await _refreshGate.WaitAsync(ct);
+        try
         {
-            log.LogInformation(
-                "Cloud sync operation '{Operation}' for user {Username} uses token that is expiring soon. {Reason}",
-                operationName,
+            // Token might have been refreshed by another concurrent operation while we waited.
+            var latestProfile = await userProfiles.GetActiveProfileAsync(ct);
+            if (latestProfile is not null &&
+                string.Equals(latestProfile.Username, activeProfile.Username, StringComparison.OrdinalIgnoreCase))
+            {
+                var latestState = tokenPolicy.Evaluate(latestProfile.AccessToken);
+                if (latestState.CanUseForSync)
+                    return latestProfile.AccessToken;
+            }
+
+            var refreshed = await authService.RefreshAsync(activeProfile.RefreshToken, ct);
+            if (refreshed is null || string.IsNullOrWhiteSpace(refreshed.AccessToken))
+            {
+                log.LogWarning(
+                    "Cloud token refresh failed for operation '{Operation}'. User {Username}.",
+                    operationName,
+                    activeProfile.Username);
+                return null;
+            }
+
+            var persistedEmail = !string.IsNullOrWhiteSpace(refreshed.Email)
+                ? refreshed.Email
+                : activeProfile.Email;
+
+            await userProfiles.SaveOrUpdateProfileAsync(
                 activeProfile.Username,
-                tokenState.Description);
+                refreshed.CloudUserId,
+                refreshed.AccessToken,
+                persistedEmail,
+                refreshed.CloudSessionId ?? activeProfile.CloudSessionId,
+                refreshed.RefreshToken ?? activeProfile.RefreshToken,
+                refreshed.AccessTokenExpiresAtUtc,
+                refreshed.RefreshTokenExpiresAtUtc,
+                ct);
+
+            log.LogInformation(
+                "Cloud token refreshed for user {Username}. NewExpiry {ExpiryUtc}",
+                activeProfile.Username,
+                refreshed.AccessTokenExpiresAtUtc);
+
+            return refreshed.AccessToken;
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(
+                ex,
+                "Cloud token refresh failed for operation '{Operation}'. User {Username}.",
+                operationName,
+                activeProfile.Username);
+            return null;
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
+    }
+
+    private async Task RecoverStaleRunningQueueItemsAsync(CancellationToken ct)
+    {
+        var cutoff = DateTime.UtcNow - RunningLeaseTimeout;
+
+        var staleRunning = await db.Set<RepositorySyncQueueItem>()
+            .Include(q => q.Repository)
+            .Where(q => q.OperationType == PushOperationType)
+            .Where(q => q.Status == RepositorySyncQueueItem.StatusRunning)
+            .Where(q => q.UpdatedAt < cutoff)
+            .Where(q => !q.Repository.IsDeleted)
+            .ToListAsync(ct);
+
+        if (staleRunning.Count == 0)
+            return;
+
+        foreach (var item in staleRunning)
+        {
+            var repository = item.Repository;
+            var maxAttempts = Math.Clamp(item.MaxAttempts, 1, 20);
+            var canRetry = item.AttemptCount < maxAttempts;
+
+            item.Status = canRetry
+                ? RepositorySyncQueueItem.StatusRetry
+                : RepositorySyncQueueItem.StatusDeadLetter;
+            item.NextAttemptAtUtc = DateTime.UtcNow;
+            item.LastError = TruncateForColumn("Recovered stale running sync job after lease timeout.", 2048);
+            item.UpdatedAt = DateTime.UtcNow;
+
+            repository.CloudSyncLastStatus = canRetry ? "retrying" : "dead_letter";
+            repository.CloudSyncLastError = item.LastError;
+            repository.UpdatedAt = item.UpdatedAt;
         }
 
-        return activeProfile.AccessToken;
+        await db.SaveChangesAsync(ct);
+
+        log.LogWarning(
+            "Recovered stale running sync jobs. Count {Count}. TimeoutMinutes {TimeoutMinutes}",
+            staleRunning.Count,
+            RunningLeaseTimeout.TotalMinutes);
     }
 
     private async Task EnqueueSnapshotPushAsync(
@@ -244,6 +352,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
             existing.NextAttemptAtUtc = now;
             existing.ObservedRemoteSnapshotId = null;
             existing.LastError = null;
+            existing.UploadCheckpointSignature = null;
+            existing.UploadCheckpointTotal = 0;
+            existing.UploadCheckpointNextIndex = 0;
             existing.UpdatedAt = now;
 
             repository.CloudSyncLastStatus = "queued";
@@ -265,6 +376,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
             AttemptCount = 0,
             MaxAttempts = maxAttempts,
             NextAttemptAtUtc = now,
+            UploadCheckpointSignature = null,
+            UploadCheckpointTotal = 0,
+            UploadCheckpointNextIndex = 0,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -290,8 +404,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 (q.Status == RepositorySyncQueueItem.StatusPending && q.NextAttemptAtUtc <= now)
                 || (q.Status == RepositorySyncQueueItem.StatusRetry && q.AttemptCount < q.MaxAttempts && q.NextAttemptAtUtc <= now)
                 || (q.Status == RepositorySyncQueueItem.StatusConflict
-                    && RepositorySyncConflictStrategies.Normalize(q.Repository.SyncConflictStrategy)
-                    != RepositorySyncConflictStrategies.ManualMerge))
+                    && q.Repository.SyncConflictStrategy != RepositorySyncConflictStrategies.ManualMerge))
             .OrderBy(q => q.NextAttemptAtUtc)
             .ThenBy(q => q.CreatedAt)
             .FirstOrDefaultAsync(ct);
@@ -328,12 +441,13 @@ public sealed class RepositoryCloudSyncOrchestrator(
                               && remoteLatestSnapshotId.HasValue
                               && remoteLatestSnapshotId.Value != repository.CloudLastRemoteSnapshotId.Value
                               && remoteLatestSnapshotId.Value != queueItem.RemoteSnapshotId;
+            var expectedRemoteSnapshotId = repository.CloudLastRemoteSnapshotId.GetValueOrDefault();
 
             if (hasConflict && strategy == RepositorySyncConflictStrategies.ManualMerge)
             {
                 queueItem.Status = RepositorySyncQueueItem.StatusConflict;
                 queueItem.ObservedRemoteSnapshotId = remoteLatestSnapshotId;
-                queueItem.LastError = $"Cloud conflict detected. Remote latest snapshot is {remoteLatestSnapshotId.Value}, expected {repository.CloudLastRemoteSnapshotId.Value}.";
+                queueItem.LastError = $"Cloud conflict detected. Remote latest snapshot is {remoteLatestSnapshotId.Value}, expected {expectedRemoteSnapshotId}.";
                 queueItem.UpdatedAt = DateTime.UtcNow;
 
                 repository.CloudSyncLastStatus = "conflict";
@@ -378,32 +492,103 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 return;
             }
 
-            var initialIdempotencyKey = BuildPushIdempotencyKey(repository.Id, queueItem.SnapshotId, queueItem.RemoteSnapshotId, package.Snapshot.PayloadSha256, phase: 0);
+            var runAttempt = Math.Max(0, queueItem.AttemptCount) + 1;
+            var initialIdempotencyKey = BuildPushIdempotencyKey(
+                repository.Id,
+                queueItem.SnapshotId,
+                queueItem.RemoteSnapshotId,
+                package.Snapshot.PayloadSha256,
+                phase: 0,
+                attempt: runAttempt);
             var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, initialIdempotencyKey, ct);
             if (pushResult is null)
                 throw new InvalidOperationException("Cloud rejected snapshot push (unauthorized or invalid session).");
 
             var uploaded = 0;
-            if (pushResult.MissingBlockHashes.Count > 0)
+            var missingHashes = pushResult.MissingBlockHashes
+                .Where(h => !string.IsNullOrWhiteSpace(h))
+                .Select(h => h.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(h => h, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (missingHashes.Count > 0)
             {
-                foreach (var missingHash in pushResult.MissingBlockHashes.Distinct(StringComparer.OrdinalIgnoreCase))
+                var checkpointSignature = BuildMissingCheckpointSignature(package.Snapshot.PayloadSha256, missingHashes);
+                var resumeIndex = 0;
+
+                if (string.Equals(queueItem.UploadCheckpointSignature, checkpointSignature, StringComparison.OrdinalIgnoreCase)
+                    && queueItem.UploadCheckpointTotal == missingHashes.Count)
                 {
-                    if (await TryUploadMissingBlockAsync(accessToken, missingHash, ct))
-                        uploaded++;
+                    resumeIndex = Math.Clamp(queueItem.UploadCheckpointNextIndex, 0, missingHashes.Count);
+                }
+                else
+                {
+                    queueItem.UploadCheckpointSignature = checkpointSignature;
+                    queueItem.UploadCheckpointTotal = missingHashes.Count;
+                    queueItem.UploadCheckpointNextIndex = 0;
+                    queueItem.UpdatedAt = DateTime.UtcNow;
+                    repository.CloudSyncLastStatus = "syncing_upload";
+                    repository.UpdatedAt = queueItem.UpdatedAt;
+                    await db.SaveChangesAsync(ct);
                 }
 
-                if (uploaded > 0)
+                if (resumeIndex > 0)
                 {
-                    var confirmIdempotencyKey = BuildPushIdempotencyKey(repository.Id, queueItem.SnapshotId, queueItem.RemoteSnapshotId, package.Snapshot.PayloadSha256, phase: 1);
-                    var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, ct);
-                    if (confirm is null)
-                        throw new InvalidOperationException("Cloud rejected follow-up snapshot push after block upload.");
+                    log.LogInformation(
+                        "Resuming cloud block upload checkpoint. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Progress {Done}/{Total}",
+                        repository.Id,
+                        queueItem.SnapshotId,
+                        resumeIndex,
+                        missingHashes.Count);
+                }
+
+                for (var i = resumeIndex; i < missingHashes.Count; i++)
+                {
+                    var missingHash = missingHashes[i];
+                    if (await TryUploadMissingBlockAsync(accessToken, missingHash, ct))
+                        uploaded++;
+
+                    queueItem.UploadCheckpointSignature = checkpointSignature;
+                    queueItem.UploadCheckpointTotal = missingHashes.Count;
+                    queueItem.UploadCheckpointNextIndex = i + 1;
+                    queueItem.UpdatedAt = DateTime.UtcNow;
+                    repository.CloudSyncLastStatus = $"syncing_upload {i + 1}/{missingHashes.Count}";
+                    repository.UpdatedAt = queueItem.UpdatedAt;
+                    await db.SaveChangesAsync(ct);
+                }
+
+                var confirmIdempotencyKey = BuildPushIdempotencyKey(
+                    repository.Id,
+                    queueItem.SnapshotId,
+                    queueItem.RemoteSnapshotId,
+                    package.Snapshot.PayloadSha256,
+                    phase: 1,
+                    attempt: runAttempt);
+
+                var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, ct);
+                if (confirm is null)
+                    throw new InvalidOperationException("Cloud rejected follow-up snapshot push after block upload.");
+
+                var stillMissing = confirm.MissingBlockHashes
+                    .Where(h => !string.IsNullOrWhiteSpace(h))
+                    .Select(h => h.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (stillMissing.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Cloud still reports {stillMissing.Count} missing block(s) after upload.");
                 }
             }
 
             queueItem.Status = RepositorySyncQueueItem.StatusCompleted;
             queueItem.LastError = null;
             queueItem.ObservedRemoteSnapshotId = null;
+            queueItem.UploadCheckpointSignature = null;
+            queueItem.UploadCheckpointTotal = 0;
+            queueItem.UploadCheckpointNextIndex = 0;
             queueItem.UpdatedAt = DateTime.UtcNow;
 
             repository.CloudLastSyncedAt = DateTime.UtcNow;
@@ -422,7 +607,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 repository.Id,
                 queueItem.SnapshotId,
                 queueItem.RemoteSnapshotId,
-                pushResult.MissingBlockHashes.Count,
+                missingHashes.Count,
                 uploaded);
         }
         catch (Exception ex)
@@ -689,16 +874,11 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (File.Exists(localPath))
             return true;
 
-        var remote = await cloudSync.DownloadBlockAsync(accessToken, blockHash, ct);
-        if (remote is null)
-            return false;
-
         var dir = Path.GetDirectoryName(localPath);
         if (!string.IsNullOrWhiteSpace(dir))
             Directory.CreateDirectory(dir);
 
-        await File.WriteAllBytesAsync(localPath, remote, ct);
-        return true;
+        return await cloudSync.DownloadBlockToFileAsync(accessToken, blockHash, localPath, ct);
     }
 
     private async Task<bool> TryUploadMissingBlockAsync(string accessToken, string blockHash, CancellationToken ct)
@@ -707,8 +887,15 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             return false;
 
-        var bytes = await File.ReadAllBytesAsync(path, ct);
-        await cloudSync.UploadBlockAsync(accessToken, blockHash, bytes, ct);
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 128 * 1024,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        await cloudSync.UploadBlockAsync(accessToken, blockHash, stream, stream.Length, ct);
         return true;
     }
 
@@ -788,12 +975,29 @@ public sealed class RepositoryCloudSyncOrchestrator(
         long localSnapshotId,
         long remoteSnapshotId,
         string? payloadSha,
-        int phase)
+        int phase,
+        int attempt)
     {
-        var payload = $"push|{repositoryId}|{localSnapshotId}|{remoteSnapshotId}|{payloadSha ?? "none"}|{phase}";
+        var payload = $"push|{repositoryId}|{localSnapshotId}|{remoteSnapshotId}|{payloadSha ?? "none"}|{phase}|a{attempt}";
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         var compact = Convert.ToHexString(digest).ToLowerInvariant();
         return $"push-{repositoryId}-{localSnapshotId}-p{phase}-{compact[..24]}";
+    }
+
+    private static string BuildMissingCheckpointSignature(
+        string? payloadSha,
+        IReadOnlyList<string> missingHashes)
+    {
+        var normalizedPayload = string.IsNullOrWhiteSpace(payloadSha) ? "none" : payloadSha.Trim().ToLowerInvariant();
+        var normalizedHashes = missingHashes
+            .Where(h => !string.IsNullOrWhiteSpace(h))
+            .Select(h => h.Trim().ToLowerInvariant())
+            .OrderBy(h => h, StringComparer.Ordinal)
+            .ToArray();
+
+        var materialized = $"{normalizedPayload}|{string.Join("|", normalizedHashes)}";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(materialized));
+        return Convert.ToHexString(digest).ToLowerInvariant();
     }
 
     private static string BuildPayloadSha(RepositorySnapshot snapshot, int entries, int fileVersions, long remoteSnapshotId)

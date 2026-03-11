@@ -10,4 +10,9 @@ public sealed record RepositoryCloudSyncStatusDto(
     string? LastStatus,
     string? LastError,
     int PendingQueueCount,
-    int ConflictQueueCount);
+    int ConflictQueueCount,
+    int RunningQueueCount = 0,
+    int RetryQueueCount = 0,
+    int DeadLetterQueueCount = 0,
+    int FailedQueueCount = 0,
+    int CompletedQueueCount = 0);
