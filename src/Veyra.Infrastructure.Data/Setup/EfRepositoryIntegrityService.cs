@@ -30,6 +30,11 @@ public sealed class EfRepositoryIntegrityService(
         IProgress<RepositoryIntegrityProgressDto>? progress = null,
         CancellationToken ct = default)
     {
+        log.LogInformation(
+            "Due integrity verification started. IntervalMinutes {IntervalMinutes}. RepairFromCloud {RepairFromCloud}. MaxIssueSamples {MaxIssueSamples}",
+            intervalMinutes,
+            repairFromCloud,
+            maxIssueSamples);
         var now = DateTime.UtcNow;
         var safeInterval = TimeSpan.FromMinutes(Math.Clamp(intervalMinutes, 5, 24 * 60));
 
@@ -82,6 +87,11 @@ public sealed class EfRepositoryIntegrityService(
             }
         }
 
+        log.LogInformation(
+            "Due integrity verification finished. DueRepositories {DueRepositories}. CompletedRuns {CompletedRuns}",
+            due.Count,
+            results.Count);
+
         return results;
     }
 
@@ -92,6 +102,11 @@ public sealed class EfRepositoryIntegrityService(
         IProgress<RepositoryIntegrityProgressDto>? progress = null,
         CancellationToken ct = default)
     {
+        log.LogInformation(
+            "Repository integrity verification started. RepositoryId {RepositoryId}. RepairFromCloud {RepairFromCloud}. MaxIssueSamples {MaxIssueSamples}",
+            repositoryId,
+            repairFromCloud,
+            maxIssueSamples);
         var startedAt = DateTime.UtcNow;
         var safeSamples = Math.Clamp(maxIssueSamples, 10, 5000);
 
@@ -217,7 +232,7 @@ public sealed class EfRepositoryIntegrityService(
 
         progress?.Report(new RepositoryIntegrityProgressDto("done", 100, "Integrity verification finished."));
 
-        return new RepositoryIntegrityRunResultDto(
+        var result = new RepositoryIntegrityRunResultDto(
             repositoryId,
             repairFromCloud,
             startedAt,
@@ -231,6 +246,17 @@ public sealed class EfRepositoryIntegrityService(
             unresolved,
             issues,
             summary);
+
+        log.LogInformation(
+            "Repository integrity verification finished. RepositoryId {RepositoryId}. UniqueBlocks {UniqueBlocks}. Verified {Verified}. Repaired {Repaired}. Missing {Missing}. Corrupted {Corrupted}",
+            repositoryId,
+            result.UniqueBlockCount,
+            result.VerifiedBlockCount,
+            result.RepairedBlockCount,
+            result.MissingBlockCount,
+            result.CorruptedBlockCount);
+
+        return result;
     }
 
     private async Task<VerificationOutcome> VerifySingleHashAsync(

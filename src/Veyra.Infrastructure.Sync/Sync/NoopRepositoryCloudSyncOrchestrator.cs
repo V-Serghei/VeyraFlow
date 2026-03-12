@@ -23,4 +23,7 @@ public sealed class NoopRepositoryCloudSyncOrchestrator : IRepositoryCloudSyncOr
             MissingLocalBlocks: 0,
             FailedUploads: 0,
             ErrorMessage: "Cloud sync is not enabled in this environment."));
+
+    public Task<bool> CancelRepositorySyncAsync(int repositoryId, CancellationToken ct = default)
+        => Task.FromResult(false);
 }

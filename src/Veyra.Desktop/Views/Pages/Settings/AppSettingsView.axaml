@@ -329,16 +329,81 @@
                                                                 <TextBlock Grid.Column="1" Text="{Binding LastSyncText}" TextWrapping="Wrap"/>
                                                             </Grid>
 
+                                                            <StackPanel Spacing="6" IsVisible="{Binding HasProgress}">
+                                                                <Grid ColumnDefinitions="150,*,Auto" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_progress_label}" Opacity="0.8"/>
+                                                                    <ProgressBar Grid.Column="1"
+                                                                                 Minimum="0"
+                                                                                 Maximum="100"
+                                                                                 Height="10"
+                                                                                 Value="{Binding ProgressPercent}"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding ProgressText}"
+                                                                               VerticalAlignment="Center"
+                                                                               FontWeight="SemiBold"/>
+                                                                </Grid>
+
+                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_eta_label}" Opacity="0.8"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding EtaText}" TextWrapping="Wrap"/>
+                                                                </Grid>
+
+                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_elapsed_label}" Opacity="0.8"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding ElapsedText}" TextWrapping="Wrap"/>
+                                                                </Grid>
+
+                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_finish_at_label}" Opacity="0.8"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding FinishAtText}" TextWrapping="Wrap"/>
+                                                                </Grid>
+
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                        <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_last_update_label}" Opacity="0.8"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding LastProgressUpdateText}" TextWrapping="Wrap"/>
+                                                    </Grid>
+
+                                                    <Border Padding="12,8"
+                                                            Background="{DynamicResource VeyraDiffContextBgBrush}"
+                                                            BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="12"
+                                                            IsVisible="{Binding HasStall}">
+                                                        <TextBlock Text="{Binding StallText}"
+                                                                   Foreground="{DynamicResource VeyraWarningBrush}"
+                                                                   FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap"/>
+                                                    </Border>
+                                                </StackPanel>
+
                                                             <TextBlock Text="{Binding ErrorText}"
                                                                        Foreground="{DynamicResource VeyraWarningBrush}"
                                                                        TextWrapping="Wrap"
                                                                        IsVisible="{Binding HasError}"/>
 
-                                                            <Button Content="{loc:Tr app_settings.repository_sync_health_open_settings}"
-                                                                    Classes="subtle"
-                                                                    HorizontalAlignment="Left"
-                                                                    Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).OpenRepositorySyncIssueSettingsCommand}"
-                                                                    CommandParameter="{Binding .}"/>
+                                                            <WrapPanel Orientation="Horizontal">
+                                                                <Button Content="{loc:Tr app_settings.repository_sync_health_cancel_now}"
+                                                                        Classes="subtle"
+                                                                        Margin="0,0,8,8"
+                                                                        HorizontalAlignment="Left"
+                                                                        IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                                        Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).CancelRepositorySyncIssueCommand}"
+                                                                        CommandParameter="{Binding .}"/>
+                                                                <Button Content="{loc:Tr app_settings.repository_sync_health_retry_now}"
+                                                                        Classes="primary"
+                                                                        Margin="0,0,8,8"
+                                                                        HorizontalAlignment="Left"
+                                                                        IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                                        Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).RetryRepositorySyncIssueCommand}"
+                                                                        CommandParameter="{Binding .}"/>
+                                                                <Button Content="{loc:Tr app_settings.repository_sync_health_open_settings}"
+                                                                        Classes="subtle"
+                                                                        Margin="0,0,8,8"
+                                                                        HorizontalAlignment="Left"
+                                                                        IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                                        Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).OpenRepositorySyncIssueSettingsCommand}"
+                                                                        CommandParameter="{Binding .}"/>
+                                                            </WrapPanel>
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>

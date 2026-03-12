@@ -371,6 +371,21 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             })
             .FirstOrDefaultAsync(ct);
 
+        var runningProgress = await db.Set<RepositorySyncQueueItem>()
+            .Where(q => q.RepositoryId == repo.Id
+                        && q.OperationType == RepositorySyncQueueItem.OperationPushSnapshot
+                        && q.Status == RepositorySyncQueueItem.StatusRunning
+                        && q.UploadCheckpointTotal > 0)
+            .OrderByDescending(q => q.UpdatedAt)
+            .Select(q => new
+            {
+                q.UploadCheckpointNextIndex,
+                q.UploadCheckpointTotal,
+                q.CreatedAt,
+                q.UpdatedAt
+            })
+            .FirstOrDefaultAsync(ct);
+
         return new RepositoryDto(
             repo.Id,
             repo.Name,
@@ -392,7 +407,11 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 queueStats?.Retry ?? 0,
                 queueStats?.DeadLetter ?? 0,
                 queueStats?.Failed ?? 0,
-                queueStats?.Completed ?? 0));
+                queueStats?.Completed ?? 0,
+                runningProgress?.UploadCheckpointNextIndex ?? 0,
+                runningProgress?.UploadCheckpointTotal ?? 0,
+                runningProgress?.CreatedAt,
+                runningProgress?.UpdatedAt));
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -439,10 +458,42 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     x => (x.Pending, x.Conflict, x.Running, x.Retry, x.DeadLetter, x.Failed, x.Completed),
                     ct);
 
+        var runningProgressByRepo = repoIds.Count == 0
+            ? new Dictionary<int, (int Current, int Total, DateTime CreatedAt, DateTime UpdatedAt)>()
+            : (await db.Set<RepositorySyncQueueItem>()
+                    .Where(q => repoIds.Contains(q.RepositoryId)
+                                && q.OperationType == RepositorySyncQueueItem.OperationPushSnapshot
+                                && q.Status == RepositorySyncQueueItem.StatusRunning
+                                && q.UploadCheckpointTotal > 0)
+                    .OrderByDescending(q => q.UpdatedAt)
+                    .Select(q => new
+                    {
+                        q.RepositoryId,
+                        q.UploadCheckpointNextIndex,
+                        q.UploadCheckpointTotal,
+                        q.CreatedAt,
+                        q.UpdatedAt
+                    })
+                    .ToListAsync(ct))
+                .GroupBy(x => x.RepositoryId)
+                .ToDictionary(
+                    g => g.Key,
+                    g =>
+                    {
+                        var first = g.First();
+                        return (
+                            Current: first.UploadCheckpointNextIndex,
+                            Total: first.UploadCheckpointTotal,
+                            CreatedAt: first.CreatedAt,
+                            UpdatedAt: first.UpdatedAt);
+                    });
+
         return repos.Select(r =>
         {
             if (!queueStatsByRepo.TryGetValue(r.Id, out var queue))
                 queue = (0, 0, 0, 0, 0, 0, 0);
+
+            runningProgressByRepo.TryGetValue(r.Id, out var progress);
 
             var pending = queue.Pending;
             var conflict = queue.Conflict;
@@ -468,7 +519,11 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     queue.Retry,
                     queue.DeadLetter,
                     queue.Failed,
-                    queue.Completed));
+                    queue.Completed,
+                    progress.Current,
+                    progress.Total,
+                    progress == default ? null : progress.CreatedAt,
+                    progress == default ? null : progress.UpdatedAt));
         }).ToList();
     }
 
@@ -576,7 +631,11 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         int retryCount,
         int deadLetterCount,
         int failedCount,
-        int completedCount)
+        int completedCount,
+        int uploadProgressCurrent = 0,
+        int uploadProgressTotal = 0,
+        DateTime? uploadProgressStartedAtUtc = null,
+        DateTime? uploadProgressUpdatedAtUtc = null)
     {
         return new RepositoryCloudSyncStatusDto(
             ConflictStrategy: RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy),
@@ -593,7 +652,11 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             RetryQueueCount: retryCount,
             DeadLetterQueueCount: deadLetterCount,
             FailedQueueCount: failedCount,
-            CompletedQueueCount: completedCount);
+            CompletedQueueCount: completedCount,
+            UploadProgressCurrent: Math.Max(0, uploadProgressCurrent),
+            UploadProgressTotal: Math.Max(0, uploadProgressTotal),
+            UploadProgressStartedAtUtc: uploadProgressStartedAtUtc,
+            UploadProgressUpdatedAtUtc: uploadProgressUpdatedAtUtc);
     }
 
     private static IReadOnlyList<string> ParseTriggerFilters(string? csv)

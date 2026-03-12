@@ -329,6 +329,11 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
             var dirs = _dirsVm.GetSelectedDirectories();
             var exts = _formatsVm.GetSelectedExtensions();
             var repoName = _repoNameVm.RepositoryName.Trim();
+            _log.LogInformation(
+                "Setup wizard final save started. RepositoryName {RepositoryName}. Directories {DirectoryCount}. Formats {FormatCount}",
+                repoName,
+                dirs.Count,
+                exts.Count);
 
             ResetProgressState();
             IsBusy = true;
@@ -355,11 +360,14 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
 
             if (!result.Success)
             {
+                _log.LogWarning(
+                    "Setup wizard final save failed. RepositoryName {RepositoryName}. Error {Error}",
+                    repoName,
+                    result.Error);
                 ErrorMessage = result.Error ?? Loc.T("setup_wizard.save_failed");
                 ProgressMessage = Loc.T("create_repo.error_progress_label");
                 IsProgressIndeterminate = false;
                 AppendProgressLog(ErrorMessage, FilesFoundCount);
-                _log.LogError("Initial setup failed: {Error}", result.Error);
                 return;
             }
 
@@ -369,8 +377,12 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
             IsCompleted = true;
             AppendProgressLog(Loc.T("create_repo.success_progress_label"), FilesFoundCount);
 
-            _log.LogInformation("Initial setup completed: {Dirs} dirs, {Exts} extensions, repo: {Name}",
-                dirs.Count, exts.Count, repoName);
+            _log.LogInformation(
+                "Setup wizard final save finished successfully. RepositoryName {RepositoryName}. Directories {DirectoryCount}. Formats {FormatCount}. FilesFound {FilesFound}",
+                repoName,
+                dirs.Count,
+                exts.Count,
+                FilesFoundCount);
         }
         catch (Exception ex)
         {

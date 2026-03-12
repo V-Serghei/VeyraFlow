@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql/driver"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -54,7 +55,7 @@ type syncSnapshotMeta struct {
 	ID              int64     `json:"id"`
 	Title           string    `json:"title"`
 	Trigger         string    `json:"trigger"`
-	CreatedAt       time.Time `json:"createdAt"`
+	CreatedAt       syncTimestamp `json:"createdAt"`
 	TotalEntries    int       `json:"totalEntries"`
 	FileEntries     int       `json:"fileEntries"`
 	DirectoryEntries int      `json:"directoryEntries"`
@@ -69,7 +70,7 @@ type syncSnapshotEntry struct {
 	IsDirectory        bool      `json:"isDirectory"`
 	Extension          string    `json:"extension"`
 	SizeBytes          int64     `json:"sizeBytes"`
-	LastWriteUTC       time.Time `json:"lastWriteUtc"`
+	LastWriteUTC       syncTimestamp `json:"lastWriteUtc"`
 	ContentHashSHA256  string    `json:"contentHashSha256"`
 }
 
@@ -79,7 +80,7 @@ type syncFileVersion struct {
 	ContentHashSHA256 string         `json:"contentHashSha256"`
 	SizeBytes         int64          `json:"sizeBytes"`
 	IsDeletionMarker  bool           `json:"isDeletionMarker"`
-	CreatedAt         time.Time      `json:"createdAt"`
+	CreatedAt         syncTimestamp  `json:"createdAt"`
 	Blocks            []syncBlockRef `json:"blocks"`
 }
 
@@ -102,13 +103,111 @@ const (
 	syncProtocolHeader    = "X-Veyra-Sync-Protocol"
 	supportedSyncProtocol = "1"
 	idempotencyKeyHeader  = "X-Idempotency-Key"
-	maxPushPayloadBytes   = 64 * 1024 * 1024
 )
 
 type syncIdempotencyReplay struct {
 	StatusCode int
 	Payload    []byte
 }
+
+type syncTimestamp struct {
+	time.Time
+}
+
+func (t *syncTimestamp) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "null" || raw == `""` || raw == "" {
+		t.Time = time.Time{}
+		return nil
+	}
+
+	parsed, err := parseFlexibleTimestamp(strings.Trim(raw, `"`))
+	if err != nil {
+		return err
+	}
+
+	t.Time = parsed.UTC()
+	return nil
+}
+
+func (t syncTimestamp) MarshalJSON() ([]byte, error) {
+	if t.Time.IsZero() {
+		return []byte(`"0001-01-01T00:00:00Z"`), nil
+	}
+
+	return json.Marshal(t.Time.UTC().Format(time.RFC3339Nano))
+}
+
+func (t *syncTimestamp) Scan(value any) error {
+	switch v := value.(type) {
+	case nil:
+		t.Time = time.Time{}
+		return nil
+	case time.Time:
+		t.Time = v.UTC()
+		return nil
+	case string:
+		parsed, err := parseFlexibleTimestamp(v)
+		if err != nil {
+			return err
+		}
+		t.Time = parsed.UTC()
+		return nil
+	case []byte:
+		parsed, err := parseFlexibleTimestamp(string(v))
+		if err != nil {
+			return err
+		}
+		t.Time = parsed.UTC()
+		return nil
+	default:
+		return fmt.Errorf("unsupported syncTimestamp scan type %T", value)
+	}
+}
+
+func (t syncTimestamp) Value() (driver.Value, error) {
+	if t.Time.IsZero() {
+		return nil, nil
+	}
+
+	return t.Time.UTC(), nil
+}
+
+func parseFlexibleTimestamp(raw string) (time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	layouts := []struct {
+		layout string
+		utc    bool
+	}{
+		{layout: time.RFC3339Nano, utc: false},
+		{layout: "2006-01-02T15:04:05.999999999", utc: true},
+		{layout: "2006-01-02T15:04:05", utc: true},
+	}
+
+	var lastErr error
+	for _, candidate := range layouts {
+		var (
+			parsed time.Time
+			err    error
+		)
+		if candidate.utc {
+			parsed, err = time.ParseInLocation(candidate.layout, value, time.UTC)
+		} else {
+			parsed, err = time.Parse(candidate.layout, value)
+		}
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+		lastErr = err
+	}
+
+	return time.Time{}, lastErr
+}
+
 func (h *Handler) ListRepositories(w http.ResponseWriter, r *http.Request) {
 	if !ensureSyncProtocol(w, r) {
 		return
@@ -196,17 +295,20 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 
 	repositoryID, err := parsePathInt(r, "repositoryId")
 	if err != nil {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "invalid repository id")
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid repository id"})
 		return
 	}
 
 	idempotencyKey := normalizeIdempotencyKey(r.Header.Get(idempotencyKeyHeader))
 	if idempotencyKey == "" {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "missing idempotency key",
+			"repository_id="+fmt.Sprintf("%d", repositoryID))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "missing idempotency key"})
 		return
 	}
 
-	reader := http.MaxBytesReader(w, r.Body, maxPushPayloadBytes)
+	reader := http.MaxBytesReader(w, r.Body, h.maxPushPayloadBytes)
 	if err = os.MkdirAll(h.blockStoreDir, 0o755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to prepare request staging directory"})
 		return
@@ -226,10 +328,19 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 	requestHasher := sha256.New()
 	written, readErr := io.Copy(io.MultiWriter(stagedBody, requestHasher), reader)
 	if readErr != nil {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "failed to read request body",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"idempotency_key="+quoteLogValue(idempotencyKey),
+			"written_bytes="+fmt.Sprintf("%d", written),
+			"max_payload_bytes="+fmt.Sprintf("%d", h.maxPushPayloadBytes),
+			"error="+quoteLogValue(readErr.Error()))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read request body"})
 		return
 	}
 	if written <= 0 {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "request body is empty",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"idempotency_key="+quoteLogValue(idempotencyKey))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "request body is empty"})
 		return
 	}
@@ -247,20 +358,40 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 	var req pushSnapshotRequest
 	decoder := json.NewDecoder(stagedBody)
 	if err = decoder.Decode(&req); err != nil {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "bad json payload",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"idempotency_key="+quoteLogValue(idempotencyKey),
+			"request_sha="+quoteLogValue(requestSHA),
+			"written_bytes="+fmt.Sprintf("%d", written),
+			"error="+quoteLogValue(err.Error()))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
 		return
 	}
 	var trailing json.RawMessage
 	if err = decoder.Decode(&trailing); err != io.EOF {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "bad json trailing payload",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"idempotency_key="+quoteLogValue(idempotencyKey),
+			"request_sha="+quoteLogValue(requestSHA),
+			"error="+quoteLogValue(err.Error()))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
 		return
 	}
 
 	if req.Repository.ID > 0 && req.Repository.ID != repositoryID {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "repository id mismatch",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"payload_repository_id="+fmt.Sprintf("%d", req.Repository.ID),
+			"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+			"idempotency_key="+quoteLogValue(idempotencyKey))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "repository id mismatch"})
 		return
 	}
 	if req.Snapshot.ID <= 0 {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "snapshot id must be positive",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+			"idempotency_key="+quoteLogValue(idempotencyKey))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "snapshot id must be positive"})
 		return
 	}
@@ -271,6 +402,12 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 	}
 
 	if len(req.FileVersions) == 0 && len(req.Entries) > 0 {
+		logHTTPRequestEvent(r, "warning", "push_snapshot", "snapshot has entries but no file versions",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+			"entries="+fmt.Sprintf("%d", len(req.Entries)),
+			"file_versions=0",
+			"idempotency_key="+quoteLogValue(idempotencyKey))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "snapshot payload has entries but no file versions"})
 		return
 	}
@@ -288,6 +425,12 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if replay != nil {
+		logHTTPRequestEvent(r, "information", "push_snapshot", "idempotency replay served",
+			"repository_id="+fmt.Sprintf("%d", repositoryID),
+			"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+			"idempotency_key="+quoteLogValue(idempotencyKey),
+			"status_code="+fmt.Sprintf("%d", replay.StatusCode),
+			"request_sha="+quoteLogValue(requestSHA))
 		if commitErr := tx.Commit(r.Context()); commitErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "idempotency replay commit failed"})
 			return
@@ -300,10 +443,10 @@ func (h *Handler) PushRepositorySnapshot(w http.ResponseWriter, r *http.Request)
 	err = tx.QueryRow(r.Context(), `
 SELECT id
 FROM repositories
-WHERE user_id = $1 AND (external_repository_id = $2 OR lower(name) = lower($3))
-ORDER BY CASE WHEN external_repository_id = $2 THEN 0 ELSE 1 END
+WHERE user_id = $1
+  AND external_repository_id = $2
 LIMIT 1;
-`, auth.UserID, repositoryID, repositoryName).Scan(&cloudRepoID)
+`, auth.UserID, repositoryID).Scan(&cloudRepoID)
 
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -421,6 +564,13 @@ VALUES($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),$7,$8,NULLIF($9,''));
 	for _, version := range req.FileVersions {
 		blocksJSON, marshalErr := json.Marshal(version.Blocks)
 		if marshalErr != nil {
+			logHTTPRequestEvent(r, "warning", "push_snapshot", "invalid block payload",
+				"repository_id="+fmt.Sprintf("%d", repositoryID),
+				"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+				"relative_path="+quoteLogValue(version.RelativePath),
+				"file_version_id="+fmt.Sprintf("%d", version.FileVersionID),
+				"blocks="+fmt.Sprintf("%d", len(version.Blocks)),
+				"error="+quoteLogValue(marshalErr.Error()))
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid block payload"})
 			return
 		}
@@ -523,6 +673,16 @@ WHERE id = $1;
 		return
 	}
 
+	logHTTPRequestEvent(r, "information", "push_snapshot", "snapshot accepted",
+		"user_id="+fmt.Sprintf("%d", auth.UserID),
+		"repository_id="+fmt.Sprintf("%d", repositoryID),
+		"snapshot_id="+fmt.Sprintf("%d", req.Snapshot.ID),
+		"idempotency_key="+quoteLogValue(idempotencyKey),
+		"request_sha="+quoteLogValue(requestSHA),
+		"entries="+fmt.Sprintf("%d", len(req.Entries)),
+		"file_versions="+fmt.Sprintf("%d", len(req.FileVersions)),
+		"missing_blocks="+fmt.Sprintf("%d", len(missing)),
+		"written_bytes="+fmt.Sprintf("%d", written))
 	writeJSONBytes(w, http.StatusOK, responsePayload)
 }
 
@@ -707,6 +867,7 @@ func (h *Handler) HeadBlock(w http.ResponseWriter, r *http.Request) {
 
 	hash := strings.TrimSpace(r.PathValue("blockHash"))
 	if hash == "" || !isValidBlockHash(hash) {
+		logHTTPRequestEvent(r, "warning", "head_block", "invalid block hash")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -742,6 +903,8 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 
 	hash := strings.TrimSpace(r.PathValue("blockHash"))
 	if hash == "" || !isValidBlockHash(hash) {
+		logHTTPRequestEvent(r, "warning", "put_block", "invalid block hash",
+			"block_hash="+quoteLogValue(hash))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid block hash"})
 		return
 	}
@@ -780,6 +943,9 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 
 	sizeBytes, err := io.Copy(writer, reader)
 	if err != nil {
+		logHTTPRequestEvent(r, "warning", "put_block", "failed to read block request body",
+			"block_hash="+quoteLogValue(hash),
+			"error="+quoteLogValue(err.Error()))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read request body"})
 		return
 	}
@@ -793,6 +959,10 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 		expected := strings.TrimPrefix(strings.ToLower(hash), "sha256-")
 		actual := strings.ToLower(hex.EncodeToString(digestWriter.Sum(nil)))
 		if expected != actual {
+			logHTTPRequestEvent(r, "warning", "put_block", "sha256 mismatch",
+				"block_hash="+quoteLogValue(hash),
+				"expected="+quoteLogValue(expected),
+				"actual="+quoteLogValue(actual))
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "sha256 mismatch"})
 			return
 		}
@@ -808,6 +978,9 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logHTTPRequestEvent(r, "information", "put_block", "block stored",
+		"block_hash="+quoteLogValue(hash),
+		"size_bytes="+fmt.Sprintf("%d", sizeBytes))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size_bytes": sizeBytes})
 }
 
@@ -824,6 +997,8 @@ func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
 
 	hash := strings.TrimSpace(r.PathValue("blockHash"))
 	if hash == "" || !isValidBlockHash(hash) {
+		logHTTPRequestEvent(r, "warning", "get_block", "invalid block hash",
+			"block_hash="+quoteLogValue(hash))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid block hash"})
 		return
 	}
@@ -834,6 +1009,9 @@ func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !exists || strings.EqualFold(record.StorageKind, "missing") {
+		logHTTPRequestEvent(r, "warning", "get_block", "block not found",
+			"block_hash="+quoteLogValue(hash),
+			"storage_kind="+quoteLogValue(record.StorageKind))
 		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "block not found"})
 		return
 	}
@@ -897,6 +1075,9 @@ func ensureSyncProtocol(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 
+	logHTTPRequestEvent(r, "warning", "sync_protocol", "sync protocol mismatch",
+		"provided_protocol="+quoteLogValue(clientVersion),
+		"required_protocol="+quoteLogValue(supportedSyncProtocol))
 	w.Header().Set("X-Veyra-Sync-Protocol-Supported", supportedSyncProtocol)
 	writeJSON(w, http.StatusPreconditionFailed, map[string]any{
 		"ok":                false,

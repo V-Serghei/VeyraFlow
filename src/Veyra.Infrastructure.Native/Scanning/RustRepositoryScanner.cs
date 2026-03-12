@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -26,6 +27,7 @@ public sealed class RustRepositoryScanner(
         RepositoryScanOptionsDto? options = null,
         CancellationToken ct = default)
     {
+        var overallTimer = Stopwatch.StartNew();
         ct.ThrowIfCancellationRequested();
 
         var scanOptions = options ?? new RepositoryScanOptionsDto();
@@ -59,9 +61,13 @@ public sealed class RustRepositoryScanner(
 
         List<RepositoryScanEntryDto> entries;
         string trigger;
+        string engineName;
+        long scanStageMs;
+        long entryProjectionMs = 0;
 
         try
         {
+            engineName = "rust";
             progress?.Report(new RepositoryScanProgressDto(
                 "scan",
                 10,
@@ -69,6 +75,7 @@ public sealed class RustRepositoryScanner(
                 0,
                 "Scanning directory"));
 
+            var nativeScanTimer = Stopwatch.StartNew();
             var json = await Task.Run(() =>
                     VeyraCoreNative.ScanDirectoryJson(
                         repo.DirectoryPath,
@@ -76,13 +83,18 @@ public sealed class RustRepositoryScanner(
                         scanOptions.MaxReadBytesPerSecond,
                         scanOptions.MaxIoOperationsPerSecond),
                 ct);
+            nativeScanTimer.Stop();
 
+            var projectionTimer = Stopwatch.StartNew();
             var nativeEntries = JsonSerializer.Deserialize<List<NativeScanEntry>>(json, JsonOptions) ?? [];
 
             entries = nativeEntries
                 .Select(ToEntry)
                 .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
                 .ToList();
+            projectionTimer.Stop();
+            scanStageMs = nativeScanTimer.ElapsedMilliseconds;
+            entryProjectionMs = projectionTimer.ElapsedMilliseconds;
 
             var scannedFiles = entries.Count(e => !e.IsDirectory);
             progress?.Report(new RepositoryScanProgressDto(
@@ -93,13 +105,24 @@ public sealed class RustRepositoryScanner(
                 $"Scanned files: {scannedFiles}"));
 
             trigger = ResolveTrigger(scanOptions, "rust");
+            log.LogInformation(
+                "Repository scan native stage completed. RepositoryId {RepositoryId}. Root {Root}. Engine {Engine}. NativeScanMs {NativeScanMs}. EntryProjectionMs {EntryProjectionMs}. Entries {Entries}. Files {Files}",
+                repositoryId,
+                repo.DirectoryPath,
+                engineName,
+                scanStageMs,
+                entryProjectionMs,
+                entries.Count,
+                scannedFiles);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
+            engineName = "managed_fallback";
             log.LogWarning(ex,
                 "Rust scanner unavailable for repository {RepositoryId}. Falling back to managed scan.",
                 repositoryId);
 
+            var managedScanTimer = Stopwatch.StartNew();
             entries = await BuildManagedEntriesAsync(
                 repo.DirectoryPath,
                 repo.LinkedFormats,
@@ -107,8 +130,18 @@ public sealed class RustRepositoryScanner(
                 scanOptions.MaxIoOperationsPerSecond,
                 progress,
                 ct);
+            managedScanTimer.Stop();
+            scanStageMs = managedScanTimer.ElapsedMilliseconds;
 
             trigger = ResolveTrigger(scanOptions, "managed_fallback");
+            log.LogInformation(
+                "Repository scan managed fallback completed. RepositoryId {RepositoryId}. Root {Root}. Engine {Engine}. ScanMs {ScanMs}. Entries {Entries}. Files {Files}",
+                repositoryId,
+                repo.DirectoryPath,
+                engineName,
+                scanStageMs,
+                entries.Count,
+                entries.Count(e => !e.IsDirectory));
         }
 
         var fileCount = entries.Count(e => !e.IsDirectory);
@@ -120,6 +153,7 @@ public sealed class RustRepositoryScanner(
             fileCount,
             "Saving scan results"));
 
+        var saveTimer = Stopwatch.StartNew();
         var saveResult = await snapshots.SaveSnapshotAsync(
             repositoryId,
             trigger,
@@ -128,6 +162,7 @@ public sealed class RustRepositoryScanner(
             scanOptions.SaveFileVersions,
             scanOptions.SnapshotTitle,
             ct);
+        saveTimer.Stop();
 
         if (scanOptions.SaveFileVersions
             && IsManualSnapshotTrigger(trigger)
@@ -145,10 +180,19 @@ public sealed class RustRepositoryScanner(
             "Scan completed"));
 
         log.LogInformation(
-            "Repository {RepositoryId} scanned. Entries {EntryCount}. Trigger {Trigger}",
+            "Repository {RepositoryId} scanned. Entries {EntryCount}. Files {FileCount}. Trigger {Trigger}. Engine {Engine}. ScanStageMs {ScanStageMs}. EntryProjectionMs {EntryProjectionMs}. SnapshotSaveMs {SnapshotSaveMs}. TotalMs {TotalMs}. SaveVersions {SaveVersions}. SnapshotCreated {SnapshotCreated}. NoChanges {NoChanges}",
             repositoryId,
             entries.Count,
-            trigger);
+            fileCount,
+            trigger,
+            engineName,
+            scanStageMs,
+            entryProjectionMs,
+            saveTimer.ElapsedMilliseconds,
+            overallTimer.ElapsedMilliseconds,
+            scanOptions.SaveFileVersions,
+            saveResult.SnapshotCreated,
+            saveResult.NoChangesDetected);
 
         return new RepositoryScanResultDto(entries.Count, fileCount, entries.Count - fileCount, trigger);
     }

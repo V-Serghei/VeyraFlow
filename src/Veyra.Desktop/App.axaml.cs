@@ -1,8 +1,10 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Threading;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -24,11 +26,13 @@ public partial class App : AvaloniaApplication
 {
     public static IServiceProvider? _serviceProvider { get; private set; } = null!;
     private static ISnapshotScheduler? _snapshotScheduler;
+    private static Task? _startupBackgroundTask;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
+        Log.Information("Application framework initialization started");
         ThemeManager.Instance.ApplyCurrentTheme();
 
         var dbPath = Path.Combine(
@@ -40,6 +44,9 @@ public partial class App : AvaloniaApplication
         _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
 
         var shouldOpenMain = false;
+        string? activeUsername = null;
+        int watchedDirectoryCount = 0;
+        int trackedExtensionCount = 0;
 
         using (var scope = _serviceProvider.CreateScope())
         {
@@ -63,68 +70,159 @@ public partial class App : AvaloniaApplication
             }
 
             var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
-            var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
             var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
 
-            var activeUsername = userProfiles.GetActiveUsernameAsync().GetAwaiter().GetResult();
-            var syncOrchestrator = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
+            activeUsername = userProfiles.GetActiveUsernameAsync().GetAwaiter().GetResult();
             if (!string.IsNullOrWhiteSpace(activeUsername))
             {
                 var dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
                 var exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+                watchedDirectoryCount = dirs.Count;
+                trackedExtensionCount = exts.Count;
+                shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
+            }
+        }
 
-                var profile = userProfiles.GetActiveProfileAsync().GetAwaiter().GetResult();
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
+        {
+            classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            classicDesktop.Exit += OnDesktopExit;
+
+            var nav = _serviceProvider.GetRequiredService<INavigationService>();
+
+            if (shouldOpenMain)
+                nav.GoToMain();
+            else
+                nav.ShowWelcome();
+
+            Log.Information(
+                "Initial shell displayed. ActiveUser {Username}. WatchedDirectories {WatchedDirectories}. TrackedExtensions {TrackedExtensions}. Target {Target}",
+                activeUsername ?? "(none)",
+                watchedDirectoryCount,
+                trackedExtensionCount,
+                shouldOpenMain ? "main" : "welcome");
+        }
+
+        _startupBackgroundTask = Task.Run(() => RunDeferredStartupAsync(activeUsername, shouldOpenMain));
+
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+    {
+        try
+        {
+            if (_startupBackgroundTask is { IsCompleted: false })
+            {
+                if (!_startupBackgroundTask.Wait(TimeSpan.FromSeconds(2)))
+                    Log.Warning("Deferred startup task is still running during shutdown; continuing shutdown.");
+            }
+            else
+            {
+                _startupBackgroundTask?.GetAwaiter().GetResult();
+            }
+
+            _snapshotScheduler?.StopAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
+        Log.Information("Application shutting down");
+        Log.CloseAndFlush();
+    }
+
+    private static async Task RunDeferredStartupAsync(string? activeUsername, bool initialShouldOpenMain)
+    {
+        if (_serviceProvider is null)
+            return;
+
+        Log.Information("Deferred startup pipeline started");
+
+        try
+        {
+            await using var scope = _serviceProvider.CreateAsyncScope();
+            var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
+            var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
+            var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
+            var syncOrchestrator = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
+            var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
+
+            if (!string.IsNullOrWhiteSpace(activeUsername))
+            {
+                var profile = await userProfiles.GetActiveProfileAsync();
                 var tokenState = tokenPolicy.Evaluate(profile?.AccessToken);
                 var canUseCloudSync = tokenState.CanUseForSync;
 
                 if (!canUseCloudSync)
                 {
                     Log.Information(
-                        "Skipping cloud startup sync for user {Username}. TokenState {TokenState}. Reason {Reason}",
+                        "Skipping deferred cloud startup sync for user {Username}. TokenState {TokenState}. Reason {Reason}",
                         activeUsername,
                         tokenState.State,
                         tokenState.Description);
                 }
-
-                if (canUseCloudSync && (dirs.Count == 0 || exts.Count == 0))
+                else
                 {
-                    var sync = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
-                    if (sync is not null)
+                    var dirs = await setup.GetWatchedDirectoriesAsync();
+                    var exts = await setup.GetTrackedExtensionsAsync();
+
+                    if (dirs.Count == 0 || exts.Count == 0)
                     {
                         try
                         {
-                            sync.RestoreRepositoriesFromCloudAsync().GetAwaiter().GetResult();
-                            dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
-                            exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
+                            var restored = await (syncOrchestrator?.RestoreRepositoriesFromCloudAsync() ?? Task.FromResult(0));
+                            Log.Information(
+                                "Deferred cloud restore finished. User {Username}. Restored {Restored}",
+                                activeUsername,
+                                restored);
+
+                            dirs = await setup.GetWatchedDirectoriesAsync();
+                            exts = await setup.GetTrackedExtensionsAsync();
+
+                            if (!initialShouldOpenMain && dirs.Count > 0 && exts.Count > 0)
+                            {
+                                await Dispatcher.UIThread.InvokeAsync(() =>
+                                {
+                                    try
+                                    {
+                                        var nav = _serviceProvider.GetRequiredService<INavigationService>();
+                                        nav.GoToMain();
+                                        Log.Information(
+                                            "Deferred startup switched shell to main window after cloud restore. WatchedDirectories {WatchedDirectories}. TrackedExtensions {TrackedExtensions}",
+                                            dirs.Count,
+                                            exts.Count);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log.Warning(ex, "Deferred startup failed to switch shell to main window");
+                                    }
+                                });
+                            }
                         }
                         catch (Exception ex)
                         {
-                            Log.Warning(ex, "Cloud restore at startup failed for user {Username}", activeUsername);
+                            Log.Warning(ex, "Deferred cloud restore failed at startup for user {Username}", activeUsername);
                         }
                     }
-                }
 
-                if (canUseCloudSync)
-                {
                     try
                     {
-                        syncOrchestrator?.ProcessPendingQueueAsync().GetAwaiter().GetResult();
+                        if (syncOrchestrator is not null)
+                            await syncOrchestrator.ProcessPendingQueueAsync();
                     }
                     catch (Exception ex)
                     {
-                        Log.Warning(ex, "Cloud pending queue resume failed at startup for user {Username}", activeUsername);
+                        Log.Warning(ex, "Deferred cloud pending queue resume failed at startup for user {Username}", activeUsername);
                     }
                 }
-
-                shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
             }
 
-            var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
             if (recovery is not null)
             {
                 try
                 {
-                    var recoveryResults = recovery.RunStartupHealthCheckAsync().GetAwaiter().GetResult();
+                    var recoveryResults = await recovery.RunStartupHealthCheckAsync();
                     foreach (var result in recoveryResults.Where(r => !r.Success || r.AffectedRows > 0))
                     {
                         Log.Information(
@@ -141,37 +239,14 @@ public partial class App : AvaloniaApplication
                     Log.Warning(ex, "Startup health-check failed.");
                 }
             }
+
+            _snapshotScheduler = _serviceProvider.GetService<ISnapshotScheduler>();
+            _snapshotScheduler?.Start();
+            Log.Information("Deferred startup pipeline completed");
         }
-
-        _snapshotScheduler = _serviceProvider.GetService<ISnapshotScheduler>();
-        _snapshotScheduler?.Start();
-
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
+        catch (Exception ex)
         {
-            classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
-            classicDesktop.Exit += OnDesktopExit;
-
-            var nav = _serviceProvider.GetRequiredService<INavigationService>();
-
-            if (shouldOpenMain)
-                nav.GoToMain();
-            else
-                nav.ShowWelcome();
+            Log.Error(ex, "Deferred startup pipeline failed");
         }
-
-        base.OnFrameworkInitializationCompleted();
-    }
-
-    private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
-    {
-        try
-        {
-            _snapshotScheduler?.StopAsync().GetAwaiter().GetResult();
-        }
-        catch
-        {
-        }
-
-        Log.CloseAndFlush();
     }
 }

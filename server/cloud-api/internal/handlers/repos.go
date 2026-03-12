@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/mail"
 	"net/http"
@@ -29,6 +30,7 @@ type Handler struct {
 	refreshTokenLifetime time.Duration
 	blockStoreDir        string
 	packTargetBytes      int64
+	maxPushPayloadBytes  int64
 	packMu               sync.Mutex
 }
 
@@ -37,6 +39,7 @@ func New(
 	tokenSecret string,
 	blockStoreDir string,
 	packTargetBytes int64,
+	maxPushPayloadBytes int64,
 	tokenLifetime time.Duration,
 	refreshTokenLifetime time.Duration,
 ) *Handler {
@@ -60,6 +63,9 @@ func New(
 	if packTargetBytes <= 0 {
 		packTargetBytes = defaultBlockPackTargetBytes
 	}
+	if maxPushPayloadBytes <= 0 {
+		maxPushPayloadBytes = 256 * 1024 * 1024
+	}
 
 	return &Handler{
 		db:                   db,
@@ -68,6 +74,7 @@ func New(
 		refreshTokenLifetime: refreshTokenLifetime,
 		blockStoreDir:        blockStoreDir,
 		packTargetBytes:      packTargetBytes,
+		maxPushPayloadBytes:  maxPushPayloadBytes,
 	}
 }
 
@@ -102,6 +109,7 @@ type refreshReq struct {
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req authReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logHTTPRequestEvent(r, "warning", "register", "bad json")
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "bad json"})
 		return
 	}
@@ -109,14 +117,22 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	if req.Username == "" || len(req.Username) > 50 {
+		logHTTPRequestEvent(r, "warning", "register", "invalid username",
+			"username="+quoteLogValue(req.Username))
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "invalid username"})
 		return
 	}
 	if !isValidEmail(req.Email) || len(req.Email) > 320 {
+		logHTTPRequestEvent(r, "warning", "register", "invalid email",
+			"username="+quoteLogValue(req.Username),
+			"email="+quoteLogValue(req.Email))
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "invalid email"})
 		return
 	}
 	if len(req.Password) < 8 || len(req.Password) > 100 {
+		logHTTPRequestEvent(r, "warning", "register", "invalid password length",
+			"username="+quoteLogValue(req.Username),
+			"password_length="+fmt.Sprintf("%d", len(req.Password)))
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "invalid password"})
 		return
 	}
@@ -140,10 +156,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errText := strings.ToLower(err.Error())
 		if strings.Contains(errText, "ux_users_email_ci") || strings.Contains(errText, "email") {
+			logHTTPRequestEvent(r, "warning", "register", "email already exists",
+				"username="+quoteLogValue(req.Username),
+				"email="+quoteLogValue(req.Email))
 			writeJSON(w, http.StatusConflict, authResp{Ok: false, Message: "email already exists"})
 			return
 		}
 		if strings.Contains(errText, "duplicate") || strings.Contains(errText, "users_username_key") {
+			logHTTPRequestEvent(r, "warning", "register", "username already exists",
+				"username="+quoteLogValue(req.Username),
+				"email="+quoteLogValue(req.Email))
 			writeJSON(w, http.StatusConflict, authResp{Ok: false, Message: "username already exists"})
 			return
 		}
@@ -169,11 +191,17 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		ExpiresAtUtc:        expiresAtUtc,
 		RefreshExpiresAtUtc: refreshExpiresAtUtc,
 	})
+	logHTTPRequestEvent(r, "information", "register", "user registered",
+		"user_id="+fmt.Sprintf("%d", userID),
+		"username="+quoteLogValue(req.Username),
+		"email="+quoteLogValue(req.Email),
+		"session_id="+fmt.Sprintf("%d", sessionID))
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req authReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logHTTPRequestEvent(r, "warning", "login", "bad json")
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "bad json"})
 		return
 	}
@@ -185,6 +213,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		identity = req.Email
 	}
 	if identity == "" {
+		logHTTPRequestEvent(r, "warning", "login", "missing identity")
 		writeAuthFail(w)
 		return
 	}
@@ -210,11 +239,16 @@ LIMIT 1`,
 		identity,
 	).Scan(&userID, &username, &email, &hash)
 	if err != nil || !hash.Valid {
+		logHTTPRequestEvent(r, "warning", "login", "identity not found",
+			"identity="+quoteLogValue(identity))
 		writeAuthFail(w)
 		return
 	}
 
 	if bcrypt.CompareHashAndPassword([]byte(hash.String), []byte(req.Password)) != nil {
+		logHTTPRequestEvent(r, "warning", "login", "password mismatch",
+			"identity="+quoteLogValue(identity),
+			"user_id="+fmt.Sprintf("%d", userID))
 		writeAuthFail(w)
 		return
 	}
@@ -237,17 +271,23 @@ LIMIT 1`,
 		ExpiresAtUtc:        expiresAtUtc,
 		RefreshExpiresAtUtc: refreshExpiresAtUtc,
 	})
+	logHTTPRequestEvent(r, "information", "login", "user signed in",
+		"user_id="+fmt.Sprintf("%d", userID),
+		"username="+quoteLogValue(username),
+		"session_id="+fmt.Sprintf("%d", sessionID))
 }
 
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logHTTPRequestEvent(r, "warning", "refresh", "bad json")
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "bad json"})
 		return
 	}
 
 	refreshToken := strings.TrimSpace(req.RefreshToken)
 	if refreshToken == "" {
+		logHTTPRequestEvent(r, "warning", "refresh", "missing refresh token")
 		writeJSON(w, http.StatusBadRequest, authResp{Ok: false, Message: "missing refresh token"})
 		return
 	}
@@ -269,8 +309,10 @@ WHERE s.refresh_token_hash = $1
   AND s.revoked_at IS NULL
   AND s.refresh_expires_at > now()
 LIMIT 1;
-`, tokenHash).Scan(&sessionID, &userID, &username, &email)
+	`, tokenHash).Scan(&sessionID, &userID, &username, &email)
 	if err != nil {
+		logHTTPRequestEvent(r, "warning", "refresh", "invalid session for refresh",
+			"refresh_token_hash="+quoteLogValue(tokenHash))
 		writeJSON(w, http.StatusUnauthorized, authResp{Ok: false, Message: "invalid session"})
 		return
 	}
@@ -316,11 +358,16 @@ WHERE id = $1
 		ExpiresAtUtc:        expiresAtUtc,
 		RefreshExpiresAtUtc: refreshExpiresAtUtc,
 	})
+	logHTTPRequestEvent(r, "information", "refresh", "session refreshed",
+		"user_id="+fmt.Sprintf("%d", userID),
+		"username="+quoteLogValue(username),
+		"session_id="+fmt.Sprintf("%d", sessionID))
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	auth, ok := getAuthUser(r)
 	if !ok {
+		logHTTPRequestEvent(r, "warning", "logout", "unauthorized logout attempt")
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
 		return
 	}
@@ -343,6 +390,10 @@ WHERE id = $1
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	logHTTPRequestEvent(r, "information", "logout", "session revoked",
+		"user_id="+fmt.Sprintf("%d", auth.UserID),
+		"username="+quoteLogValue(auth.Username),
+		"session_id="+fmt.Sprintf("%d", auth.SessionID))
 }
 
 type tokenPayload struct {
@@ -571,6 +622,7 @@ func (h *Handler) WithAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		header := strings.TrimSpace(r.Header.Get("Authorization"))
 		if header == "" || !strings.HasPrefix(strings.ToLower(header), "bearer ") {
+			logHTTPRequestEvent(r, "warning", "auth", "missing bearer token")
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "missing bearer token"})
 			return
 		}
@@ -578,6 +630,8 @@ func (h *Handler) WithAuth(next http.HandlerFunc) http.HandlerFunc {
 		token := strings.TrimSpace(header[len("Bearer "):])
 		claims, err := h.parseToken(token)
 		if err != nil {
+			logHTTPRequestEvent(r, "warning", "auth", "invalid bearer token",
+				"error="+quoteLogValue(err.Error()))
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "invalid token"})
 			return
 		}
@@ -594,11 +648,16 @@ SELECT EXISTS (
       AND refresh_expires_at > now());
 `, claims.SID, claims.UID).Scan(&isSessionActive)
 		if err != nil || !isSessionActive {
+			logHTTPRequestEvent(r, "warning", "auth", "invalid session",
+				"user_id="+fmt.Sprintf("%d", claims.UID),
+				"username="+quoteLogValue(claims.USR),
+				"session_id="+fmt.Sprintf("%d", claims.SID))
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "invalid session"})
 			return
 		}
 
 		_, _ = h.db.Exec(r.Context(), `UPDATE user_sessions SET last_used_at = now() WHERE id = $1`, claims.SID)
+		log.Printf("level=debug operation=auth message=%q user_id=%d username=%q session_id=%d path=%s", "authorized request", claims.UID, claims.USR, claims.SID, r.URL.Path)
 
 		ctx := context.WithValue(r.Context(), ctxUserKey, authUser{
 			UserID:    claims.UID,

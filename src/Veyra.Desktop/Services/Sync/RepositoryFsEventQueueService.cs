@@ -61,6 +61,12 @@ public sealed class RepositoryFsEventQueueService(
             }
 
             await SaveStateAsync(state, ct);
+            log.LogDebug(
+                "FS event enqueued. RepositoryId {RepositoryId}. Path {Path}. EventKind {EventKind}. QueueSize {QueueSize}",
+                repositoryId,
+                normalizedPath,
+                NormalizeEventKind(eventKind),
+                state.Items.Count);
         }
         finally
         {
@@ -114,6 +120,11 @@ public sealed class RepositoryFsEventQueueService(
             }
 
             await SaveStateAsync(state, ct);
+            log.LogDebug(
+                "FS event lease acquired. RepositoryId {RepositoryId}. LeasedItems {LeasedItems}. QueueSize {QueueSize}",
+                repositoryId,
+                lease.Count,
+                state.Items.Count);
             return new RepositoryFsEventLease(lease.Select(x => x.Id).ToArray(), lease.Count);
         }
         finally
@@ -134,6 +145,11 @@ public sealed class RepositoryFsEventQueueService(
             var ids = itemIds.ToHashSet();
             state.Items.RemoveAll(x => x.RepositoryId == repositoryId && ids.Contains(x.Id));
             await SaveStateAsync(state, ct);
+            log.LogDebug(
+                "FS event lease completed. RepositoryId {RepositoryId}. CompletedItems {CompletedItems}. QueueSize {QueueSize}",
+                repositoryId,
+                itemIds.Count,
+                state.Items.Count);
         }
         finally
         {
@@ -162,6 +178,11 @@ public sealed class RepositoryFsEventQueueService(
             }
 
             await SaveStateAsync(state, ct);
+            log.LogWarning(
+                "FS event lease requeued. RepositoryId {RepositoryId}. RequeuedItems {RequeuedItems}. Error {Error}",
+                repositoryId,
+                itemIds.Count,
+                error ?? "(none)");
         }
         finally
         {

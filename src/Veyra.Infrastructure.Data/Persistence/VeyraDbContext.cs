@@ -218,6 +218,7 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.SnapshotId, e.FileIdentityId }).IsUnique();
             entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.FileIdentityId });
+            entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.FileVersionId });
             entity.HasIndex(e => new { e.FileIdentityId, e.SnapshotId });
             entity.HasIndex(e => e.FileVersionId);
             entity.HasQueryFilter(e => !e.IsDeleted);
@@ -316,7 +317,10 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.RepositoryId, e.SnapshotId, e.OperationType }).IsUnique();
             entity.HasIndex(e => new { e.RepositoryId, e.Status, e.NextAttemptAtUtc });
+            entity.HasIndex(e => new { e.OperationType, e.Status, e.NextAttemptAtUtc, e.CreatedAt });
+            entity.HasIndex(e => new { e.OperationType, e.Status, e.UpdatedAt });
             entity.HasIndex(e => new { e.Status, e.NextAttemptAtUtc, e.CreatedAt });
+            entity.HasQueryFilter(e => !e.Repository.IsDeleted);
         });
 
         modelBuilder.Entity<RepositorySnapshot>(entity =>
@@ -354,6 +358,7 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.SnapshotId, e.RelativePath }).IsUnique();
             entity.HasIndex(e => new { e.SnapshotId, e.IsDeleted, e.RelativePath });
             entity.HasIndex(e => new { e.SnapshotId, e.ParentRelativePath });
+            entity.HasIndex(e => new { e.RepositoryId, e.SnapshotId, e.IsDeleted, e.RelativePath });
             entity.HasIndex(e => new { e.RepositoryId, e.RelativePath });
             entity.HasIndex(e => e.ContentHashSha256);
             entity.HasQueryFilter(e => !e.IsDeleted);

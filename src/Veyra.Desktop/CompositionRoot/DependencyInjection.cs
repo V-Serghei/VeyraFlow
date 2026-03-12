@@ -41,7 +41,7 @@ public static class DependencyInjection
         var services = new ServiceCollection();
 
         services.AddSingleton<IConfiguration>(cfg);
-        services.AddVeyraLogging();
+        services.AddVeyraLogging(cfg);
 
         services.AddApplication();
         services.AddInfrastructureData(connectionString);

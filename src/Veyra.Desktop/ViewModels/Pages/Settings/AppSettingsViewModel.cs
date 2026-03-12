@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net.Mail;
+using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -71,11 +73,25 @@ public sealed record AppRepositorySyncIssueItemViewModel(
     string StatusText,
     string QueueText,
     string LastSyncText,
+    bool HasProgress,
+    int ProgressCurrent,
+    int ProgressTotal,
+    double ProgressPercent,
+    string ProgressText,
+    string EtaText,
+    string ElapsedText,
+    string FinishAtText,
+    string LastProgressUpdateText,
+    string StallText,
+    bool HasStall,
     string ErrorText,
     bool HasError);
 
 public sealed partial class AppSettingsViewModel : ObservableObject
 {
+    private static readonly TimeSpan SyncStatusAutoRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SyncProgressStallThreshold = TimeSpan.FromSeconds(90);
+
     private readonly IUserProfileRepository _userProfiles;
     private readonly IAccessTokenPolicyService _tokenPolicy;
     private readonly IAuthService _auth;
@@ -87,10 +103,15 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly ILogger<AppSettingsViewModel> _log;
     private readonly LocalizationManager _localization;
     private readonly ThemeManager _theme;
+    private readonly SemaphoreSlim _syncStatusRefreshGate = new(1, 1);
 
     private bool _suppressLanguageSelectionChanged;
     private bool _suppressThemeSelectionChanged;
     private bool _suppressSensitiveActionToggleChanged;
+    private bool _hasActiveSyncWork;
+    private readonly Dictionary<int, bool> _stallStateByRepositoryId = [];
+    private CancellationTokenSource? _syncStatusAutoRefreshCts;
+    private Task? _syncStatusAutoRefreshTask;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralTabSelected))]
@@ -327,6 +348,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             AuthMessage = string.Empty;
             SyncMessage = string.Empty;
             GeneralMessage = string.Empty;
+            _log.LogInformation("Loading app settings");
 
             var active = await _userProfiles.GetActiveProfileAsync();
             var activeTokenState = _tokenPolicy.Evaluate(active?.AccessToken);
@@ -371,11 +393,17 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
             var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
             LocalRepositoryCount = repositories.Count;
-            RefreshRepositorySyncIssues(repositories);
+            _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
+            UpdateSyncStatusAutoRefreshState();
 
             await LoadCloudStorageMetricsAsync(active, silent: true);
 
             await LoadOperationJournalAsync();
+            _log.LogInformation(
+                "App settings loaded. Profiles {Profiles}. Repositories {Repositories}. SyncIssues {SyncIssues}",
+                Profiles.Count,
+                LocalRepositoryCount,
+                RepositorySyncIssueCount);
         }
         catch (Exception ex)
         {
@@ -400,7 +428,114 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         if (issue is null || OpenRepositorySettingsRequested is null)
             return;
 
+        _log.LogInformation("Opening repository settings from sync issues. RepositoryId {RepositoryId}", issue.RepositoryId);
         await OpenRepositorySettingsRequested.Invoke(issue.RepositoryId);
+    }
+
+    [RelayCommand]
+    private async Task RetryRepositorySyncIssueAsync(AppRepositorySyncIssueItemViewModel? issue)
+    {
+        if (issue is null)
+            return;
+
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.F("security.action_retry_repository_sync_body", issue.Name));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            IsSyncBusy = true;
+            SyncMessage = string.Empty;
+
+            _log.LogInformation(
+                "Manual retry requested from sync issues. RepositoryId {RepositoryId}. Name {RepositoryName}",
+                issue.RepositoryId,
+                issue.Name);
+
+            await _sync.TryPushLatestSnapshotAsync(issue.RepositoryId);
+
+            SyncMessage = Loc.F("app_settings.sync_retry_repository_requested", issue.Name);
+            await AppendJournalAsync("info", "sync", "settings_retry_repository_sync", SyncMessage, ActiveUsername);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Manual retry for repository sync failed. RepositoryId {RepositoryId}. Name {RepositoryName}",
+                issue.RepositoryId,
+                issue.Name);
+            SyncMessage = Loc.F("app_settings.sync_retry_repository_failed", issue.Name);
+            await AppendJournalAsync("error", "sync", "settings_retry_repository_sync", $"{SyncMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsSyncBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CancelRepositorySyncIssueAsync(AppRepositorySyncIssueItemViewModel? issue)
+    {
+        if (issue is null)
+            return;
+
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
+                Loc.T("security.action_cloud_sync"),
+                Loc.F("security.action_cancel_repository_sync_body", issue.Name));
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            IsSyncBusy = true;
+            SyncMessage = string.Empty;
+
+            _log.LogInformation(
+                "Manual cancellation requested from sync issues. RepositoryId {RepositoryId}. Name {RepositoryName}",
+                issue.RepositoryId,
+                issue.Name);
+
+            var cancelled = await _sync.CancelRepositorySyncAsync(issue.RepositoryId);
+            SyncMessage = cancelled
+                ? Loc.F("app_settings.sync_cancel_repository_requested", issue.Name)
+                : Loc.F("app_settings.sync_cancel_repository_failed", issue.Name);
+
+            await AppendJournalAsync(
+                cancelled ? "info" : "warning",
+                "sync",
+                "settings_cancel_repository_sync",
+                SyncMessage,
+                ActiveUsername);
+
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Manual cancellation for repository sync failed. RepositoryId {RepositoryId}. Name {RepositoryName}",
+                issue.RepositoryId,
+                issue.Name);
+            SyncMessage = Loc.F("app_settings.sync_cancel_repository_failed", issue.Name);
+            await AppendJournalAsync("error", "sync", "settings_cancel_repository_sync", $"{SyncMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsSyncBusy = false;
+        }
     }
 
     [RelayCommand]
@@ -414,6 +549,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         foreach (var tab in Tabs)
             tab.IsSelected = ReferenceEquals(tab, value);
+
+        UpdateSyncStatusAutoRefreshState();
     }
 
     [RelayCommand]
@@ -430,6 +567,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             IsAuthBusy = true;
             AuthMessage = string.Empty;
+            _log.LogInformation(
+                "Submitting auth request from app settings. Mode {Mode}. Username {Username}",
+                IsRegisterMode ? "register" : "login",
+                UsernameInput.Trim());
 
             if (IsRegisterMode && !string.Equals(PasswordInput, ConfirmPasswordInput, StringComparison.Ordinal))
             {
@@ -492,6 +633,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 session.Username);
 
             await LoadAsync();
+            _log.LogInformation(
+                "Auth request completed successfully in app settings. Mode {Mode}. Username {Username}",
+                IsRegisterMode ? "register" : "login",
+                session.Username);
         }
         catch (Exception ex)
         {
@@ -518,6 +663,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         if (profile.IsActive)
         {
+            _log.LogInformation("Profile activation skipped because profile is already active. Username {Username}", profile.Username);
             AuthMessage = Loc.T("app_settings.profile_already_active");
             return;
         }
@@ -526,10 +672,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             IsAuthBusy = true;
             AuthMessage = string.Empty;
+            _log.LogInformation("Activating local profile. Username {Username}", profile.Username);
 
             var switched = await _userProfiles.SetActiveProfileAsync(profile.Username);
             if (!switched)
             {
+                _log.LogWarning("Failed to activate profile because it was not found. Username {Username}", profile.Username);
                 AuthMessage = Loc.T("app_settings.profile_not_found");
                 return;
             }
@@ -539,6 +687,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 ? Loc.F("app_settings.profile_switched", profile.Username)
                 : Loc.F("app_settings.profile_switched_without_token", profile.Username);
             await LoadAsync();
+            _log.LogInformation("Local profile activated. Username {Username}. HasAccessToken {HasAccessToken}", profile.Username, profile.HasAccessToken);
         }
         catch (Exception ex)
         {
@@ -557,31 +706,36 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         try
         {
             IsAuthBusy = true;
+            _log.LogInformation("Signing out active profile");
             var activeProfile = await _userProfiles.GetActiveProfileAsync();
             if (activeProfile is null)
             {
+                _log.LogInformation("Sign-out skipped because there is no active profile");
                 AuthMessage = Loc.T("app_settings.sign_out_not_signed_in");
                 return;
             }
 
             if (!string.IsNullOrWhiteSpace(activeProfile?.AccessToken))
             {
+                var activeUsername = activeProfile.Username;
                 try
                 {
                     var cloudLoggedOut = await _auth.LogoutAsync(activeProfile.AccessToken);
                     if (!cloudLoggedOut)
-                        _log.LogInformation("Cloud logout returned non-success for user {Username}", activeProfile.Username);
+                        _log.LogInformation("Cloud logout returned non-success for user {Username}", activeUsername);
                 }
                 catch (Exception ex)
                 {
-                    _log.LogWarning(ex, "Cloud logout failed for user {Username}; continuing local sign-out", activeProfile.Username);
+                    _log.LogWarning(ex, "Cloud logout failed for user {Username}; continuing local sign-out", activeUsername);
                 }
             }
 
+            var signedOutUsername = activeProfile?.Username ?? ActiveUsername;
             await _userProfiles.SignOutActiveAsync();
             AuthMessage = Loc.T("app_settings.signed_out");
             await AppendJournalAsync("info", "auth", "settings_sign_out", AuthMessage, ActiveUsername);
             await LoadAsync();
+            _log.LogInformation("Active profile signed out. Username {Username}", signedOutUsername);
         }
         catch (Exception ex)
         {
@@ -715,13 +869,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             IsCloudMaintenanceBusy = true;
             CloudStorageMessage = string.Empty;
+            _log.LogInformation("Refreshing sync section status and cloud storage metrics");
 
-            var active = await _userProfiles.GetActiveProfileAsync();
-            await LoadCloudStorageMetricsAsync(active, silent: false);
+            await RefreshSyncSectionAsync(silentMetrics: false, refreshStorageMetrics: true);
+            _log.LogInformation(
+                "Sync section refresh finished. HasMetrics {HasMetrics}. SyncIssues {SyncIssues}. ActiveWork {ActiveWork}",
+                HasCloudStorageMetrics,
+                RepositorySyncIssueCount,
+                _hasActiveSyncWork);
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Failed to refresh cloud storage metrics");
+            _log.LogError(ex, "Failed to refresh sync section status");
             CloudStorageMessage = Loc.T("app_settings.cloud_storage_metrics_failed");
         }
         finally
@@ -748,6 +907,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
             IsCloudMaintenanceBusy = true;
             CloudStorageMessage = string.Empty;
+            _log.LogInformation("Running cloud storage repair");
 
             var active = await _userProfiles.GetActiveProfileAsync();
             var accessToken = active?.AccessToken;
@@ -761,6 +921,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             var result = await _cloudSyncService.RepairStorageAsync(accessToken);
             if (result is null)
             {
+                _log.LogWarning("Cloud storage repair returned no result");
                 CloudStorageMessage = Loc.T("app_settings.cloud_storage_repair_failed");
                 return;
             }
@@ -778,6 +939,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 "settings_cloud_storage_repair",
                 CloudStorageMessage,
                 ActiveUsername);
+
+            await RefreshSyncSectionAsync(silentMetrics: true, refreshStorageMetrics: false);
+
+            _log.LogInformation(
+                "Cloud storage repair finished. Compacted {Compacted}. MissingMarked {MissingMarked}. BrokenReferences {BrokenReferences}",
+                result.Repair.Compacted,
+                result.Repair.MissingMarked,
+                result.Repair.BrokenPackRefs + result.Repair.BrokenLooseRefs);
         }
         catch (Exception ex)
         {
@@ -819,6 +988,36 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ToggleAuthLabel));
 
         _ = LoadAsync();
+    }
+
+    private async Task RefreshSyncSectionAsync(
+        bool silentMetrics,
+        bool refreshStorageMetrics,
+        CancellationToken ct = default)
+    {
+        if (!await _syncStatusRefreshGate.WaitAsync(0, ct))
+        {
+            _log.LogDebug("Skipping sync section refresh because another refresh is already running");
+            return;
+        }
+
+        try
+        {
+            var active = await _userProfiles.GetActiveProfileAsync(ct);
+            var repositories = await _mediator.Send(new GetAllRepositoriesQuery(), ct);
+
+            LocalRepositoryCount = repositories.Count;
+            _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
+
+            if (refreshStorageMetrics)
+                await LoadCloudStorageMetricsAsync(active, silent: silentMetrics);
+
+            UpdateSyncStatusAutoRefreshState();
+        }
+        finally
+        {
+            _syncStatusRefreshGate.Release();
+        }
     }
 
     private async Task LoadCloudStorageMetricsAsync(UserProfileSessionDto? activeProfile, bool silent)
@@ -873,9 +1072,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         CloudStorageLastUpdatedText = DateTime.Now.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     }
 
-    private void RefreshRepositorySyncIssues(IReadOnlyList<RepositoryDto> repositories)
+    private bool RefreshRepositorySyncIssues(IReadOnlyList<RepositoryDto> repositories)
     {
         RepositorySyncIssues.Clear();
+        var hasActiveWork = false;
+        var currentStallStates = new Dictionary<int, bool>();
 
         foreach (var repository in repositories
                      .Where(HasSyncIssue)
@@ -886,6 +1087,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             var lastSyncText = cloud?.LastSyncedAtUtc is null
                 ? Loc.T("common.never")
                 : cloud.LastSyncedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            var isStalled = IsSyncStalled(cloud);
+            var stallText = FormatStallText(cloud);
+
+            currentStallStates[repository.Id] = isStalled;
+            LogStallTransition(repository, isStalled, stallText);
 
             RepositorySyncIssues.Add(new AppRepositorySyncIssueItemViewModel(
                 repository.Id,
@@ -898,11 +1104,72 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     cloud?.ConflictQueueCount ?? 0,
                     cloud?.DeadLetterQueueCount ?? 0),
                 lastSyncText,
+                cloud is not null && cloud.UploadProgressTotal > 0,
+                cloud?.UploadProgressCurrent ?? 0,
+                cloud?.UploadProgressTotal ?? 0,
+                CalculateProgressPercent(cloud?.UploadProgressCurrent ?? 0, cloud?.UploadProgressTotal ?? 0),
+                FormatUploadProgress(cloud?.UploadProgressCurrent ?? 0, cloud?.UploadProgressTotal ?? 0),
+                FormatEtaText(
+                    cloud?.UploadProgressCurrent ?? 0,
+                    cloud?.UploadProgressTotal ?? 0,
+                    cloud?.UploadProgressStartedAtUtc,
+                    cloud?.UploadProgressUpdatedAtUtc),
+                FormatElapsedText(
+                    cloud?.UploadProgressCurrent ?? 0,
+                    cloud?.UploadProgressTotal ?? 0,
+                    cloud?.UploadProgressStartedAtUtc,
+                    cloud?.UploadProgressUpdatedAtUtc),
+                FormatFinishAtText(
+                    cloud?.UploadProgressCurrent ?? 0,
+                    cloud?.UploadProgressTotal ?? 0,
+                    cloud?.UploadProgressStartedAtUtc,
+                    cloud?.UploadProgressUpdatedAtUtc),
+                FormatLastProgressUpdateText(cloud?.UploadProgressUpdatedAtUtc),
+                stallText,
+                isStalled,
                 cloud?.LastError ?? string.Empty,
                 !string.IsNullOrWhiteSpace(cloud?.LastError)));
+
+            hasActiveWork |= HasActiveSyncWork(cloud);
         }
 
+        _stallStateByRepositoryId.Clear();
+        foreach (var pair in currentStallStates)
+            _stallStateByRepositoryId[pair.Key] = pair.Value;
+
         RepositorySyncIssueCount = RepositorySyncIssues.Count;
+        return hasActiveWork;
+    }
+
+    private void LogStallTransition(RepositoryDto repository, bool isStalled, string stallText)
+    {
+        var hadPreviousState = _stallStateByRepositoryId.TryGetValue(repository.Id, out var previousState);
+        if (hadPreviousState && previousState == isStalled)
+            return;
+
+        if (isStalled)
+        {
+            _log.LogWarning(
+                "Repository sync appears stalled. RepositoryId {RepositoryId}. Name {RepositoryName}. LastStatus {LastStatus}. Progress {Current}/{Total}. LastProgressUpdateUtc {LastProgressUpdateUtc}. StallText {StallText}",
+                repository.Id,
+                repository.Name,
+                repository.CloudSync?.LastStatus ?? "(none)",
+                repository.CloudSync?.UploadProgressCurrent ?? 0,
+                repository.CloudSync?.UploadProgressTotal ?? 0,
+                repository.CloudSync?.UploadProgressUpdatedAtUtc,
+                stallText);
+        }
+        else if (hadPreviousState && previousState)
+        {
+            _log.LogInformation(
+                "Repository sync resumed after stall. RepositoryId {RepositoryId}. Name {RepositoryName}. LastStatus {LastStatus}. Progress {Current}/{Total}. LastProgressUpdateUtc {LastProgressUpdateUtc}",
+                repository.Id,
+                repository.Name,
+                repository.CloudSync?.LastStatus ?? "(none)",
+                repository.CloudSync?.UploadProgressCurrent ?? 0,
+                repository.CloudSync?.UploadProgressTotal ?? 0,
+                repository.CloudSync?.UploadProgressUpdatedAtUtc);
+        }
     }
 
     private static bool HasSyncIssue(RepositoryDto repository)
@@ -931,6 +1198,90 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             or "conflict"
             or "failed"
             or "dead_letter";
+    }
+
+    private static bool HasActiveSyncWork(RepositoryCloudSyncStatusDto? cloud)
+    {
+        if (cloud is null)
+            return false;
+
+        if (cloud.PendingQueueCount > 0 || cloud.RunningQueueCount > 0 || cloud.RetryQueueCount > 0)
+            return true;
+
+        if (cloud.UploadProgressTotal > 0 && cloud.UploadProgressCurrent < cloud.UploadProgressTotal)
+            return true;
+
+        var normalizedStatus = cloud.LastStatus?.Trim().ToLowerInvariant();
+        return normalizedStatus is "queued"
+            or "syncing"
+            or "offline_retry"
+            or "retrying";
+    }
+
+    private static bool IsSyncStalled(RepositoryCloudSyncStatusDto? cloud)
+    {
+        if (cloud is null)
+            return false;
+
+        if (cloud.UploadProgressTotal <= 0 || cloud.UploadProgressCurrent >= cloud.UploadProgressTotal)
+            return false;
+
+        var normalizedStatus = cloud.LastStatus?.Trim().ToLowerInvariant();
+        if (normalizedStatus is not ("syncing_upload" or "syncing" or "retrying" or "offline_retry"))
+            return false;
+
+        if (cloud.UploadProgressUpdatedAtUtc is null)
+            return false;
+
+        return DateTime.UtcNow - cloud.UploadProgressUpdatedAtUtc.Value >= SyncProgressStallThreshold;
+    }
+
+    private void UpdateSyncStatusAutoRefreshState()
+    {
+        var shouldRun = IsSyncTabSelected && _hasActiveSyncWork;
+        if (shouldRun)
+        {
+            if (_syncStatusAutoRefreshCts is not null)
+                return;
+
+            _syncStatusAutoRefreshCts = new CancellationTokenSource();
+            var token = _syncStatusAutoRefreshCts.Token;
+            _syncStatusAutoRefreshTask = Task.Run(() => RunSyncStatusAutoRefreshAsync(token), token);
+            _log.LogInformation(
+                "Sync status auto-refresh started. IntervalSeconds {IntervalSeconds}",
+                SyncStatusAutoRefreshInterval.TotalSeconds);
+            return;
+        }
+
+        if (_syncStatusAutoRefreshCts is null)
+            return;
+
+        _syncStatusAutoRefreshCts.Cancel();
+        _syncStatusAutoRefreshCts.Dispose();
+        _syncStatusAutoRefreshCts = null;
+        _syncStatusAutoRefreshTask = null;
+        _log.LogInformation("Sync status auto-refresh stopped");
+    }
+
+    private async Task RunSyncStatusAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(SyncStatusAutoRefreshInterval, ct);
+                await Dispatcher.UIThread.InvokeAsync(
+                    () => RefreshSyncSectionAsync(silentMetrics: true, refreshStorageMetrics: true, ct),
+                    DispatcherPriority.Background);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Sync status auto-refresh loop failed");
+        }
     }
 
     private static int GetIssueSeverity(RepositoryCloudSyncStatusDto? cloud)
@@ -974,6 +1325,117 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private static string FormatCloudQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
         => Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+
+    private static string FormatUploadProgress(int current, int total)
+    {
+        if (total <= 0)
+            return Loc.T("common.not_available_short");
+
+        return Loc.F("app_settings.repository_sync_health_progress_format", Math.Clamp(current, 0, total), total);
+    }
+
+    private static double CalculateProgressPercent(int current, int total)
+    {
+        if (total <= 0)
+            return 0;
+
+        return Math.Clamp((double)Math.Clamp(current, 0, total) / total * 100d, 0d, 100d);
+    }
+
+    private static string FormatEtaText(int current, int total, DateTime? startedAtUtc, DateTime? updatedAtUtc)
+    {
+        if (total <= 0)
+            return Loc.T("common.not_available_short");
+
+        current = Math.Clamp(current, 0, total);
+        if (current >= total)
+            return Loc.T("app_settings.repository_sync_health_eta_done");
+
+        if (startedAtUtc is null)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var referenceUtc = updatedAtUtc ?? DateTime.UtcNow;
+        var elapsed = referenceUtc - startedAtUtc.Value;
+        if (elapsed <= TimeSpan.FromSeconds(2) || current <= 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var rate = current / elapsed.TotalSeconds;
+        if (rate <= 0.0001d)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var remainingItems = total - current;
+        var remainingSeconds = remainingItems / rate;
+        if (double.IsNaN(remainingSeconds) || double.IsInfinity(remainingSeconds) || remainingSeconds < 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        return Loc.F("app_settings.repository_sync_health_eta_format", FormatDuration(TimeSpan.FromSeconds(remainingSeconds)));
+    }
+
+    private static string FormatElapsedText(int current, int total, DateTime? startedAtUtc, DateTime? updatedAtUtc)
+    {
+        if (total <= 0 || startedAtUtc is null)
+            return Loc.T("common.not_available_short");
+
+        var referenceUtc = updatedAtUtc ?? DateTime.UtcNow;
+        var elapsed = referenceUtc - startedAtUtc.Value;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+
+        return Loc.F("app_settings.repository_sync_health_elapsed_format", FormatDuration(elapsed));
+    }
+
+    private static string FormatFinishAtText(int current, int total, DateTime? startedAtUtc, DateTime? updatedAtUtc)
+    {
+        if (total <= 0)
+            return Loc.T("common.not_available_short");
+
+        current = Math.Clamp(current, 0, total);
+        if (current >= total)
+            return Loc.T("app_settings.repository_sync_health_eta_done");
+
+        if (startedAtUtc is null)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var referenceUtc = updatedAtUtc ?? DateTime.UtcNow;
+        var elapsed = referenceUtc - startedAtUtc.Value;
+        if (elapsed <= TimeSpan.FromSeconds(2) || current <= 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var rate = current / elapsed.TotalSeconds;
+        if (rate <= 0.0001d)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var remainingSeconds = (total - current) / rate;
+        if (double.IsNaN(remainingSeconds) || double.IsInfinity(remainingSeconds) || remainingSeconds < 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var finishAtLocal = referenceUtc.AddSeconds(remainingSeconds).ToLocalTime();
+        return Loc.F("app_settings.repository_sync_health_finish_at_format", finishAtLocal.ToString("HH:mm:ss"));
+    }
+
+    private static string FormatLastProgressUpdateText(DateTime? updatedAtUtc)
+    {
+        if (updatedAtUtc is null)
+            return Loc.T("common.not_available_short");
+
+        return Loc.F(
+            "app_settings.repository_sync_health_last_update_format",
+            updatedAtUtc.Value.ToLocalTime().ToString("HH:mm:ss"));
+    }
+
+    private static string FormatStallText(RepositoryCloudSyncStatusDto? cloud)
+    {
+        if (!IsSyncStalled(cloud) || cloud?.UploadProgressUpdatedAtUtc is null)
+            return string.Empty;
+
+        var stalledFor = DateTime.UtcNow - cloud.UploadProgressUpdatedAtUtc.Value;
+        if (stalledFor < TimeSpan.Zero)
+            stalledFor = TimeSpan.Zero;
+
+        return Loc.F(
+            "app_settings.repository_sync_health_stalled_format",
+            FormatDuration(stalledFor));
+    }
 
     private void ClearCloudStorageMetrics()
     {
@@ -1174,6 +1636,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         return unitIndex == 0
             ? $"{value:0} {units[unitIndex]}"
             : $"{value:0.#} {units[unitIndex]}";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return "0s";
+
+        if (duration.TotalDays >= 1)
+            return $"{(int)duration.TotalDays}d {duration.Hours}h";
+
+        if (duration.TotalHours >= 1)
+            return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+
+        if (duration.TotalMinutes >= 1)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+
+        return $"{Math.Max(1, duration.Seconds)}s";
     }
 }
 

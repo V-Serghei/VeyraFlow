@@ -15,4 +15,8 @@ public sealed record RepositoryCloudSyncStatusDto(
     int RetryQueueCount = 0,
     int DeadLetterQueueCount = 0,
     int FailedQueueCount = 0,
-    int CompletedQueueCount = 0);
+    int CompletedQueueCount = 0,
+    int UploadProgressCurrent = 0,
+    int UploadProgressTotal = 0,
+    DateTime? UploadProgressStartedAtUtc = null,
+    DateTime? UploadProgressUpdatedAtUtc = null);

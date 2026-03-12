@@ -93,6 +93,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = null;
+            _log.LogInformation("Loading repository dashboard");
 
             if (!_presetsLoaded)
             {
@@ -154,6 +155,10 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             RebuildFormatTagFilters();
             ApplyFilter();
             IsEmpty = Repositories.Count == 0;
+            _log.LogInformation(
+                "Repository dashboard loaded. TotalRepositories {Total}. VisibleRepositories {Visible}",
+                _allRepositories.Count,
+                Repositories.Count);
         }
         catch (Exception ex)
         {
@@ -183,6 +188,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (repo is null)
             return;
 
+        _log.LogInformation("Dashboard open repository requested. RepositoryId {RepositoryId}", repo.Id);
         if (OpenRepositoryRequested is not null)
             await OpenRepositoryRequested.Invoke(repo.Id);
     }
@@ -193,6 +199,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (repo is null)
             return;
 
+        _log.LogInformation("Dashboard open repository settings requested. RepositoryId {RepositoryId}", repo.Id);
         if (OpenRepositorySettingsRequested is not null)
             await OpenRepositorySettingsRequested.Invoke(repo.Id);
     }
@@ -215,6 +222,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
             var wizard = _windows.Create<CreateRepositoryWindow>();
             var owner = _windows.GetActiveWindow();
+            _log.LogInformation("Opening create repository window from dashboard");
 
             if (owner is not null)
                 await _windows.ShowDialogAsync(wizard, owner);
@@ -323,6 +331,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
     private void ApplyFilter()
     {
+        _log.LogDebug(
+            "Applying dashboard filters. Query {Query}. Availability {Availability}. SyncState {SyncState}. Format {Format}. QueueIssuesOnly {QueueIssuesOnly}",
+            SearchQuery,
+            SelectedAvailabilityFilter,
+            SelectedSyncStateFilter,
+            SelectedFormatTagFilter,
+            OnlyQueueIssues);
         var directives = ParseSearchDirectives(SearchQuery.Trim());
 
         var textQuery = directives.TextQuery;

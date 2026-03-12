@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -16,6 +17,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly ThemeManager _theme = ThemeManager.Instance;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
+    private readonly ILogger<MainWindowViewModel> _log;
     private bool _returnToAppSettingsFromRepositorySettings;
 
     public RepositoryDashboardViewModel Dashboard { get; }
@@ -31,12 +33,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RepositoryDashboardViewModel dashboard,
         RepositoryExplorerViewModel explorer,
         RepositorySettingsViewModel settings,
-        AppSettingsViewModel appSettings)
+        AppSettingsViewModel appSettings,
+        ILogger<MainWindowViewModel> log)
     {
         Dashboard = dashboard;
         Explorer = explorer;
         Settings = settings;
         AppSettings = appSettings;
+        _log = log;
 
         Dashboard.OpenRepositoryRequested += OpenRepositoryAsync;
         Dashboard.OpenRepositorySettingsRequested += OpenRepositorySettingsAsync;
@@ -61,6 +65,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task OpenGlobalSettingsAsync()
     {
+        _log.LogInformation("Opening global settings page");
         await AppSettings.LoadAsync();
         CurrentPage = AppSettings;
     }
@@ -70,6 +75,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _theme.ToggleDarkLight();
         RefreshThemeState();
+        _log.LogInformation("Theme toggled. DarkTheme {IsDarkTheme}", _theme.IsDarkTheme);
     }
 
     [RelayCommand]
@@ -93,16 +99,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         _localization.SetLanguage(languages[nextIndex].Code);
         RefreshLanguageState();
+        _log.LogInformation("Language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
     }
 
     public async void OnLoaded()
     {
+        _log.LogInformation("Main window loaded. Loading dashboard");
         await Dashboard.LoadAsync();
         CurrentPage = Dashboard;
     }
 
     private async Task OpenRepositoryAsync(int repositoryId)
     {
+        _log.LogInformation("Opening repository explorer. RepositoryId {RepositoryId}", repositoryId);
         await Explorer.LoadAsync(repositoryId);
         CurrentPage = Explorer;
     }
@@ -110,6 +119,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task OpenRepositorySettingsAsync(int repositoryId)
     {
         _returnToAppSettingsFromRepositorySettings = false;
+        _log.LogInformation("Opening repository settings. RepositoryId {RepositoryId}", repositoryId);
         await Settings.LoadAsync(repositoryId);
         CurrentPage = Settings;
     }
@@ -117,6 +127,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task OpenRepositorySettingsFromAppSettingsAsync(int repositoryId)
     {
         _returnToAppSettingsFromRepositorySettings = true;
+        _log.LogInformation("Opening repository settings from app settings. RepositoryId {RepositoryId}", repositoryId);
         await Settings.LoadAsync(repositoryId);
         CurrentPage = Settings;
     }
@@ -130,6 +141,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void OnRepositoryDeleted()
     {
+        _log.LogInformation("Repository deleted. Returning to dashboard");
         _ = ShowDashboardAsync();
     }
 
@@ -138,6 +150,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (_returnToAppSettingsFromRepositorySettings && ReferenceEquals(CurrentPage, Settings))
         {
             _returnToAppSettingsFromRepositorySettings = false;
+            _log.LogInformation("Returning from repository settings to app settings");
             CurrentPage = AppSettings;
             return;
         }
@@ -147,6 +160,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task ShowDashboardAsync()
     {
+        _log.LogInformation("Showing dashboard page");
         await Dashboard.LoadAsync();
         CurrentPage = Dashboard;
     }

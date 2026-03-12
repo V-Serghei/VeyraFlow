@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -87,7 +88,7 @@ type repairScanRecord struct {
 }
 
 func (h *Handler) GetStorageMetrics(w http.ResponseWriter, r *http.Request) {
-	_, ok := getAuthUser(r)
+	auth, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
 		return
@@ -99,11 +100,17 @@ func (h *Handler) GetStorageMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logHTTPRequestEvent(r, "information", "storage_metrics", "cloud storage metrics collected",
+		"user_id="+quoteLogValue(fmt.Sprintf("%d", auth.UserID)),
+		"username="+quoteLogValue(auth.Username),
+		"logical_blocks="+fmt.Sprintf("%d", metrics.Summary.LogicalBlockCount),
+		"physical_objects="+fmt.Sprintf("%d", metrics.Summary.PhysicalObjectCount),
+		"missing_blocks="+fmt.Sprintf("%d", metrics.Summary.MissingBlockCount))
 	writeJSON(w, http.StatusOK, metrics)
 }
 
 func (h *Handler) RepairStorage(w http.ResponseWriter, r *http.Request) {
-	_, ok := getAuthUser(r)
+	auth, ok := getAuthUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
 		return
@@ -117,7 +124,10 @@ func (h *Handler) RepairStorage(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			logHTTPRequestEvent(r, "warning", "storage_repair", "bad json",
+				"user_id="+fmt.Sprintf("%d", auth.UserID),
+				"username="+quoteLogValue(auth.Username))
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "bad json"})
 			return
 		}
@@ -135,6 +145,16 @@ func (h *Handler) RepairStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logHTTPRequestEvent(r, "information", "storage_repair", "cloud storage repair completed",
+		"user_id="+fmt.Sprintf("%d", auth.UserID),
+		"username="+quoteLogValue(auth.Username),
+		"scan_limit="+fmt.Sprintf("%d", req.ScanLimit),
+		"compact_limit="+fmt.Sprintf("%d", req.CompactLimit),
+		"scanned="+fmt.Sprintf("%d", stats.Scanned),
+		"missing_marked="+fmt.Sprintf("%d", stats.MissingMarked),
+		"broken_loose="+fmt.Sprintf("%d", stats.BrokenLooseRefs),
+		"broken_pack="+fmt.Sprintf("%d", stats.BrokenPackRefs),
+		"compacted="+fmt.Sprintf("%d", stats.Compacted))
 	writeJSON(w, http.StatusOK, storageRepairResponse{
 		Ok:      true,
 		Repair:  stats,

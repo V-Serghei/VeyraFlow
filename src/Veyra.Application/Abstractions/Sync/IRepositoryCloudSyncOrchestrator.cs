@@ -8,4 +8,5 @@ public interface IRepositoryCloudSyncOrchestrator
     Task<int> RestoreRepositoriesFromCloudAsync(CancellationToken ct = default);
     Task ProcessPendingQueueAsync(CancellationToken ct = default);
     Task<RepositoryCloudRepairResultDto> RepairRepositoryCloudDataAsync(int repositoryId, CancellationToken ct = default);
+    Task<bool> CancelRepositorySyncAsync(int repositoryId, CancellationToken ct = default);
 }

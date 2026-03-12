@@ -56,6 +56,7 @@ internal static class DatabaseStartupBootstrapper
         BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(db);
         db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
         db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+        EnsurePerformanceIndexes(db);
     }
 
     private static void EnsureRepositorySnapshotTitleColumn(VeyraDbContext db)
@@ -956,6 +957,50 @@ WHERE ""StorageFormatVersion"" < 2
                 return;
 
             EnsureMigrationHistoryRow(connection, SensitiveActionVerificationMigrationId);
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsurePerformanceIndexes(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            using (var idx1 = connection.CreateCommand())
+            {
+                idx1.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_SnapshotFileLinks_SnapshotId_IsDeleted_FileVersionId\" ON \"SnapshotFileLinks\" (\"SnapshotId\", \"IsDeleted\", \"FileVersionId\");";
+                idx1.ExecuteNonQuery();
+            }
+
+            using (var idx2 = connection.CreateCommand())
+            {
+                idx2.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySyncQueueItems_OperationType_Status_NextAttemptAtUtc_CreatedAt\" ON \"RepositorySyncQueueItems\" (\"OperationType\", \"Status\", \"NextAttemptAtUtc\", \"CreatedAt\");";
+                idx2.ExecuteNonQuery();
+            }
+
+            using (var idx3 = connection.CreateCommand())
+            {
+                idx3.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySyncQueueItems_OperationType_Status_UpdatedAt\" ON \"RepositorySyncQueueItems\" (\"OperationType\", \"Status\", \"UpdatedAt\");";
+                idx3.ExecuteNonQuery();
+            }
+
+            using (var idx4 = connection.CreateCommand())
+            {
+                idx4.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySnapshotEntries_RepositoryId_SnapshotId_IsDeleted_RelativePath\" ON \"RepositorySnapshotEntries\" (\"RepositoryId\", \"SnapshotId\", \"IsDeleted\", \"RelativePath\");";
+                idx4.ExecuteNonQuery();
+            }
         }
         finally
         {

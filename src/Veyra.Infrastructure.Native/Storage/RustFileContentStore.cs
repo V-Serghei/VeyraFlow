@@ -41,12 +41,16 @@ internal sealed class RustFileContentStore : IFileContentStore
         _nativeStoreAvailable = native.SupportsStoreFileBlocks;
         _nativeRestoreAvailable = native.SupportsRestoreFileBlocks;
 
-        if (_artifactCryptor.IsEncryptionEnabled && (_nativeStoreAvailable || _nativeRestoreAvailable))
+        if (_artifactCryptor.IsEncryptionEnabled)
         {
             _nativeStoreAvailable = false;
             _nativeRestoreAvailable = false;
-            _log.LogWarning(
-                "Artifact encryption is enabled. Native block-store is temporarily disabled to guarantee encrypted payload storage.");
+            _log.LogInformation(
+                "Artifact encryption is enabled. Managed block-store path is active to guarantee encrypted payload storage. Native support detected: store {StoreAvailable}, restore {RestoreAvailable}. Library {LoadedPath}",
+                native.SupportsStoreFileBlocks,
+                native.SupportsRestoreFileBlocks,
+                native.LoadedPath ?? "(not loaded)");
+            return;
         }
 
         if (_nativeStoreAvailable && _nativeRestoreAvailable)
@@ -54,16 +58,15 @@ internal sealed class RustFileContentStore : IFileContentStore
             _log.LogInformation(
                 "Native block-store entrypoints detected. Library {LoadedPath}",
                 native.LoadedPath ?? "(unknown)");
+            return;
         }
-        else
-        {
-            _log.LogWarning(
-                "Native block-store entrypoints are unavailable at startup. Store {StoreAvailable}. Restore {RestoreAvailable}. Library {LoadedPath}. Error {Error}",
-                _nativeStoreAvailable,
-                _nativeRestoreAvailable,
-                native.LoadedPath ?? "(not loaded)",
-                native.ErrorMessage ?? "(no error details)");
-        }
+
+        _log.LogWarning(
+            "Native block-store entrypoints are unavailable at startup. Store {StoreAvailable}. Restore {RestoreAvailable}. Library {LoadedPath}. Error {Error}",
+            _nativeStoreAvailable,
+            _nativeRestoreAvailable,
+            native.LoadedPath ?? "(not loaded)",
+            native.ErrorMessage ?? "(no error details)");
     }
 
     public async Task<StoredFileContentDto> StoreFileAsync(string filePath, CancellationToken ct = default)

@@ -11,6 +11,7 @@ public class RepositorySyncQueueItem
     public const string StatusCompleted = "completed";
     public const string StatusFailed = "failed";
     public const string StatusDeadLetter = "dead_letter";
+    public const string StatusCancelled = "cancelled";
 
     public long Id { get; set; }
 

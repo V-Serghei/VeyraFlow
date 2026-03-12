@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -37,10 +38,16 @@ public sealed class RepositoryCloudSyncOrchestrator(
     private const string ManagedHashPrefix = "sha256-";
     private const string PushOperationType = RepositorySyncQueueItem.OperationPushSnapshot;
     private static readonly TimeSpan RunningLeaseTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan UploadCheckpointPersistInterval = TimeSpan.FromSeconds(2);
+    private const int UploadCheckpointPersistEveryBlocks = 32;
 
     private readonly SemaphoreSlim _queueGate = new(1, 1);
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly string _clientInstanceId = ResolveClientInstanceId(configuration);
+    private readonly object _activeQueueItemStateGate = new();
+    private CancellationTokenSource? _activeQueueItemCts;
+    private long? _activeQueueItemId;
+    private int? _activeQueueRepositoryId;
 
     public async Task TryPushLatestSnapshotAsync(int repositoryId, CancellationToken ct = default)
     {
@@ -97,6 +104,38 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
                 await ProcessQueueItemAsync(accessToken, next.Id, ct);
             }
+        }
+        finally
+        {
+            _queueGate.Release();
+        }
+    }
+
+    public async Task<bool> CancelRepositorySyncAsync(int repositoryId, CancellationToken ct = default)
+    {
+        var activeCancelled = CancelActiveQueueItemIfMatches(repositoryId);
+        if (activeCancelled)
+        {
+            log.LogInformation(
+                "Requested cancellation for active repository sync. RepositoryId {RepositoryId}",
+                repositoryId);
+            return true;
+        }
+
+        await _queueGate.WaitAsync(ct);
+        try
+        {
+            var affected = await MarkRepositoryQueueCancelledAsync(
+                repositoryId,
+                "Cloud sync cancelled by user.",
+                ct);
+
+            log.LogInformation(
+                "Repository sync cancellation completed without active upload. RepositoryId {RepositoryId}. AffectedQueueItems {AffectedQueueItems}",
+                repositoryId,
+                affected);
+
+            return affected > 0;
         }
         finally
         {
@@ -541,6 +580,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private async Task ProcessQueueItemAsync(string accessToken, long queueItemId, CancellationToken ct)
     {
+        var overallTimer = Stopwatch.StartNew();
         var queueItem = await db.Set<RepositorySyncQueueItem>()
             .Include(q => q.Repository)
             .FirstOrDefaultAsync(q => q.Id == queueItemId, ct);
@@ -550,6 +590,10 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         var repository = queueItem.Repository;
         var now = DateTime.UtcNow;
+        using var queueItemCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var itemCt = queueItemCts.Token;
+
+        RegisterActiveQueueItem(queueItemId, repository.Id, queueItemCts);
 
         queueItem.Status = RepositorySyncQueueItem.StatusRunning;
         queueItem.LastError = null;
@@ -559,11 +603,20 @@ public sealed class RepositoryCloudSyncOrchestrator(
         repository.CloudSyncLastError = null;
         repository.UpdatedAt = now;
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(itemCt);
+        log.LogInformation(
+            "Cloud queue item started. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. RemoteSnapshotId {RemoteSnapshotId}. Attempt {Attempt}/{MaxAttempts}. ConflictStrategy {ConflictStrategy}",
+            queueItem.Id,
+            repository.Id,
+            queueItem.SnapshotId,
+            queueItem.RemoteSnapshotId,
+            Math.Max(0, queueItem.AttemptCount) + 1,
+            Math.Clamp(queueItem.MaxAttempts, 1, 20),
+            queueItem.ConflictStrategy);
 
         try
         {
-            var remoteLatestSnapshotId = await GetRemoteLatestSnapshotIdAsync(accessToken, repository.Id, ct);
+            var remoteLatestSnapshotId = await GetRemoteLatestSnapshotIdAsync(accessToken, repository.Id, itemCt);
             var strategy = RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy);
 
             var hasConflict = repository.CloudLastRemoteSnapshotId.HasValue
@@ -571,6 +624,15 @@ public sealed class RepositoryCloudSyncOrchestrator(
                               && remoteLatestSnapshotId.Value != repository.CloudLastRemoteSnapshotId.Value
                               && remoteLatestSnapshotId.Value != queueItem.RemoteSnapshotId;
             var expectedRemoteSnapshotId = repository.CloudLastRemoteSnapshotId.GetValueOrDefault();
+            log.LogInformation(
+                "Cloud queue item resolved remote head. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. ExpectedRemoteSnapshotId {ExpectedRemoteSnapshotId}. ObservedRemoteSnapshotId {ObservedRemoteSnapshotId}. PendingRemoteSnapshotId {PendingRemoteSnapshotId}. HasConflict {HasConflict}. Strategy {Strategy}",
+                queueItem.Id,
+                repository.Id,
+                repository.CloudLastRemoteSnapshotId,
+                remoteLatestSnapshotId,
+                queueItem.RemoteSnapshotId,
+                hasConflict,
+                strategy);
 
             if (hasConflict && strategy == RepositorySyncConflictStrategies.ManualMerge)
             {
@@ -583,7 +645,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 repository.CloudSyncLastError = queueItem.LastError;
                 repository.UpdatedAt = DateTime.UtcNow;
 
-                await db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(itemCt);
                 return;
             }
 
@@ -605,7 +667,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 queueItem.SnapshotId,
                 queueItem.RemoteSnapshotId,
                 titleSuffix,
-                ct);
+                itemCt);
 
             if (package is null)
             {
@@ -617,7 +679,12 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 repository.CloudSyncLastError = null;
                 repository.UpdatedAt = DateTime.UtcNow;
 
-                await db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(itemCt);
+                log.LogInformation(
+                    "Cloud queue item skipped because snapshot package is empty. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}",
+                    queueItem.Id,
+                    repository.Id,
+                    queueItem.SnapshotId);
                 return;
             }
 
@@ -629,7 +696,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 package.Snapshot.PayloadSha256,
                 phase: 0,
                 attempt: runAttempt);
-            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, initialIdempotencyKey, ct);
+            var initialPushTimer = Stopwatch.StartNew();
+            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, initialIdempotencyKey, itemCt);
+            initialPushTimer.Stop();
             if (pushResult is null)
                 throw new InvalidOperationException("Cloud rejected snapshot push (unauthorized or invalid session).");
 
@@ -640,26 +709,41 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(h => h, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            log.LogInformation(
+                "Cloud queue item initial push completed. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. MissingBlocks {MissingBlocks}. IdempotencyKey {IdempotencyKey}. DurationMs {DurationMs}",
+                queueItem.Id,
+                repository.Id,
+                queueItem.SnapshotId,
+                missingHashes.Count,
+                initialIdempotencyKey,
+                initialPushTimer.ElapsedMilliseconds);
 
             if (missingHashes.Count > 0)
             {
+                var uploadPhaseTimer = Stopwatch.StartNew();
                 var checkpointSignature = BuildMissingCheckpointSignature(package.Snapshot.PayloadSha256, missingHashes);
                 var resumeIndex = 0;
+                var lastCheckpointPersistedIndex = 0;
+                var lastCheckpointPersistedAtUtc = DateTime.UtcNow;
 
                 if (string.Equals(queueItem.UploadCheckpointSignature, checkpointSignature, StringComparison.OrdinalIgnoreCase)
                     && queueItem.UploadCheckpointTotal == missingHashes.Count)
                 {
                     resumeIndex = Math.Clamp(queueItem.UploadCheckpointNextIndex, 0, missingHashes.Count);
+                    lastCheckpointPersistedIndex = resumeIndex;
+                    lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
                 }
                 else
                 {
-                    queueItem.UploadCheckpointSignature = checkpointSignature;
-                    queueItem.UploadCheckpointTotal = missingHashes.Count;
-                    queueItem.UploadCheckpointNextIndex = 0;
-                    queueItem.UpdatedAt = DateTime.UtcNow;
-                    repository.CloudSyncLastStatus = "syncing_upload";
-                    repository.UpdatedAt = queueItem.UpdatedAt;
-                    await db.SaveChangesAsync(ct);
+                    await PersistUploadCheckpointAsync(
+                        queueItem,
+                        repository,
+                        checkpointSignature,
+                        missingHashes.Count,
+                        0,
+                        itemCt);
+                    lastCheckpointPersistedIndex = 0;
+                    lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
                 }
 
                 if (resumeIndex > 0)
@@ -675,8 +759,16 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 for (var i = resumeIndex; i < missingHashes.Count; i++)
                 {
                     var missingHash = missingHashes[i];
-                    if (await TryUploadMissingBlockAsync(accessToken, missingHash, ct))
+                    if (await TryUploadMissingBlockAsync(accessToken, missingHash, itemCt))
                         uploaded++;
+                    log.LogDebug(
+                        "Cloud queue item uploaded missing block. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. BlockIndex {BlockIndex}/{TotalBlocks}. BlockHash {BlockHash}",
+                        queueItem.Id,
+                        repository.Id,
+                        queueItem.SnapshotId,
+                        i + 1,
+                        missingHashes.Count,
+                        missingHash);
 
                     queueItem.UploadCheckpointSignature = checkpointSignature;
                     queueItem.UploadCheckpointTotal = missingHashes.Count;
@@ -684,7 +776,25 @@ public sealed class RepositoryCloudSyncOrchestrator(
                     queueItem.UpdatedAt = DateTime.UtcNow;
                     repository.CloudSyncLastStatus = $"syncing_upload {i + 1}/{missingHashes.Count}";
                     repository.UpdatedAt = queueItem.UpdatedAt;
-                    await db.SaveChangesAsync(ct);
+
+                    if (ShouldPersistUploadCheckpoint(
+                            queueItem.UploadCheckpointNextIndex,
+                            missingHashes.Count,
+                            lastCheckpointPersistedIndex,
+                            lastCheckpointPersistedAtUtc,
+                            queueItem.UpdatedAt))
+                    {
+                        await db.SaveChangesAsync(itemCt);
+                        lastCheckpointPersistedIndex = queueItem.UploadCheckpointNextIndex;
+                        lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
+                    }
+                }
+
+                if (queueItem.UploadCheckpointNextIndex != lastCheckpointPersistedIndex)
+                {
+                    await db.SaveChangesAsync(itemCt);
+                    lastCheckpointPersistedIndex = queueItem.UploadCheckpointNextIndex;
+                    lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
                 }
 
                 var confirmIdempotencyKey = BuildPushIdempotencyKey(
@@ -695,7 +805,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
                     phase: 1,
                     attempt: runAttempt);
 
-                var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, ct);
+                var confirmPushTimer = Stopwatch.StartNew();
+                var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, itemCt);
+                confirmPushTimer.Stop();
                 if (confirm is null)
                     throw new InvalidOperationException("Cloud rejected follow-up snapshot push after block upload.");
 
@@ -710,6 +822,15 @@ public sealed class RepositoryCloudSyncOrchestrator(
                     throw new InvalidOperationException(
                         $"Cloud still reports {stillMissing.Count} missing block(s) after upload.");
                 }
+                log.LogInformation(
+                    "Cloud queue item follow-up push confirmed uploaded blocks. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. UploadedBlocks {UploadedBlocks}. IdempotencyKey {IdempotencyKey}. UploadDurationMs {UploadDurationMs}. ConfirmDurationMs {ConfirmDurationMs}",
+                    queueItem.Id,
+                    repository.Id,
+                    queueItem.SnapshotId,
+                    uploaded,
+                    confirmIdempotencyKey,
+                    uploadPhaseTimer.ElapsedMilliseconds,
+                    confirmPushTimer.ElapsedMilliseconds);
             }
 
             queueItem.Status = RepositorySyncQueueItem.StatusCompleted;
@@ -729,20 +850,159 @@ public sealed class RepositoryCloudSyncOrchestrator(
             repository.CloudSyncLastError = null;
             repository.UpdatedAt = DateTime.UtcNow;
 
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(itemCt);
 
             log.LogInformation(
-                "Cloud queue item completed. RepositoryId {RepositoryId}. LocalSnapshotId {SnapshotId}. RemoteSnapshotId {RemoteSnapshotId}. Missing {Missing}. Uploaded {Uploaded}",
+                "Cloud queue item completed. RepositoryId {RepositoryId}. LocalSnapshotId {SnapshotId}. RemoteSnapshotId {RemoteSnapshotId}. Missing {Missing}. Uploaded {Uploaded}. TotalDurationMs {TotalDurationMs}",
                 repository.Id,
                 queueItem.SnapshotId,
                 queueItem.RemoteSnapshotId,
                 missingHashes.Count,
-                uploaded);
+                uploaded,
+                overallTimer.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (queueItemCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            var affected = await MarkRepositoryQueueCancelledAsync(
+                repository.Id,
+                "Cloud sync cancelled by user.",
+                CancellationToken.None);
+
+            log.LogInformation(
+                "Cloud queue item cancelled by user. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. AffectedQueueItems {AffectedQueueItems}",
+                queueItem.Id,
+                repository.Id,
+                queueItem.SnapshotId,
+                affected);
         }
         catch (Exception ex)
         {
             await MarkQueueFailureAsync(queueItemId, ex, ct);
         }
+        finally
+        {
+            ClearActiveQueueItem(queueItemId);
+        }
+    }
+
+    private static bool ShouldPersistUploadCheckpoint(
+        int currentIndex,
+        int totalCount,
+        int lastPersistedIndex,
+        DateTime lastPersistedAtUtc,
+        DateTime currentUpdatedAtUtc)
+    {
+        if (currentIndex <= lastPersistedIndex)
+            return false;
+
+        if (currentIndex >= totalCount)
+            return false;
+
+        if (currentIndex - lastPersistedIndex >= UploadCheckpointPersistEveryBlocks)
+            return true;
+
+        return currentUpdatedAtUtc - lastPersistedAtUtc >= UploadCheckpointPersistInterval;
+    }
+
+    private async Task PersistUploadCheckpointAsync(
+        RepositorySyncQueueItem queueItem,
+        Repository repository,
+        string checkpointSignature,
+        int totalCount,
+        int nextIndex,
+        CancellationToken ct)
+    {
+        queueItem.UploadCheckpointSignature = checkpointSignature;
+        queueItem.UploadCheckpointTotal = totalCount;
+        queueItem.UploadCheckpointNextIndex = Math.Clamp(nextIndex, 0, totalCount);
+        queueItem.UpdatedAt = DateTime.UtcNow;
+        repository.CloudSyncLastStatus = nextIndex > 0
+            ? $"syncing_upload {queueItem.UploadCheckpointNextIndex}/{totalCount}"
+            : "syncing_upload";
+        repository.UpdatedAt = queueItem.UpdatedAt;
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private void RegisterActiveQueueItem(long queueItemId, int repositoryId, CancellationTokenSource cts)
+    {
+        lock (_activeQueueItemStateGate)
+        {
+            _activeQueueItemId = queueItemId;
+            _activeQueueRepositoryId = repositoryId;
+            _activeQueueItemCts = cts;
+        }
+    }
+
+    private void ClearActiveQueueItem(long queueItemId)
+    {
+        lock (_activeQueueItemStateGate)
+        {
+            if (_activeQueueItemId != queueItemId)
+                return;
+
+            _activeQueueItemId = null;
+            _activeQueueRepositoryId = null;
+            _activeQueueItemCts = null;
+        }
+    }
+
+    private bool CancelActiveQueueItemIfMatches(int repositoryId)
+    {
+        lock (_activeQueueItemStateGate)
+        {
+            if (_activeQueueRepositoryId != repositoryId || _activeQueueItemCts is null)
+                return false;
+
+            _activeQueueItemCts.Cancel();
+            return true;
+        }
+    }
+
+    private async Task<int> MarkRepositoryQueueCancelledAsync(
+        int repositoryId,
+        string reason,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var affected = 0;
+
+        var queueItems = await db.Set<RepositorySyncQueueItem>()
+            .Include(q => q.Repository)
+            .Where(q => q.RepositoryId == repositoryId
+                        && q.OperationType == PushOperationType
+                        && (q.Status == RepositorySyncQueueItem.StatusPending
+                            || q.Status == RepositorySyncQueueItem.StatusRunning
+                            || q.Status == RepositorySyncQueueItem.StatusRetry))
+            .ToListAsync(ct);
+
+        foreach (var queueItem in queueItems)
+        {
+            queueItem.Status = RepositorySyncQueueItem.StatusCancelled;
+            queueItem.LastError = TruncateForColumn(reason, 2048);
+            queueItem.NextAttemptAtUtc = now;
+            queueItem.ObservedRemoteSnapshotId = null;
+            queueItem.UploadCheckpointSignature = null;
+            queueItem.UploadCheckpointTotal = 0;
+            queueItem.UploadCheckpointNextIndex = 0;
+            queueItem.UpdatedAt = now;
+            affected++;
+        }
+
+        var repository = await db.Repositories
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repository is not null)
+        {
+            repository.CloudSyncLastStatus = RepositorySyncQueueItem.StatusCancelled;
+            repository.CloudSyncLastError = null;
+            repository.UpdatedAt = now;
+        }
+
+        if (affected > 0 || repository is not null)
+            await db.SaveChangesAsync(ct);
+
+        return affected;
     }
 
     private async Task MarkQueueFailureAsync(long queueItemId, Exception ex, CancellationToken ct)
@@ -753,6 +1013,15 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         if (queueItem is null)
             return;
+
+        if (queueItem.Status == RepositorySyncQueueItem.StatusCancelled)
+        {
+            log.LogInformation(
+                "Cloud queue item failure handler observed an already-cancelled item. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}",
+                queueItem.Id,
+                queueItem.RepositoryId);
+            return;
+        }
 
         var repository = queueItem.Repository;
         var message = TruncateForColumn(GetInnermostMessage(ex), 2048);
@@ -843,21 +1112,41 @@ public sealed class RepositoryCloudSyncOrchestrator(
         string? titleSuffix,
         CancellationToken ct)
     {
+        var totalTimer = Stopwatch.StartNew();
+
+        var headerTimer = Stopwatch.StartNew();
         var repository = await db.Repositories
-            .Include(r => r.Directory)
+            .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
 
         if (repository is null)
+        {
+            log.LogWarning(
+                "Cloud snapshot package build skipped because repository was not found. RepositoryId {RepositoryId}. LocalSnapshotId {LocalSnapshotId}",
+                repositoryId,
+                localSnapshotId);
             return null;
+        }
 
         var snapshot = await db.RepositorySnapshots
+            .AsNoTracking()
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted && s.Id == localSnapshotId)
             .FirstOrDefaultAsync(ct);
+        headerTimer.Stop();
 
         if (snapshot is null)
+        {
+            log.LogWarning(
+                "Cloud snapshot package build skipped because snapshot was not found. RepositoryId {RepositoryId}. LocalSnapshotId {LocalSnapshotId}. HeaderLoadMs {HeaderLoadMs}",
+                repositoryId,
+                localSnapshotId,
+                headerTimer.ElapsedMilliseconds);
             return null;
+        }
 
+        var entriesTimer = Stopwatch.StartNew();
         var entries = await db.RepositorySnapshotEntries
+            .AsNoTracking()
             .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshot.Id && !e.IsDeleted)
             .OrderBy(e => e.RelativePath)
             .Select(e => new CloudSnapshotEntryDto(
@@ -870,38 +1159,105 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 e.LastWriteUtc,
                 e.ContentHashSha256))
             .ToListAsync(ct);
+        entriesTimer.Stop();
 
-        var links = await db.SnapshotFileLinks
+        var fileVersionMetadataTimer = Stopwatch.StartNew();
+        var fileVersionRows = await db.SnapshotFileLinks
+            .AsNoTracking()
             .Where(l => l.SnapshotId == snapshot.Id && !l.IsDeleted)
-            .Include(l => l.FileIdentity)
-            .Include(l => l.FileVersion)
-                .ThenInclude(v => v.Blocks)
+            .Where(l => !l.FileIdentity.IsDeleted && !l.FileVersion.IsDeleted)
             .OrderBy(l => l.FileIdentity.RelativePath)
+            .Select(l => new
+            {
+                RelativePath = l.FileIdentity.RelativePath,
+                l.FileVersionId,
+                l.FileVersion.ContentHashSha256,
+                l.FileVersion.SizeBytes,
+                l.FileVersion.IsDeletionMarker,
+                CreatedAtUtc = l.FileVersion.CreatedAt
+            })
             .ToListAsync(ct);
+        fileVersionMetadataTimer.Stop();
 
-        if (links.Count == 0)
+        if (fileVersionRows.Count == 0)
+        {
+            log.LogInformation(
+                "Cloud snapshot package build finished without file versions. RepositoryId {RepositoryId}. LocalSnapshotId {LocalSnapshotId}. Entries {Entries}. HeaderLoadMs {HeaderLoadMs}. EntryLoadMs {EntryLoadMs}. FileVersionLoadMs {FileVersionLoadMs}. TotalMs {TotalMs}",
+                repositoryId,
+                localSnapshotId,
+                entries.Count,
+                headerTimer.ElapsedMilliseconds,
+                entriesTimer.ElapsedMilliseconds,
+                fileVersionMetadataTimer.ElapsedMilliseconds,
+                totalTimer.ElapsedMilliseconds);
             return null;
+        }
 
-        var fileVersions = links
-            .Select(link => new CloudFileVersionDto(
-                link.FileIdentity.RelativePath,
-                link.FileVersionId,
-                link.FileVersion.ContentHashSha256,
-                link.FileVersion.SizeBytes,
-                link.FileVersion.IsDeletionMarker,
-                link.FileVersion.CreatedAt,
-                link.FileVersion.Blocks
-                    .Where(b => !b.IsDeleted)
-                    .OrderBy(b => b.Sequence)
-                    .Select(b => new CloudBlockRefDto(
-                        b.Sequence,
-                        b.BlockHashBlake3,
-                        b.LengthBytes,
-                        b.StoredSizeBytes))
-                    .ToList()))
+        var fileVersionIds = db.SnapshotFileLinks
+            .AsNoTracking()
+            .Where(l => l.SnapshotId == snapshot.Id && !l.IsDeleted)
+            .Where(l => !l.FileVersion.IsDeleted)
+            .Select(l => l.FileVersionId)
+            .Distinct();
+
+        var blockLoadTimer = Stopwatch.StartNew();
+        var blockRows = await db.Set<FileVersionBlock>()
+            .AsNoTracking()
+            .Where(b => !b.IsDeleted && fileVersionIds.Contains(b.FileVersionId))
+            .OrderBy(b => b.FileVersionId)
+            .ThenBy(b => b.Sequence)
+            .Select(b => new
+            {
+                b.FileVersionId,
+                Block = new CloudBlockRefDto(
+                    b.Sequence,
+                    b.BlockHashBlake3,
+                    b.LengthBytes,
+                    b.StoredSizeBytes)
+            })
+            .ToListAsync(ct);
+        blockLoadTimer.Stop();
+
+        var assemblyTimer = Stopwatch.StartNew();
+        var blockLookup = blockRows
+            .GroupBy(row => row.FileVersionId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<CloudBlockRefDto>)group
+                    .Select(row => row.Block)
+                    .ToList());
+
+        var fileVersions = fileVersionRows
+            .Select(row => new CloudFileVersionDto(
+                row.RelativePath,
+                row.FileVersionId,
+                row.ContentHashSha256,
+                row.SizeBytes,
+                row.IsDeletionMarker,
+                row.CreatedAtUtc,
+                blockLookup.TryGetValue(row.FileVersionId, out var blocks)
+                    ? blocks
+                    : Array.Empty<CloudBlockRefDto>()))
             .ToList();
+        assemblyTimer.Stop();
 
         var snapshotTitle = AppendTitleSuffix(snapshot.Title, titleSuffix);
+        var blockCount = blockRows.Count;
+        log.LogInformation(
+            "Built cloud snapshot package. RepositoryId {RepositoryId}. LocalSnapshotId {LocalSnapshotId}. RemoteSnapshotId {RemoteSnapshotId}. Entries {Entries}. FileVersions {FileVersions}. Blocks {Blocks}. TitleSuffix {TitleSuffix}. HeaderLoadMs {HeaderLoadMs}. EntryLoadMs {EntryLoadMs}. FileVersionLoadMs {FileVersionLoadMs}. BlockLoadMs {BlockLoadMs}. AssemblyMs {AssemblyMs}. TotalMs {TotalMs}",
+            repositoryId,
+            localSnapshotId,
+            remoteSnapshotId,
+            entries.Count,
+            fileVersions.Count,
+            blockCount,
+            titleSuffix ?? "(none)",
+            headerTimer.ElapsedMilliseconds,
+            entriesTimer.ElapsedMilliseconds,
+            fileVersionMetadataTimer.ElapsedMilliseconds,
+            blockLoadTimer.ElapsedMilliseconds,
+            assemblyTimer.ElapsedMilliseconds,
+            totalTimer.ElapsedMilliseconds);
 
         return new CloudSnapshotPackageDto(
             new CloudRepositoryMetadataDto(repository.Id, repository.Name, repository.Description),

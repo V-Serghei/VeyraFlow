@@ -20,6 +20,10 @@ public sealed class EfRepositoryRecoveryService(
         bool repairMissingBlocksFromCloud = true,
         CancellationToken ct = default)
     {
+        log.LogInformation(
+            "Repository repair started. RepositoryId {RepositoryId}. RepairMissingBlocksFromCloud {RepairMissingBlocksFromCloud}",
+            repositoryId,
+            repairMissingBlocksFromCloud);
         var startedAt = DateTime.UtcNow;
         var messages = new List<string>();
 
@@ -40,7 +44,7 @@ public sealed class EfRepositoryRecoveryService(
         var summary =
             $"Repair {(success ? "completed" : "finished with warnings")}. RepairedBlocks={integrityRun.RepairedBlockCount}, Unresolved={integrityRun.UnresolvedIssueCount}, RelinkAffected={relink.AffectedRows}.";
 
-        return new RepositoryRecoveryResultDto(
+        var result = new RepositoryRecoveryResultDto(
             RepositoryId: repositoryId,
             Action: "repair",
             Success: success,
@@ -49,12 +53,22 @@ public sealed class EfRepositoryRecoveryService(
             AffectedRows: affectedRows,
             Messages: messages,
             Summary: summary);
+
+        log.LogInformation(
+            "Repository repair finished. RepositoryId {RepositoryId}. Success {Success}. AffectedRows {AffectedRows}. Summary {Summary}",
+            repositoryId,
+            result.Success,
+            result.AffectedRows,
+            result.Summary);
+
+        return result;
     }
 
     public async Task<RepositoryRecoveryResultDto> ReindexRepositoryAsync(
         int repositoryId,
         CancellationToken ct = default)
     {
+        log.LogInformation("Repository reindex started. RepositoryId {RepositoryId}", repositoryId);
         var startedAt = DateTime.UtcNow;
         var options = new RepositoryScanOptionsDto(
             SaveFileVersions: true,
@@ -70,7 +84,7 @@ public sealed class EfRepositoryRecoveryService(
         var summary =
             $"Reindex completed. Entries={scanResult.TotalEntries}, Files={scanResult.FileEntries}, Trigger={scanResult.Trigger}.";
 
-        return new RepositoryRecoveryResultDto(
+        var result = new RepositoryRecoveryResultDto(
             RepositoryId: repositoryId,
             Action: "reindex",
             Success: true,
@@ -79,12 +93,21 @@ public sealed class EfRepositoryRecoveryService(
             AffectedRows: scanResult.TotalEntries,
             Messages: [summary],
             Summary: summary);
+
+        log.LogInformation(
+            "Repository reindex finished. RepositoryId {RepositoryId}. AffectedRows {AffectedRows}. Summary {Summary}",
+            repositoryId,
+            result.AffectedRows,
+            result.Summary);
+
+        return result;
     }
 
     public async Task<RepositoryRecoveryResultDto> RelinkRepositoryAsync(
         int repositoryId,
         CancellationToken ct = default)
     {
+        log.LogInformation("Repository relink started. RepositoryId {RepositoryId}", repositoryId);
         var startedAt = DateTime.UtcNow;
 
         var repositoryExists = await db.Set<Repository>()
@@ -250,7 +273,7 @@ public sealed class EfRepositoryRecoveryService(
             ? $"Relink completed. Removed={removed}, Inserted={links.Count}."
             : $"Relink completed with warnings. Removed={removed}, Inserted={links.Count}, MissingIdentities={missingIdentities}, MissingVersions={missingVersions}.";
 
-        return new RepositoryRecoveryResultDto(
+        var result = new RepositoryRecoveryResultDto(
             RepositoryId: repositoryId,
             Action: "relink",
             Success: success,
@@ -259,6 +282,15 @@ public sealed class EfRepositoryRecoveryService(
             AffectedRows: removed + links.Count,
             Messages: messages,
             Summary: summary);
+
+        log.LogInformation(
+            "Repository relink finished. RepositoryId {RepositoryId}. Success {Success}. AffectedRows {AffectedRows}. Summary {Summary}",
+            repositoryId,
+            result.Success,
+            result.AffectedRows,
+            result.Summary);
+
+        return result;
     }
 
     public async Task<IReadOnlyList<RepositoryRecoveryResultDto>> RunStartupHealthCheckAsync(

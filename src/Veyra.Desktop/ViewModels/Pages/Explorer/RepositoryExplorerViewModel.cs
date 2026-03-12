@@ -353,6 +353,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             CancelPanelLoadRequests();
             IsLoading = true;
             ErrorMessage = null;
+            _log.LogInformation("Loading repository explorer. RepositoryId {RepositoryId}", repositoryId);
 
             if (!_savedFiltersLoaded)
             {
@@ -418,6 +419,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             RepositoryPath = repo.DirectoryPath;
 
             await RefreshEntriesAndTreeAsync(clearSelection: true);
+            _log.LogInformation(
+                "Repository explorer loaded. RepositoryId {RepositoryId}. Entries {EntryCount}. PendingChanges {PendingCount}",
+                RepositoryId,
+                _entries.Count,
+                PendingChanges.Count);
             StartLiveSync(repo.DirectoryPath, repo.LinkedFormats);
         }
         catch (Exception ex)

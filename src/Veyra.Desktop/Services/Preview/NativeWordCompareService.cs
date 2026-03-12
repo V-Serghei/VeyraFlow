@@ -44,6 +44,12 @@ public sealed class NativeWordCompareService(ILogger<NativeWordCompareService> l
         {
             try
             {
+                if (!OperatingSystem.IsWindows())
+                {
+                    tcs.TrySetResult(NativeWordCompareLaunchResult.Fail("Native Word compare is available only on Windows."));
+                    return;
+                }
+
                 var result = OpenCompareOnSta(wordType, leftFilePath, rightFilePath, effectiveOptions);
                 tcs.TrySetResult(result);
             }

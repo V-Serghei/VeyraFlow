@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -27,7 +29,12 @@ public sealed class CloudSyncHttpService : ICloudSyncService
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        Converters =
+        {
+            new UtcDateTimeJsonConverter(),
+            new NullableUtcDateTimeJsonConverter()
+        }
     };
 
     public CloudSyncHttpService(
@@ -54,15 +61,27 @@ public sealed class CloudSyncHttpService : ICloudSyncService
     {
         MaybeInjectFault("list_repositories", Interlocked.Increment(ref _listCalls));
 
+        var requestTimer = Stopwatch.StartNew();
+        _log.LogInformation("Cloud API request started. Operation {Operation}", "list_repositories");
         using var req = BuildRequest(HttpMethod.Get, "/api/sync/repositories", accessToken);
         using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
 
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning(
+                "Cloud API request unauthorized. Operation {Operation}. StatusCode {StatusCode}. DurationMs {DurationMs}",
+                "list_repositories",
+                (int)resp.StatusCode,
+                requestTimer.ElapsedMilliseconds);
             return [];
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(resp, "list_repositories", ct);
 
+        var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<ListRepositoriesResponse>(JsonOptions, ct);
+        parseTimer.Stop();
         if (payload is null || !payload.Ok || payload.Repositories is null)
             return [];
 
@@ -95,6 +114,14 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 .ToList();
         }
 
+        _log.LogInformation(
+            "Cloud API request completed. Operation {Operation}. Repositories {Repositories}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            "list_repositories",
+            repositories.Count,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
         return repositories;
     }
 
@@ -103,15 +130,31 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         int repositoryId,
         CancellationToken ct = default)
     {
+        var requestTimer = Stopwatch.StartNew();
+        _log.LogInformation(
+            "Cloud API request started. Operation {Operation}. RepositoryId {RepositoryId}",
+            "get_latest_snapshot",
+            repositoryId);
         using var req = BuildRequest(HttpMethod.Get, $"/api/sync/repositories/{repositoryId}/latest", accessToken);
         using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
 
         if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning(
+                "Cloud API request returned empty result. Operation {Operation}. RepositoryId {RepositoryId}. StatusCode {StatusCode}. DurationMs {DurationMs}",
+                "get_latest_snapshot",
+                repositoryId,
+                (int)resp.StatusCode,
+                requestTimer.ElapsedMilliseconds);
             return null;
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(resp, "get_latest_snapshot", ct, ("RepositoryId", repositoryId));
 
+        var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<GetLatestSnapshotResponse>(JsonOptions, ct);
+        parseTimer.Stop();
         if (payload is null || !payload.Ok || payload.Repository is null || payload.Snapshot is null)
             return null;
 
@@ -143,6 +186,16 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                     .ToList() ?? []))
             .ToList() ?? [];
 
+        _log.LogInformation(
+            "Cloud API request completed. Operation {Operation}. RepositoryId {RepositoryId}. Entries {Entries}. FileVersions {FileVersions}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            "get_latest_snapshot",
+            repositoryId,
+            entries.Count,
+            fileVersions.Count,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
         return new CloudSnapshotPackageDto(
             new CloudRepositoryMetadataDto(
                 payload.Repository.Id,
@@ -170,7 +223,9 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         CancellationToken ct = default)
     {
         MaybeInjectFault("push_snapshot", Interlocked.Increment(ref _pushCalls));
+        var blockCount = package.FileVersions.Sum(v => v.Blocks.Count);
 
+        var requestBuildTimer = Stopwatch.StartNew();
         var requestPayload = new PushSnapshotRequest
         {
             Repository = new PushRepositoryMeta
@@ -219,14 +274,38 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 }).ToList()
             }).ToList()
         };
+        requestBuildTimer.Stop();
 
-        var first = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, idempotencyKey, ct);
+        var serializationTimer = Stopwatch.StartNew();
+        var requestPayloadBytes = JsonSerializer.SerializeToUtf8Bytes(requestPayload, JsonOptions);
+        serializationTimer.Stop();
+
+        _log.LogInformation(
+            "Cloud snapshot push started. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Entries {Entries}. FileVersions {FileVersions}. Blocks {Blocks}. IdempotencyKey {IdempotencyKey}. PayloadSha {PayloadSha}. BuildMs {BuildMs}. SerializeMs {SerializeMs}. PayloadBytes {PayloadBytes}",
+            repositoryId,
+            package.Snapshot.Id,
+            package.Entries.Count,
+            package.FileVersions.Count,
+            blockCount,
+            idempotencyKey ?? "(none)",
+            package.Snapshot.PayloadSha256 ?? "(none)",
+            requestBuildTimer.ElapsedMilliseconds,
+            serializationTimer.ElapsedMilliseconds,
+            requestPayloadBytes.Length);
+
+        var first = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, idempotencyKey, ct);
         if (first is null)
             return null;
 
+        _log.LogInformation(
+            "Cloud snapshot push acknowledged. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. MissingBlocks {MissingBlocks}",
+            repositoryId,
+            package.Snapshot.Id,
+            first.MissingBlockHashes.Count);
+
         if (_fault.DuplicateAckOnPush && !string.IsNullOrWhiteSpace(idempotencyKey))
         {
-            var replay = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, idempotencyKey, ct);
+            var replay = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, idempotencyKey, ct);
             if (replay is not null && !first.MissingBlockHashes.SequenceEqual(replay.MissingBlockHashes, StringComparer.OrdinalIgnoreCase))
             {
                 _log.LogWarning(
@@ -256,6 +335,11 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         CancellationToken ct = default)
     {
         MaybeInjectFault("upload_block", Interlocked.Increment(ref _uploadCalls));
+        var uploadTimer = Stopwatch.StartNew();
+        _log.LogDebug(
+            "Cloud block upload started. BlockHash {BlockHash}. ContentLength {ContentLength}",
+            blockHash,
+            contentLength ?? -1);
 
         using var req = BuildRequest(HttpMethod.Post, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
         req.Content = new StreamContent(content);
@@ -263,8 +347,17 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         if (contentLength is > 0)
             req.Content.Headers.ContentLength = contentLength.Value;
 
+        var sendTimer = Stopwatch.StartNew();
         using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
+        sendTimer.Stop();
+        await EnsureSuccessAsync(resp, "upload_block", ct, ("BlockHash", blockHash), ("ContentLength", contentLength ?? -1));
+        uploadTimer.Stop();
+        _log.LogDebug(
+            "Cloud block upload completed. BlockHash {BlockHash}. ContentLength {ContentLength}. SendMs {SendMs}. TotalMs {TotalMs}",
+            blockHash,
+            contentLength ?? -1,
+            sendTimer.ElapsedMilliseconds,
+            uploadTimer.ElapsedMilliseconds);
     }
 
     public async Task<bool> DownloadBlockToFileAsync(
@@ -274,14 +367,24 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         CancellationToken ct = default)
     {
         MaybeInjectFault("download_block", Interlocked.Increment(ref _downloadCalls));
+        var totalTimer = Stopwatch.StartNew();
+        _log.LogDebug("Cloud block download started. BlockHash {BlockHash}. TargetPath {TargetPath}", blockHash, targetPath);
 
         using var req = BuildRequest(HttpMethod.Get, $"/api/sync/blocks/{Uri.EscapeDataString(blockHash)}", accessToken);
+        var headerTimer = Stopwatch.StartNew();
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        headerTimer.Stop();
 
         if (resp.StatusCode == HttpStatusCode.NotFound)
+        {
+            _log.LogWarning(
+                "Cloud block download returned 404. BlockHash {BlockHash}. HeaderMs {HeaderMs}",
+                blockHash,
+                headerTimer.ElapsedMilliseconds);
             return false;
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(resp, "download_block", ct, ("BlockHash", blockHash), ("TargetPath", targetPath));
 
         var directory = Path.GetDirectoryName(targetPath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -291,6 +394,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         try
         {
             await using var remoteStream = await resp.Content.ReadAsStreamAsync(ct);
+            var copyTimer = Stopwatch.StartNew();
             await using (var fileStream = new FileStream(
                              tempPath,
                              FileMode.Create,
@@ -302,8 +406,18 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 await remoteStream.CopyToAsync(fileStream, ct);
                 await fileStream.FlushAsync(ct);
             }
+            copyTimer.Stop();
 
             File.Move(tempPath, targetPath, overwrite: true);
+            totalTimer.Stop();
+            _log.LogDebug(
+                "Cloud block download completed. BlockHash {BlockHash}. TargetPath {TargetPath}. ResponseContentLength {ContentLength}. HeaderMs {HeaderMs}. CopyMs {CopyMs}. TotalMs {TotalMs}",
+                blockHash,
+                targetPath,
+                resp.Content.Headers.ContentLength ?? -1,
+                headerTimer.ElapsedMilliseconds,
+                copyTimer.ElapsedMilliseconds,
+                totalTimer.ElapsedMilliseconds);
             return true;
         }
         finally
@@ -326,19 +440,27 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         string accessToken,
         CancellationToken ct = default)
     {
+        var requestTimer = Stopwatch.StartNew();
+        _log.LogInformation("Cloud storage metrics request started.");
         using var req = BuildRequest(HttpMethod.Get, "/api/admin/storage/metrics", accessToken);
         using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
 
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning("Cloud storage metrics request unauthorized. DurationMs {DurationMs}", requestTimer.ElapsedMilliseconds);
             return null;
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(resp, "storage_metrics", ct);
 
+        var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<StorageMetricsResponse>(JsonOptions, ct);
+        parseTimer.Stop();
         if (payload is null || !payload.Ok || payload.Summary is null || payload.Blocks is null || payload.Packs is null || payload.Filesystem is null)
             return null;
 
-        return new CloudStorageMetricsDto(
+        var metrics = new CloudStorageMetricsDto(
             payload.Ok,
             new CloudStorageSummaryDto(
                 payload.Summary.LogicalBlockCount,
@@ -371,6 +493,17 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 payload.Filesystem.LooseFileBytes,
                 payload.Filesystem.OtherFileBytes,
                 payload.Filesystem.TotalPhysicalBytes));
+
+        _log.LogInformation(
+            "Cloud storage metrics request completed. LogicalBlocks {LogicalBlocks}. PhysicalObjects {PhysicalObjects}. MissingBlocks {MissingBlocks}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            metrics.Summary.LogicalBlockCount,
+            metrics.Summary.PhysicalObjectCount,
+            metrics.Summary.MissingBlockCount,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
+        return metrics;
     }
 
     public async Task<CloudStorageRepairResultDto?> RepairStorageAsync(
@@ -385,16 +518,38 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             CompactLimit = compactLimit
         };
 
+        var serializationTimer = Stopwatch.StartNew();
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(requestPayload, JsonOptions);
+        serializationTimer.Stop();
+
+        _log.LogInformation(
+            "Cloud storage repair request started. ScanLimit {ScanLimit}. CompactLimit {CompactLimit}. SerializeMs {SerializeMs}. PayloadBytes {PayloadBytes}",
+            scanLimit,
+            compactLimit,
+            serializationTimer.ElapsedMilliseconds,
+            payloadBytes.Length);
+
         using var req = BuildRequest(HttpMethod.Post, "/api/admin/storage/repair", accessToken);
-        req.Content = JsonContent.Create(requestPayload);
+        req.Content = new ByteArrayContent(payloadBytes);
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json")
+        {
+            CharSet = Encoding.UTF8.WebName
+        };
 
+        var requestTimer = Stopwatch.StartNew();
         using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning("Cloud storage repair request unauthorized. DurationMs {DurationMs}", requestTimer.ElapsedMilliseconds);
             return null;
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(resp, "storage_repair", ct, ("ScanLimit", scanLimit), ("CompactLimit", compactLimit));
 
+        var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<StorageRepairResponse>(JsonOptions, ct);
+        parseTimer.Stop();
         if (payload is null || !payload.Ok || payload.Repair is null || payload.Metrics is null)
             return null;
 
@@ -440,6 +595,15 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         if (metrics is null)
             return null;
 
+        _log.LogInformation(
+            "Cloud storage repair request completed. Scanned {Scanned}. MissingMarked {MissingMarked}. Compacted {Compacted}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            payload.Repair.Scanned,
+            payload.Repair.MissingMarked,
+            payload.Repair.Compacted,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            serializationTimer.ElapsedMilliseconds + requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
         return new CloudStorageRepairResultDto(
             payload.Ok,
             new CloudStorageRepairStatsDto(
@@ -467,21 +631,57 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         string accessToken,
         int repositoryId,
         PushSnapshotRequest requestPayload,
+        byte[] requestPayloadBytes,
         string? idempotencyKey,
         CancellationToken ct)
     {
         using var req = BuildRequest(HttpMethod.Post, $"/api/sync/repositories/{repositoryId}/snapshots", accessToken, idempotencyKey);
-        req.Content = JsonContent.Create(requestPayload);
+        req.Content = new ByteArrayContent(requestPayloadBytes);
+        req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json")
+        {
+            CharSet = Encoding.UTF8.WebName
+        };
 
+        var requestTimer = Stopwatch.StartNew();
         using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning(
+                "Cloud snapshot push unauthorized. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. IdempotencyKey {IdempotencyKey}. PayloadBytes {PayloadBytes}. RequestMs {RequestMs}",
+                repositoryId,
+                requestPayload.Snapshot?.Id,
+                idempotencyKey ?? "(none)",
+                requestPayloadBytes.Length,
+                requestTimer.ElapsedMilliseconds);
             return null;
+        }
 
-        resp.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(
+            resp,
+            "push_snapshot",
+            ct,
+            ("RepositoryId", repositoryId),
+            ("SnapshotId", requestPayload.Snapshot?.Id ?? 0),
+            ("Entries", requestPayload.Entries?.Count ?? 0),
+            ("FileVersions", requestPayload.FileVersions?.Count ?? 0),
+            ("IdempotencyKey", idempotencyKey ?? "(none)"));
 
+        var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<PushSnapshotResponse>(JsonOptions, ct);
+        parseTimer.Stop();
         if (payload is null)
             return null;
+
+        _log.LogInformation(
+            "Cloud snapshot push request completed. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. MissingBlocks {MissingBlocks}. PayloadBytes {PayloadBytes}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            repositoryId,
+            requestPayload.Snapshot?.Id ?? 0,
+            payload.MissingBlockHashes?.Count ?? 0,
+            requestPayloadBytes.Length,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
 
         return new CloudPushResultDto(payload.Ok, payload.MissingBlockHashes ?? []);
     }
@@ -503,6 +703,52 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         {
             throw new TaskCanceledException(
                 $"Fault injection: simulated timeout on '{operation}' call #{callNumber}.");
+        }
+    }
+
+    private async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        string operation,
+        CancellationToken ct,
+        params (string Key, object? Value)[] properties)
+    {
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await ReadResponseBodySafeAsync(response, ct);
+        var values = properties
+            .Where(p => !string.IsNullOrWhiteSpace(p.Key))
+            .Select(p => $"{p.Key}={p.Value}")
+            .ToArray();
+        var context = values.Length == 0 ? string.Empty : " " + string.Join(" ", values);
+
+        _log.LogWarning(
+            "Cloud API request failed. Operation {Operation}. StatusCode {StatusCode}. ReasonPhrase {ReasonPhrase}. Context {Context}. ResponseBody {ResponseBody}",
+            operation,
+            (int)response.StatusCode,
+            response.ReasonPhrase ?? string.Empty,
+            context,
+            body);
+
+        throw new HttpRequestException(
+            $"Cloud API {operation} failed with status {(int)response.StatusCode} ({response.ReasonPhrase ?? "unknown"}). Response: {body}",
+            null,
+            response.StatusCode);
+    }
+
+    private static async Task<string> ReadResponseBodySafeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            if (string.IsNullOrWhiteSpace(body))
+                return "(empty)";
+
+            return body.Length <= 4096 ? body : body[..4096];
+        }
+        catch (Exception ex)
+        {
+            return $"(failed to read response body: {ex.Message})";
         }
     }
 
@@ -698,6 +944,46 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         public string? BlockHash { get; init; }
         public int LengthBytes { get; init; }
         public long StoredSizeBytes { get; init; }
+    }
+
+    private static DateTime NormalizeUtc(DateTime value)
+    {
+        if (value == default)
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            _ => value.ToUniversalTime()
+        };
+    }
+
+    private sealed class UtcDateTimeJsonConverter : JsonConverter<DateTime>
+    {
+        public override DateTime Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            NormalizeUtc(reader.GetDateTime());
+
+        public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(NormalizeUtc(value).ToString("O"));
+    }
+
+    private sealed class NullableUtcDateTimeJsonConverter : JsonConverter<DateTime?>
+    {
+        public override DateTime? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType == JsonTokenType.Null ? null : NormalizeUtc(reader.GetDateTime());
+
+        public override void Write(Utf8JsonWriter writer, DateTime? value, JsonSerializerOptions options)
+        {
+            if (value is null)
+            {
+                writer.WriteNullValue();
+                return;
+            }
+
+            writer.WriteStringValue(NormalizeUtc(value.Value).ToString("O"));
+        }
     }
 }
 

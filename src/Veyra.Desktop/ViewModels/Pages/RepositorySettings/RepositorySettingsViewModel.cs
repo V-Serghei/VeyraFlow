@@ -116,6 +116,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = null;
+            _log.LogInformation("Loading repository settings. RepositoryId {RepositoryId}", repositoryId);
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
@@ -160,6 +161,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             RetentionResultText = string.Empty;
             RetentionProgressText = string.Empty;
             BundleOperationMessage = string.Empty;
+            _log.LogInformation(
+                "Repository settings loaded. RepositoryId {RepositoryId}. SelectedFormats {SelectedFormatsCount}",
+                RepositoryId,
+                SelectedFormats.Count);
         }
         catch (Exception ex)
         {
@@ -239,6 +244,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = null;
+            _log.LogInformation("Saving repository settings. RepositoryId {RepositoryId}", RepositoryId);
 
             var policy = BuildRetentionPolicyFromState();
             var syncRetryAttempts = ParseIntOrDefault(SyncRetryMaxAttempts, 5, 1, 20);
@@ -268,6 +274,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 await RepositoryUpdated.Invoke(RepositoryId);
 
             await LoadAsync(RepositoryId);
+            _log.LogInformation("Repository settings saved. RepositoryId {RepositoryId}", RepositoryId);
         }
         catch (Exception ex)
         {
@@ -301,11 +308,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             IsSyncNowRunning = true;
             ErrorMessage = null;
+            _log.LogInformation("Repository cloud sync requested. RepositoryId {RepositoryId}", RepositoryId);
 
             await _cloudSync.TryPushLatestSnapshotAsync(RepositoryId);
             await _cloudSync.ProcessPendingQueueAsync();
 
             await LoadAsync(RepositoryId);
+            _log.LogInformation("Repository cloud sync finished. RepositoryId {RepositoryId}", RepositoryId);
         }
         catch (Exception ex)
         {
@@ -340,6 +349,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsCloudRepairRunning = true;
             ErrorMessage = null;
             CloudRepairMessage = Loc.T("repo_settings.cloud_repair_running");
+            _log.LogInformation("Repository cloud repair requested. RepositoryId {RepositoryId}", RepositoryId);
 
             var result = await _cloudSync.RepairRepositoryCloudDataAsync(RepositoryId);
             await LoadAsync(RepositoryId);
@@ -361,6 +371,15 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !result.Success)
                 ErrorMessage = result.ErrorMessage;
+
+            _log.LogInformation(
+                "Repository cloud repair finished. RepositoryId {RepositoryId}. Success {Success}. ReferencedBlocks {ReferencedBlocks}. UploadedBlocks {UploadedBlocks}. MissingLocalBlocks {MissingLocalBlocks}. FailedUploads {FailedUploads}",
+                RepositoryId,
+                result.Success,
+                result.ReferencedBlocks,
+                result.UploadedBlocks,
+                result.MissingLocalBlocks,
+                result.FailedUploads);
         }
         catch (Exception ex)
         {

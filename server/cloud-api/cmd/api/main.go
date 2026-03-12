@@ -10,19 +10,24 @@ import (
 	"time"
 
 	"veyraflow/server/cloud-api/internal/handlers"
+	"veyraflow/server/cloud-api/internal/obs"
 	"veyraflow/server/cloud-api/internal/store/postgres"
 )
 
 func main() {
 	port := getenv("HTTP_PORT", "8080")
 	dsn := getenv("DB_DSN", "postgres://veyra:veyra_pass_Dev@localhost:5432/veyraflow?sslmode=disable")
+	seqURL := getenv("SEQ_URL", "")
 	tokenSecret := getenv("AUTH_TOKEN_SECRET", "veyra-dev-secret-change-me")
 	blockStoreDir := getenv("BLOCK_STORE_DIR", "./data/blocks")
 	blockPackTargetMB := getenvInt("BLOCK_PACK_TARGET_MB", 128, 16, 4096)
 	blockCompactionIntervalSeconds := getenvInt("BLOCK_COMPACTION_INTERVAL_SECONDS", 120, 10, 86400)
 	blockCompactionBatchSize := getenvInt("BLOCK_COMPACTION_BATCH_SIZE", 128, 1, 10000)
+	maxPushPayloadMB := getenvInt("SYNC_MAX_PUSH_PAYLOAD_MB", 256, 16, 1024)
 	tokenLifetimeMinutes := getenvInt("AUTH_TOKEN_LIFETIME_MINUTES", 1440, 5, 30*24*60)
 	refreshTokenLifetimeMinutes := getenvInt("AUTH_REFRESH_TOKEN_LIFETIME_MINUTES", 30*24*60, 60, 90*24*60)
+	closeLogger := obs.ConfigureStandardLogger("veyra-cloud-api", seqURL)
+	defer closeLogger()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -48,6 +53,7 @@ func main() {
 		tokenSecret,
 		blockStoreDir,
 		int64(blockPackTargetMB)*1024*1024,
+		int64(maxPushPayloadMB)*1024*1024,
 		time.Duration(tokenLifetimeMinutes)*time.Minute,
 		time.Duration(refreshTokenLifetimeMinutes)*time.Minute)
 
@@ -77,12 +83,19 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      mux,
+		Handler:      withRecoveryLogging(withHTTPAccessLogging(mux)),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second,
 	}
 
-	log.Printf("cloud-api listening on :%s", port)
+	log.Printf(
+		"cloud-api listening on :%s seq_url=%q pack_target_mb=%d push_payload_mb=%d compaction_interval_seconds=%d compaction_batch_size=%d",
+		port,
+		seqURL,
+		blockPackTargetMB,
+		maxPushPayloadMB,
+		blockCompactionIntervalSeconds,
+		blockCompactionBatchSize)
 	if err = srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -165,4 +178,49 @@ func getenvInt(k string, def, min, max int) int {
 		return max
 	}
 	return parsed
+}
+
+type statusCapturingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusCapturingResponseWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func withHTTPAccessLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now().UTC()
+		captured := &statusCapturingResponseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+		}
+
+		next.ServeHTTP(captured, r)
+
+		duration := time.Since(startedAt)
+		log.Printf(
+			"http request completed method=%s path=%s status=%d duration_ms=%d remote=%s user_agent=%q",
+			r.Method,
+			r.URL.Path,
+			captured.statusCode,
+			duration.Milliseconds(),
+			strings.TrimSpace(r.RemoteAddr),
+			strings.TrimSpace(r.UserAgent()))
+	})
+}
+
+func withRecoveryLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("panic recovered method=%s path=%s remote=%s panic=%v", r.Method, r.URL.Path, strings.TrimSpace(r.RemoteAddr), recovered)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		}()
+
+		next.ServeHTTP(w, r)
+	})
 }
