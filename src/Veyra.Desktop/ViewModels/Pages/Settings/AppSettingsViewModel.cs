@@ -17,8 +17,11 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Styling;
+using Veyra.Desktop.ViewModels.Windows;
+using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.Settings;
 
@@ -99,6 +102,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly IRepositoryCloudSyncOrchestrator _sync;
     private readonly ICloudSyncService _cloudSyncService;
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
+    private readonly IWindowService _windows;
     private readonly IMediator _mediator;
     private readonly ILogger<AppSettingsViewModel> _log;
     private readonly LocalizationManager _localization;
@@ -251,6 +255,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         IRepositoryCloudSyncOrchestrator sync,
         ICloudSyncService cloudSyncService,
         ISensitiveActionGuard sensitiveActionGuard,
+        IWindowService windows,
         IMediator mediator,
         IConfiguration config,
         ILogger<AppSettingsViewModel> log)
@@ -262,6 +267,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _sync = sync;
         _cloudSyncService = cloudSyncService;
         _sensitiveActionGuard = sensitiveActionGuard;
+        _windows = windows;
         _mediator = mediator;
         _log = log;
         _localization = LocalizationManager.Instance;
@@ -292,6 +298,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool HasLocalizationExtraSample => !string.IsNullOrWhiteSpace(LocalizationExtraSample);
     public bool CanEditSensitiveActionVerification => HasActiveProfile;
     public bool HasRepositorySyncIssues => RepositorySyncIssueCount > 0;
+    public bool HasKnownProfiles => Profiles.Count > 0;
+    public bool IsGuestMode => !HasActiveProfile;
+    public bool HasOperationJournalItems => OperationJournalItems.Count > 0;
 
     public bool IsConfirmPasswordVisible => IsRegisterMode;
     public string SubmitAuthLabel => IsRegisterMode ? Loc.T("app_settings.auth_create_account") : Loc.T("auth.sign_in");
@@ -353,6 +362,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             var active = await _userProfiles.GetActiveProfileAsync();
             var activeTokenState = _tokenPolicy.Evaluate(active?.AccessToken);
             HasActiveProfile = active is not null;
+            OnPropertyChanged(nameof(IsGuestMode));
 
             ActiveUsername = active?.Username ?? Loc.T("app_settings.not_signed_in");
             ActiveEmail = string.IsNullOrWhiteSpace(active?.Email)
@@ -450,6 +460,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     SyncMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
                 return;
             }
+            OnPropertyChanged(nameof(HasKnownProfiles));
 
             IsSyncBusy = true;
             SyncMessage = string.Empty;
@@ -559,6 +570,15 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         IsRegisterMode = !IsRegisterMode;
         AuthMessage = string.Empty;
     }
+
+    [RelayCommand]
+    private Task OpenSignInDialogAsync() => OpenAuthDialogAsync(registerMode: false);
+
+    [RelayCommand]
+    private Task OpenRegisterDialogAsync() => OpenAuthDialogAsync(registerMode: true);
+
+    [RelayCommand]
+    private Task AddUserAsync() => OpenAuthDialogAsync(registerMode: false);
 
     [RelayCommand(CanExecute = nameof(CanSubmitAuth))]
     private async Task SubmitAuthAsync()
@@ -746,6 +766,30 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         finally
         {
             IsAuthBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ShowOperationJournalAsync()
+    {
+        try
+        {
+            var owner = _windows.GetActiveWindow();
+            var window = _windows.Create<OperationJournalWindow>();
+            if (window.DataContext is not OperationJournalWindowViewModel vm)
+                return;
+
+            await vm.LoadAsync();
+
+            if (owner is not null)
+                await _windows.ShowDialogAsync(window, owner);
+            else
+                _windows.Show(window);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open operation journal window");
+            GeneralMessage = Loc.T("app_settings.operation_journal_open_failed");
         }
     }
 
@@ -1552,7 +1596,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
-            var entries = await _journal.GetRecentAsync(120);
+            var entries = await _journal.GetRecentAsync(5);
             OperationJournalItems.Clear();
 
             foreach (var entry in entries)
@@ -1571,11 +1615,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     scope,
                     entry.Message));
             }
+
+            OnPropertyChanged(nameof(HasOperationJournalItems));
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Failed to load operation journal");
             OperationJournalItems.Clear();
+            OnPropertyChanged(nameof(HasOperationJournalItems));
         }
     }
 
@@ -1602,6 +1649,41 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogDebug(ex, "Skipped appending operation journal entry for action {Action}", action);
+        }
+    }
+
+    private async Task OpenAuthDialogAsync(bool registerMode)
+    {
+        try
+        {
+            var owner = _windows.GetActiveWindow();
+            var window = _windows.Create<AuthDialogWindow>();
+            if (window.DataContext is not AuthDialogWindowViewModel vm)
+                return;
+
+            vm.Configure(registerMode);
+
+            if (owner is not null)
+                await _windows.ShowDialogAsync(window, owner);
+            else
+                _windows.Show(window);
+
+            if (!vm.IsSuccessful)
+                return;
+
+            AuthMessage = vm.ResultMessage;
+            await AppendJournalAsync(
+                "info",
+                "auth",
+                registerMode ? "dialog_register" : "dialog_login",
+                vm.ResultMessage,
+                ActiveUsername);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open auth dialog. RegisterMode {RegisterMode}", registerMode);
+            AuthMessage = Loc.T("app_settings.auth_request_failed");
         }
     }
 

@@ -128,9 +128,16 @@
                                 <TextBlock Text="{loc:Tr snapshot_dialog.scroll_synced}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
                             </Border>
                             <Button Grid.Column="6"
-                                    Content="{Binding WrapToggleLabel}"
-                                    Classes="subtle"
-                                    Command="{Binding ToggleWrapModeCommand}"/>
+                                    Classes="subtle responsive-icon"
+                                    Command="{Binding ToggleWrapModeCommand}"
+                                    ToolTip.Tip="{loc:Tr compare.tooltip_toggle_wrap}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE8A9;"/>
+                                        <TextBlock Classes="button-label" Text="{Binding WrapToggleLabel}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
                         </Grid>
 
                         <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="8">
@@ -329,8 +336,90 @@
                             </Border>
 
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">
-                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                                    <ItemsControl Grid.Row="0" ItemsSource="{Binding PreviewMetrics}">
+                                <StackPanel Spacing="10">
+                                    <Border Classes="toolbar"
+                                            Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="10">
+                                        <WrapPanel Orientation="Horizontal">
+                                            <StackPanel Spacing="4" MinWidth="160" Margin="0,0,10,10">
+                                                <TextBlock Text="{loc:Tr compare.image_mode}" Classes="muted" FontSize="11"/>
+                                                <Border Classes="segmented-control" MinWidth="322">
+                                                    <ItemsControl ItemsSource="{Binding ImageDiffModes}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="windows:ImageDiffModeOptionViewModel">
+                                                                <ToggleButton Classes="segmented"
+                                                                              Content="{Binding Label}"
+                                                                              IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                                              Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).SelectImageDiffModeCommand}"
+                                                                              CommandParameter="{Binding}"/>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Border>
+                                            </StackPanel>
+
+                                            <StackPanel Spacing="4" MinWidth="190" Margin="0,0,10,10">
+                                                <TextBlock Text="{loc:Tr compare.image_sensitivity}" Classes="muted" FontSize="11"/>
+                                                <Slider Minimum="1"
+                                                        Maximum="100"
+                                                        Value="{Binding ImageDiffSensitivity}"
+                                                        TickFrequency="5"
+                                                        IsSnapToTickEnabled="False"/>
+                                                <TextBlock Text="{Binding ImageSensitivityLabel}" Classes="muted" FontSize="11"/>
+                                            </StackPanel>
+
+                                            <StackPanel Spacing="4" MinWidth="160" Margin="0,0,10,10" IsVisible="{Binding IsSplitImageDiffMode}">
+                                                <TextBlock Text="{loc:Tr compare.image_split}" Classes="muted" FontSize="11"/>
+                                                <Slider Minimum="0"
+                                                        Maximum="100"
+                                                        Value="{Binding ComparisonSplitPercent}"/>
+                                                <TextBlock Text="{Binding SplitPositionLabel}" Classes="muted" FontSize="11"/>
+                                            </StackPanel>
+
+                                            <StackPanel Spacing="6" VerticalAlignment="Bottom" Margin="0,0,10,10">
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Command="{Binding ToggleShowImageDiffRegionBoxesCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE81E;"/>
+                                                            <TextBlock Classes="button-label" Text="{Binding ImageRegionBoxesLabel}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Command="{Binding ToggleShowSourceImagePanelsCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE7B3;"/>
+                                                            <TextBlock Classes="button-label" Text="{Binding SourceImagePanelsLabel}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </StackPanel>
+
+                                            <StackPanel Spacing="6" VerticalAlignment="Bottom" Margin="0,0,10,10">
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Command="{Binding ResetImageDiffSettingsCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.reset_diff_settings}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </StackPanel>
+                                        </WrapPanel>
+                                    </Border>
+
+                                    <ItemsControl ItemsSource="{Binding PreviewMetrics}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
                                                 <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,6">
@@ -346,7 +435,19 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
 
-                                    <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding HasImagePreviews}">
+                                    <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="8"
+                                            IsVisible="{Binding HasOverlayImagePreview}">
+                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                            <TextBlock Grid.Row="0" Text="{Binding OverlayImageCaption}" FontWeight="SemiBold"/>
+                                            <Image Grid.Row="1" Source="{Binding OverlayImagePreview}" Stretch="Uniform"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding ShowSourceImagePanelsSection}">
                                         <Border Grid.Column="0" Background="{DynamicResource VeyraSurfaceSoftBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
@@ -362,12 +463,11 @@
                                         </Border>
                                     </Grid>
 
-                                    <TextBlock Grid.Row="1"
-                                               Text="{loc:Tr compare.image_preview_unavailable}"
+                                    <TextBlock Text="{loc:Tr compare.image_preview_unavailable}"
                                                Classes="muted"
                                                IsVisible="{Binding HasNoImagePreviews}"
                                                TextWrapping="Wrap"/>
-                                </Grid>
+                                </StackPanel>
                             </Border>
 
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding HasNoPreviewContent}">
@@ -395,12 +495,25 @@
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             Spacing="8">
-                    <Button Content="{loc:Tr common.cancel}" Width="132" Classes="subtle" Command="{Binding CancelCommand}"/>
-                    <Button Content="{loc:Tr snapshot_dialog.save_snapshot}"
-                            Width="164"
-                            Classes="primary"
+                    <Button Width="132" Classes="subtle responsive-icon" Command="{Binding CancelCommand}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.cancel}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button Width="164"
+                            Classes="primary responsive-icon"
                             Command="{Binding SaveCommand}"
-                            IsEnabled="{Binding CanSave}"/>
+                            IsEnabled="{Binding CanSave}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE74E;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr snapshot_dialog.save_snapshot}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

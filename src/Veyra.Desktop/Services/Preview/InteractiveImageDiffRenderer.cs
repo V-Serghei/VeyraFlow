@@ -1,0 +1,438 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
+using SixLabors.Fonts;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+
+namespace Veyra.Desktop.Services.Preview;
+
+public enum ImageDiffVisualizationMode
+{
+    Overlay,
+    Heatmap,
+    Split,
+    Composite
+}
+
+internal sealed record InteractiveImageDiffRenderResult(
+    Bitmap Bitmap,
+    byte[] PngBytes,
+    int ChangedPixelCount,
+    double ChangedPixelRatio,
+    int ChangedRegionCount);
+
+internal static class InteractiveImageDiffRenderer
+{
+    private const int MaxPixels = 24_000_000;
+    private const int MinRegionPixels = 12;
+
+    public static async Task<InteractiveImageDiffRenderResult?> TryRenderAsync(
+        string baselinePath,
+        string currentPath,
+        double sensitivityPercent,
+        ImageDiffVisualizationMode mode,
+        double splitPercent,
+        bool showRegionBoxes,
+        string? leftLabel,
+        string? rightLabel,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(baselinePath)
+            || string.IsNullOrWhiteSpace(currentPath)
+            || !File.Exists(baselinePath)
+            || !File.Exists(currentPath))
+        {
+            return null;
+        }
+
+        using var baselineImage = await Image.LoadAsync<Rgba32>(baselinePath, ct);
+        using var currentImage = await Image.LoadAsync<Rgba32>(currentPath, ct);
+
+        var compareWidth = Math.Max(baselineImage.Width, currentImage.Width);
+        var compareHeight = Math.Max(baselineImage.Height, currentImage.Height);
+        var width = mode == ImageDiffVisualizationMode.Composite
+            ? baselineImage.Width + currentImage.Width + 24
+            : compareWidth;
+        var height = mode == ImageDiffVisualizationMode.Composite
+            ? Math.Max(baselineImage.Height, currentImage.Height)
+            : compareHeight;
+
+        if (width <= 0 || height <= 0 || (long)width * height > MaxPixels)
+            return null;
+
+        var normalizedSensitivity = Math.Clamp(sensitivityPercent / 100d, 0d, 1d);
+        var diffThreshold = Lerp(64d, 6d, normalizedSensitivity);
+        var splitRatio = Math.Clamp(splitPercent / 100d, 0d, 1d);
+        var splitX = (int)Math.Round(width * splitRatio);
+
+        using var output = new Image<Rgba32>(width, height);
+        if (mode == ImageDiffVisualizationMode.Composite)
+        {
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                    output[x, y] = new Rgba32(18, 22, 30, 255);
+            }
+        }
+        var mask = new bool[compareWidth * compareHeight];
+        var changedPixels = 0;
+
+        for (var y = 0; y < compareHeight; y++)
+        {
+            for (var x = 0; x < compareWidth; x++)
+            {
+                var baselinePixel = x < baselineImage.Width && y < baselineImage.Height
+                    ? baselineImage[x, y]
+                    : default;
+                var currentPixel = x < currentImage.Width && y < currentImage.Height
+                    ? currentImage[x, y]
+                    : default;
+
+                var difference = ComputeDifference(baselinePixel, currentPixel);
+                var changed = difference >= diffThreshold;
+                if (changed)
+                {
+                    mask[(y * width) + x] = true;
+                    changedPixels++;
+                }
+
+                output[x, y] = mode switch
+                {
+                    ImageDiffVisualizationMode.Heatmap => BuildHeatmapPixel(currentPixel, baselinePixel, difference, diffThreshold),
+                    ImageDiffVisualizationMode.Split => BuildSplitPixel(x, splitX, baselinePixel, currentPixel),
+                    ImageDiffVisualizationMode.Composite => BuildBaseDisplayPixel(new Rgba32(18, 22, 30, 255)),
+                    _ => BuildOverlayPixel(currentPixel, baselinePixel, difference, diffThreshold)
+                };
+            }
+        }
+
+        if (mode == ImageDiffVisualizationMode.Composite)
+            RenderComposite(output, baselineImage, currentImage);
+
+        var regions = ExtractRegions(mask, compareWidth, compareHeight);
+
+        if (showRegionBoxes)
+        {
+            foreach (var region in regions)
+            {
+                if (mode == ImageDiffVisualizationMode.Composite)
+                {
+                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), 0);
+                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), baselineImage.Width + 24);
+                }
+                else
+                {
+                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), 0);
+                }
+            }
+        }
+
+        if (mode == ImageDiffVisualizationMode.Split)
+            DrawSplitDivider(output, splitX, new Rgba32(128, 184, 255, 255));
+        else if (mode == ImageDiffVisualizationMode.Composite)
+        {
+            DrawCompositeDivider(output, baselineImage.Width + 12, new Rgba32(128, 184, 255, 255));
+            DrawCompositeLabels(output, baselineImage, currentImage, leftLabel, rightLabel);
+        }
+
+        await using var stream = new MemoryStream();
+        await output.SaveAsPngAsync(stream, new PngEncoder(), ct);
+        var pngBytes = stream.ToArray();
+        await using var bitmapStream = new MemoryStream(pngBytes, writable: false);
+        var bitmap = new Bitmap(bitmapStream);
+        return new InteractiveImageDiffRenderResult(
+            bitmap,
+            pngBytes,
+            changedPixels,
+            Math.Clamp((double)changedPixels / (compareWidth * (double)compareHeight), 0d, 1d),
+            regions.Count);
+    }
+
+    private static double ComputeDifference(Rgba32 left, Rgba32 right)
+    {
+        var alphaWeight = 0.35d;
+        var rgbWeight = 0.65d / 3d;
+
+        return (Math.Abs(left.R - right.R) * rgbWeight)
+               + (Math.Abs(left.G - right.G) * rgbWeight)
+               + (Math.Abs(left.B - right.B) * rgbWeight)
+               + (Math.Abs(left.A - right.A) * alphaWeight);
+    }
+
+    private static Rgba32 BuildOverlayPixel(Rgba32 currentPixel, Rgba32 baselinePixel, double difference, double threshold)
+    {
+        var basePixel = BuildBaseDisplayPixel(currentPixel.A > 0 ? currentPixel : baselinePixel);
+        if (difference < threshold)
+            return basePixel;
+
+        var strength = Math.Clamp((difference - threshold) / Math.Max(1d, 255d - threshold), 0d, 1d);
+        var highlight = HeatColor(strength);
+        return Blend(basePixel, highlight, (float)(0.40d + (strength * 0.45d)));
+    }
+
+    private static Rgba32 BuildHeatmapPixel(Rgba32 currentPixel, Rgba32 baselinePixel, double difference, double threshold)
+    {
+        var basePixel = BuildBaseDisplayPixel(currentPixel.A > 0 ? currentPixel : baselinePixel);
+        var normalized = difference <= 0d ? 0d : Math.Clamp(difference / 255d, 0d, 1d);
+        var highlight = HeatColor(normalized);
+
+        if (difference < threshold)
+            return Blend(basePixel, new Rgba32(20, 30, 44, 255), 0.18f);
+
+        return Blend(basePixel, highlight, (float)(0.30d + (normalized * 0.60d)));
+    }
+
+    private static Rgba32 BuildSplitPixel(int x, int splitX, Rgba32 baselinePixel, Rgba32 currentPixel)
+    {
+        var visible = x < splitX ? baselinePixel : currentPixel;
+        return visible.A == 0
+            ? new Rgba32(18, 22, 30, 255)
+            : new Rgba32(visible.R, visible.G, visible.B, 255);
+    }
+
+    private static void DrawSplitDivider(Image<Rgba32> image, int splitX, Rgba32 color)
+    {
+        if (splitX < 0 || splitX >= image.Width)
+            return;
+
+        for (var y = 0; y < image.Height; y++)
+        {
+            image[splitX, y] = color;
+            if (splitX + 1 < image.Width)
+                image[splitX + 1, y] = new Rgba32(238, 245, 255, 255);
+        }
+    }
+
+    private static void DrawCompositeDivider(Image<Rgba32> image, int dividerCenterX, Rgba32 color)
+    {
+        if (dividerCenterX < 0 || dividerCenterX >= image.Width)
+            return;
+
+        for (var y = 0; y < image.Height; y++)
+        {
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                var x = dividerCenterX + dx;
+                if (x >= 0 && x < image.Width)
+                    image[x, y] = color;
+            }
+        }
+    }
+
+    private static void RenderComposite(Image<Rgba32> output, Image<Rgba32> baselineImage, Image<Rgba32> currentImage)
+    {
+        for (var y = 0; y < baselineImage.Height; y++)
+        {
+            for (var x = 0; x < baselineImage.Width; x++)
+                output[x, y] = BuildBaseDisplayPixel(baselineImage[x, y]);
+        }
+
+        var offsetX = baselineImage.Width + 24;
+        for (var y = 0; y < currentImage.Height; y++)
+        {
+            for (var x = 0; x < currentImage.Width; x++)
+                output[offsetX + x, y] = BuildBaseDisplayPixel(currentImage[x, y]);
+        }
+    }
+
+    private static void DrawCompositeLabels(
+        Image<Rgba32> output,
+        Image<Rgba32> baselineImage,
+        Image<Rgba32> currentImage,
+        string? leftLabel,
+        string? rightLabel)
+    {
+        var font = ResolveLabelFont(18f);
+        if (font is null)
+            return;
+
+        var leftText = string.IsNullOrWhiteSpace(leftLabel) ? "Before" : leftLabel;
+        var rightText = string.IsNullOrWhiteSpace(rightLabel) ? "After" : rightLabel;
+        DrawLabel(output, leftText, 16, 16, font, new Rgba32(26, 40, 63, 235), new Rgba32(235, 244, 255, 255));
+        DrawLabel(output, rightText, baselineImage.Width + 40, 16, font, new Rgba32(49, 35, 68, 235), new Rgba32(245, 236, 255, 255));
+    }
+
+    private static void DrawLabel(
+        Image<Rgba32> image,
+        string text,
+        int left,
+        int top,
+        Font font,
+        Rgba32 background,
+        Rgba32 foreground)
+    {
+        var options = new TextOptions(font);
+        var size = TextMeasurer.MeasureSize(text, options);
+        const float horizontalPadding = 14f;
+        const float verticalPadding = 8f;
+        var width = size.Width + (horizontalPadding * 2f);
+        var height = size.Height + (verticalPadding * 2f);
+        var capsule = new RectangularPolygon(left, top, width, height);
+        var border = new Rgba32(foreground.R, foreground.G, foreground.B, 120);
+
+        image.Mutate(ctx =>
+        {
+            ctx.Fill(background, capsule);
+            ctx.Draw(border, 1.5f, capsule);
+            ctx.DrawText(text, font, foreground, new PointF(left + horizontalPadding, top + verticalPadding - 1f));
+        });
+    }
+
+    private static Font? ResolveLabelFont(float size)
+    {
+        foreach (var familyName in new[] { "Segoe UI", "Inter", "Arial", "Tahoma" })
+        {
+            try
+            {
+                return SystemFonts.CreateFont(familyName, size, FontStyle.Bold);
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var fallback in SystemFonts.Collection.Families)
+            return fallback.CreateFont(size, FontStyle.Bold);
+
+        return null;
+    }
+
+    private static IReadOnlyList<PixelRegion> ExtractRegions(bool[] mask, int width, int height)
+    {
+        var visited = new bool[mask.Length];
+        var queue = new Queue<int>();
+        var regions = new List<PixelRegion>();
+
+        for (var index = 0; index < mask.Length; index++)
+        {
+            if (!mask[index] || visited[index])
+                continue;
+
+            visited[index] = true;
+            queue.Enqueue(index);
+
+            var minX = int.MaxValue;
+            var minY = int.MaxValue;
+            var maxX = int.MinValue;
+            var maxY = int.MinValue;
+            var pixels = 0;
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                var x = current % width;
+                var y = current / width;
+
+                pixels++;
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                maxX = Math.Max(maxX, x);
+                maxY = Math.Max(maxY, y);
+
+                EnqueueIfNeeded(x - 1, y);
+                EnqueueIfNeeded(x + 1, y);
+                EnqueueIfNeeded(x, y - 1);
+                EnqueueIfNeeded(x, y + 1);
+            }
+
+            if (pixels >= MinRegionPixels)
+                regions.Add(new PixelRegion(minX, minY, maxX, maxY));
+        }
+
+        return regions;
+
+        void EnqueueIfNeeded(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= width || y >= height)
+                return;
+
+            var offset = (y * width) + x;
+            if (visited[offset] || !mask[offset])
+                return;
+
+            visited[offset] = true;
+            queue.Enqueue(offset);
+        }
+    }
+
+    private static void DrawRegionOutline(Image<Rgba32> image, PixelRegion region, Rgba32 color, int xOffset)
+    {
+        const int thickness = 2;
+
+        for (var y = region.Top; y <= region.Bottom; y++)
+        {
+            for (var x = region.Left; x <= region.Right; x++)
+            {
+                if (x - region.Left < thickness
+                    || region.Right - x < thickness
+                    || y - region.Top < thickness
+                    || region.Bottom - y < thickness)
+                {
+                    var targetX = x + xOffset;
+                    if (targetX >= 0 && targetX < image.Width && y >= 0 && y < image.Height)
+                        image[targetX, y] = color;
+                }
+            }
+        }
+    }
+
+    private static Rgba32 BuildBaseDisplayPixel(Rgba32 pixel)
+    {
+        if (pixel.A == 0)
+            return new Rgba32(18, 22, 30, 255);
+
+        return new Rgba32(
+            (byte)Math.Clamp((int)Math.Round(pixel.R * 0.7d), 0, 255),
+            (byte)Math.Clamp((int)Math.Round(pixel.G * 0.7d), 0, 255),
+            (byte)Math.Clamp((int)Math.Round(pixel.B * 0.7d), 0, 255),
+            255);
+    }
+
+    private static Rgba32 Blend(Rgba32 basePixel, Rgba32 overlayPixel, float overlayOpacity)
+    {
+        var opacity = Math.Clamp(overlayOpacity, 0f, 1f);
+        var inverse = 1f - opacity;
+
+        return new Rgba32(
+            (byte)Math.Clamp((int)Math.Round((basePixel.R * inverse) + (overlayPixel.R * opacity)), 0, 255),
+            (byte)Math.Clamp((int)Math.Round((basePixel.G * inverse) + (overlayPixel.G * opacity)), 0, 255),
+            (byte)Math.Clamp((int)Math.Round((basePixel.B * inverse) + (overlayPixel.B * opacity)), 0, 255),
+            255);
+    }
+
+    private static Rgba32 HeatColor(double normalized)
+    {
+        var clamped = Math.Clamp(normalized, 0d, 1d);
+        if (clamped < 0.5d)
+        {
+            var local = clamped / 0.5d;
+            return LerpColor(new Rgba32(64, 174, 255, 255), new Rgba32(255, 221, 82, 255), local);
+        }
+
+        return LerpColor(new Rgba32(255, 221, 82, 255), new Rgba32(255, 84, 84, 255), (clamped - 0.5d) / 0.5d);
+    }
+
+    private static Rgba32 LerpColor(Rgba32 start, Rgba32 end, double t)
+    {
+        var clamped = Math.Clamp(t, 0d, 1d);
+        return new Rgba32(
+            (byte)Math.Round(Lerp(start.R, end.R, clamped)),
+            (byte)Math.Round(Lerp(start.G, end.G, clamped)),
+            (byte)Math.Round(Lerp(start.B, end.B, clamped)),
+            255);
+    }
+
+    private static double Lerp(double start, double end, double t)
+        => start + ((end - start) * Math.Clamp(t, 0d, 1d));
+
+    private sealed record PixelRegion(int Left, int Top, int Right, int Bottom);
+}

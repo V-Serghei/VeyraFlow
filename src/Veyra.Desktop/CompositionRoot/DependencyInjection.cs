@@ -96,6 +96,8 @@ public static class DependencyInjection
         services.AddTransient<FileVersionCompareWindowViewModel>();
         services.AddTransient<ConfirmActionWindowViewModel>();
         services.AddTransient<PasswordVerificationWindowViewModel>();
+        services.AddTransient<AuthDialogWindowViewModel>();
+        services.AddTransient<OperationJournalWindowViewModel>();
 
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
@@ -123,6 +125,12 @@ public static class DependencyInjection
 
         services.AddTransient<PasswordVerificationWindow>(sp =>
             new PasswordVerificationWindow { DataContext = sp.GetRequiredService<PasswordVerificationWindowViewModel>() });
+
+        services.AddTransient<AuthDialogWindow>(sp =>
+            new AuthDialogWindow { DataContext = sp.GetRequiredService<AuthDialogWindowViewModel>() });
+
+        services.AddTransient<OperationJournalWindow>(sp =>
+            new OperationJournalWindow { DataContext = sp.GetRequiredService<OperationJournalWindowViewModel>() });
 
         services.AddTransient<SetupWizardWindow>();
 

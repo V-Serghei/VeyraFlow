@@ -13,8 +13,22 @@
         <Border DockPanel.Dock="Top" Classes="hero" Padding="18" Margin="0,0,0,12">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                    <Button Content="{loc:Tr common.back}" Command="{Binding BackCommand}" Classes="subtle"/>
-                    <Button Content="{loc:Tr common.refresh}" Command="{Binding RefreshCommand}" Classes="subtle"/>
+                    <Button Command="{Binding BackCommand}" Classes="subtle responsive-icon" ToolTip.Tip="{loc:Tr common.back}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72B;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.back}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button Command="{Binding RefreshCommand}" Classes="subtle responsive-icon" ToolTip.Tip="{loc:Tr common.refresh}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Spacing="2">
@@ -30,8 +44,8 @@
             </Grid>
         </Border>
 
-        <Grid ColumnDefinitions="280,8,*" ColumnSpacing="0">
-            <Border Grid.Column="0" Classes="card" Padding="10" MinWidth="220">
+        <Grid x:Name="SettingsLayoutGrid" ColumnDefinitions="250,8,*" ColumnSpacing="0">
+            <Border x:Name="SettingsSidebarPanel" Grid.Column="0" Classes="card" Padding="8" MinWidth="208">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Tabs}">
                         <ItemsControl.ItemTemplate>
@@ -53,14 +67,14 @@
                 </ScrollViewer>
             </Border>
 
-            <GridSplitter Grid.Column="1"
+            <GridSplitter x:Name="SettingsLayoutSplitter" Grid.Column="1"
                           Width="8"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
                           ResizeDirection="Columns"
                           ResizeBehavior="PreviousAndNext"/>
 
-            <Border Grid.Column="2" Classes="card" Padding="16" Margin="12,0,0,0" MinWidth="420">
+            <Border x:Name="SettingsContentPanel" Grid.Column="2" Classes="card" Padding="16" Margin="12,0,0,0" MinWidth="420">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="14">
                         <TextBlock Text="{Binding SelectedTab.Title}" FontSize="20" FontWeight="SemiBold"/>
@@ -88,12 +102,60 @@
 
                                 <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
 
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Content="{loc:Tr app_settings.sign_out}"
+                                <WrapPanel Orientation="Horizontal">
+                                    <Button
+                                            Margin="0,0,8,8"
+                                            Command="{Binding OpenSignInDialogCommand}"
+                                            Classes="primary compact responsive-icon"
+                                            IsVisible="{Binding IsGuestMode}"
+                                            ToolTip.Tip="{loc:Tr auth.sign_in}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE77B;"/>
+                                                <TextBlock Classes="button-label" Text="{loc:Tr auth.sign_in}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                    <Button
+                                            Margin="0,0,8,8"
+                                            Command="{Binding OpenRegisterDialogCommand}"
+                                            Classes="subtle compact responsive-icon"
+                                            IsVisible="{Binding IsGuestMode}"
+                                            ToolTip.Tip="{loc:Tr auth.register}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE710;"/>
+                                                <TextBlock Classes="button-label" Text="{loc:Tr auth.register}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                    <Button
+                                            Margin="0,0,8,8"
+                                            Command="{Binding AddUserCommand}"
+                                            Classes="subtle compact responsive-icon"
+                                            IsVisible="{Binding HasKnownProfiles}"
+                                            ToolTip.Tip="{loc:Tr app_settings.add_user}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE710;"/>
+                                                <TextBlock Classes="button-label" Text="{loc:Tr app_settings.add_user}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                    <Button
+                                            Margin="0,0,8,8"
                                             Command="{Binding SignOutCommand}"
                                             IsEnabled="{Binding HasActiveProfile}"
-                                            Classes="subtle"/>
-                                </StackPanel>
+                                            Classes="subtle compact responsive-icon"
+                                            ToolTip.Tip="{loc:Tr app_settings.sign_out}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE8AC;"/>
+                                                <TextBlock Classes="button-label" Text="{loc:Tr app_settings.sign_out}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                </WrapPanel>
 
                                 <TextBlock Text="{Binding AuthMessage}"
                                            IsVisible="{Binding AuthMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
@@ -102,8 +164,10 @@
 
                                 <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}"/>
 
-                                <TextBlock Text="{loc:Tr app_settings.known_profiles}" FontWeight="SemiBold"/>
-                                <ItemsControl ItemsSource="{Binding Profiles}">
+                                <TextBlock Text="{loc:Tr app_settings.known_profiles}"
+                                           FontWeight="SemiBold"
+                                           IsVisible="{Binding HasKnownProfiles}"/>
+                                <ItemsControl ItemsSource="{Binding Profiles}" IsVisible="{Binding HasKnownProfiles}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="settings:AppUserProfileItemViewModel">
                                             <Border Classes="card" Padding="10" Margin="0,0,0,8">
@@ -124,7 +188,7 @@
                                                                    Foreground="{DynamicResource VeyraInfoBrush}"
                                                                    HorizontalAlignment="Right"/>
                                                         <Button Content="{loc:Tr app_settings.activate}"
-                                                                Classes="subtle"
+                                                                Classes="subtle compact"
                                                                 IsEnabled="{Binding IsActive, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                                                 Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ActivateProfileCommand}"
                                                                 CommandParameter="{Binding .}"/>
@@ -135,34 +199,10 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
 
-                                <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}"/>
-
-                                <TextBlock Text="{loc:Tr app_settings.authentication}" FontWeight="SemiBold"/>
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                    <TextBox Grid.Column="0" Text="{Binding UsernameInput, Mode=TwoWay}" Watermark="{loc:Tr auth.username}"/>
-                                    <Button Grid.Column="1" Content="{Binding ToggleAuthLabel}" Command="{Binding ToggleAuthModeCommand}" Classes="subtle"/>
-                                </Grid>
-
-                                <TextBox Text="{Binding EmailInput, Mode=TwoWay}"
-                                         Watermark="{loc:Tr auth.email}"
-                                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
-
-                                <TextBox Text="{Binding PasswordInput, Mode=TwoWay}" PasswordChar="*" Watermark="{loc:Tr auth.password}"/>
-                                <TextBox Text="{Binding ConfirmPasswordInput, Mode=TwoWay}"
-                                         PasswordChar="*"
-                                         Watermark="{loc:Tr auth.confirm_password}"
-                                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
-
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Content="{Binding SubmitAuthLabel}"
-                                            Command="{Binding SubmitAuthCommand}"
-                                            Classes="primary"/>
-                                </StackPanel>
-
-                                <TextBlock Text="{Binding AuthMessage}"
-                                           IsVisible="{Binding AuthMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                                           Foreground="{DynamicResource VeyraInfoBrush}"
-                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr app_settings.guest_auth_hint}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding IsGuestMode}"/>
                             </StackPanel>
                         </Border>
 
@@ -182,20 +222,23 @@
 
                                 <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
 
-                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                <WrapPanel Orientation="Horizontal">
                                     <Button Content="{loc:Tr app_settings.restore_from_cloud}"
                                             Command="{Binding RestoreFromCloudCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"/>
+                                            Classes="subtle"
+                                            Margin="0,0,8,8"/>
                                     <Button Content="{loc:Tr app_settings.push_all_latest}"
                                             Command="{Binding PushAllRepositoriesCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"/>
+                                            Classes="subtle"
+                                            Margin="0,0,8,8"/>
                                     <Button Content="{loc:Tr app_settings.process_queue}"
                                             Command="{Binding ProcessQueueCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"/>
-                                </StackPanel>
+                                            Classes="subtle"
+                                            Margin="0,0,8,8"/>
+                                </WrapPanel>
 
                                 <TextBlock Text="{loc:Tr common.running}"
                                            IsVisible="{Binding IsSyncBusy}"/>
@@ -213,16 +256,34 @@
                                                 <TextBlock Text="{loc:Tr app_settings.cloud_storage_subtitle}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                                                <Button Content="{loc:Tr app_settings.cloud_storage_refresh}"
+                                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button
                                                         Command="{Binding RefreshCloudStorageMetricsCommand}"
                                                         IsEnabled="{Binding IsCloudMaintenanceBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="subtle"/>
-                                                <Button Content="{loc:Tr app_settings.cloud_storage_repair}"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,8,8"
+                                                        ToolTip.Tip="{loc:Tr app_settings.cloud_storage_refresh}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.cloud_storage_refresh}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                                <Button
                                                         Command="{Binding RepairCloudStorageCommand}"
                                                         IsEnabled="{Binding IsCloudMaintenanceBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="primary"/>
-                                            </StackPanel>
+                                                        Classes="primary compact responsive-icon"
+                                                        Margin="0,0,0,8"
+                                                        ToolTip.Tip="{loc:Tr app_settings.cloud_storage_repair}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE90F;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.cloud_storage_repair}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </WrapPanel>
                                         </Grid>
 
                                         <TextBlock Text="{loc:Tr app_settings.cloud_storage_empty_hint}"
@@ -383,21 +444,21 @@
 
                                                             <WrapPanel Orientation="Horizontal">
                                                                 <Button Content="{loc:Tr app_settings.repository_sync_health_cancel_now}"
-                                                                        Classes="subtle"
+                                                                        Classes="subtle compact"
                                                                         Margin="0,0,8,8"
                                                                         HorizontalAlignment="Left"
                                                                         IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                                                         Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).CancelRepositorySyncIssueCommand}"
                                                                         CommandParameter="{Binding .}"/>
                                                                 <Button Content="{loc:Tr app_settings.repository_sync_health_retry_now}"
-                                                                        Classes="primary"
+                                                                        Classes="primary compact"
                                                                         Margin="0,0,8,8"
                                                                         HorizontalAlignment="Left"
                                                                         IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                                                         Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).RetryRepositorySyncIssueCommand}"
                                                                         CommandParameter="{Binding .}"/>
                                                                 <Button Content="{loc:Tr app_settings.repository_sync_health_open_settings}"
-                                                                        Classes="subtle"
+                                                                        Classes="subtle compact"
                                                                         Margin="0,0,8,8"
                                                                         HorizontalAlignment="Left"
                                                                         IsEnabled="{Binding #Root.((settings:AppSettingsViewModel)DataContext).IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
@@ -529,25 +590,48 @@
 
                                 <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="8">
-                                        <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Command="{Binding ShowOperationJournalCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    VerticalAlignment="Top"
+                                                    ToolTip.Tip="{loc:Tr app_settings.operation_journal_show_all}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8A5;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.operation_journal_show_all}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </Grid>
 
                                         <ItemsControl ItemsSource="{Binding OperationJournalItems}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="settings:AppOperationJournalItemViewModel">
                                                     <Border Classes="card" Padding="8" Margin="0,0,0,6">
-                                                        <Grid ColumnDefinitions="150,68,92,220,90,*" ColumnSpacing="8">
-                                                            <TextBlock Grid.Column="0" Text="{Binding TimestampText}" Classes="muted"/>
-                                                            <TextBlock Grid.Column="1" Text="{Binding Level}" FontWeight="SemiBold"/>
-                                                            <TextBlock Grid.Column="2" Text="{Binding Category}" Classes="muted"/>
-                                                            <TextBlock Grid.Column="3" Text="{Binding Action}" TextTrimming="CharacterEllipsis"/>
-                                                            <TextBlock Grid.Column="4" Text="{Binding ScopeText}" Classes="muted"/>
-                                                            <TextBlock Grid.Column="5" Text="{Binding Message}" TextWrapping="Wrap"/>
-                                                        </Grid>
+                                                        <StackPanel Spacing="6">
+                                                            <WrapPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding TimestampText}" Classes="muted" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding Level}" FontWeight="SemiBold" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding Category}" Classes="muted" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding ScopeText}" Classes="muted" Margin="0,0,0,4"/>
+                                                            </WrapPanel>
+                                                            <TextBlock Text="{Binding Action}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Classes="muted"/>
+                                                        </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+
+                                        <TextBlock Text="{loc:Tr operation_journal.empty}"
+                                                   Classes="muted"
+                                                   IsVisible="{Binding HasOperationJournalItems, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

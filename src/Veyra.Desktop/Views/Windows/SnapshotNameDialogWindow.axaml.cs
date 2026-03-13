@@ -8,6 +8,8 @@ namespace Veyra.Desktop.Views.Windows;
 
 public partial class SnapshotNameDialogWindow : Window
 {
+    private const double CompactWidth = 1120;
+    private const double NarrowWidth = 940;
     private bool _isSyncingDiffScroll;
     private ScrollViewer? _leftDiffScrollViewer;
     private ScrollViewer? _rightDiffScrollViewer;
@@ -18,6 +20,7 @@ public partial class SnapshotNameDialogWindow : Window
     public SnapshotNameDialogWindow()
     {
         InitializeComponent();
+        SizeChanged += OnSizeChanged;
 
         Opened += (_, _) =>
         {
@@ -41,6 +44,8 @@ public partial class SnapshotNameDialogWindow : Window
                     minHeightDip: 540d),
                 DispatcherPriority.Background);
 
+            ApplyResponsiveLayout(Bounds.Width);
+
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
 
@@ -56,6 +61,31 @@ public partial class SnapshotNameDialogWindow : Window
                 vm.CleanupPreviewResources();
             }
         };
+    }
+
+    private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        ApplyResponsiveLayout(e.NewSize.Width);
+    }
+
+    private void ApplyResponsiveLayout(double width)
+    {
+        ToggleRootClass("compact-layout", width < CompactWidth);
+        ToggleRootClass("narrow-layout", width < NarrowWidth);
+    }
+
+    private void ToggleRootClass(string className, bool enabled)
+    {
+        if (enabled)
+        {
+            if (!Classes.Contains(className))
+                Classes.Add(className);
+
+            return;
+        }
+
+        if (Classes.Contains(className))
+            Classes.Remove(className);
     }
 
     private void OnRequestClose(bool confirmed)

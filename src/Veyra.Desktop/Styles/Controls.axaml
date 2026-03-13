@@ -194,6 +194,14 @@
         <Setter Property="Padding" Value="12"/>
     </Style>
 
+    <Style Selector="Border.segmented-control">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusMedium}"/>
+        <Setter Property="Padding" Value="4"/>
+    </Style>
+
     <Style Selector="Border.hero">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
@@ -291,15 +299,14 @@
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Transitions">
             <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.11"/>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.11"/>
-                <DoubleTransition Property="Opacity" Duration="0:0:0.11"/>
+                <BrushTransition Property="Background" Duration="0:0:0.12"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
+                <BrushTransition Property="Foreground" Duration="0:0:0.12"/>
             </Transitions>
         </Setter>
     </Style>
 
     <Style Selector="Button:pointerover">
-        <Setter Property="Background" Value="{DynamicResource VeyraCardNeutralBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
     </Style>
 
@@ -358,6 +365,74 @@
         <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
     </Style>
 
+    <Style Selector="Button.compact">
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <Style Selector="StackPanel.button-content">
+        <Setter Property="Orientation" Value="Horizontal"/>
+        <Setter Property="Spacing" Value="6"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="TextBlock.button-icon">
+        <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="TextBlock.button-label">
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+
+    <Style Selector="Button.responsive-icon">
+        <Setter Property="MinWidth" Value="42"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="UserControl.compact-layout Button, Window.compact-layout Button">
+        <Setter Property="FontSize" Value="12.5"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout Button, Window.narrow-layout Button">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Padding" Value="10,6"/>
+    </Style>
+
+    <Style Selector="UserControl.compact-layout StackPanel.button-content, Window.compact-layout StackPanel.button-content">
+        <Setter Property="Spacing" Value="5"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout StackPanel.button-content, Window.narrow-layout StackPanel.button-content">
+        <Setter Property="Spacing" Value="0"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout TextBlock.button-label, Window.narrow-layout TextBlock.button-label">
+        <Setter Property="IsVisible" Value="False"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout Button.responsive-icon, Window.narrow-layout Button.responsive-icon">
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="MinWidth" Value="40"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout TextBlock.hide-on-narrow, Window.narrow-layout TextBlock.hide-on-narrow">
+        <Setter Property="IsVisible" Value="False"/>
+    </Style>
+
+    <Style Selector="UserControl.compact-layout TextBox, UserControl.compact-layout ComboBox, Window.compact-layout TextBox, Window.compact-layout ComboBox">
+        <Setter Property="FontSize" Value="12.5"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout TextBox, UserControl.narrow-layout ComboBox, Window.narrow-layout TextBox, Window.narrow-layout ComboBox">
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Padding" Value="8,6"/>
+    </Style>
+
     <Style Selector="Button.danger">
         <Setter Property="Background" Value="{DynamicResource VeyraDiffRemoveBgBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraDangerBrush}"/>
@@ -379,6 +454,11 @@
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusMedium}"/>
     </Style>
 
+    <Style Selector="TextBox.compact, ComboBox.compact">
+        <Setter Property="Padding" Value="9,7"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
     <Style Selector="TextBox:pointerover, ComboBox:pointerover">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
@@ -394,6 +474,20 @@
 
     <Style Selector="TextBox.error, ComboBox.error">
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraDangerBrush}"/>
+    </Style>
+
+    <Style Selector="ComboBoxItem">
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="MinHeight" Value="34"/>
+    </Style>
+
+    <Style Selector="ComboBoxItem:pointerover">
+        <Setter Property="Background" Value="{DynamicResource VeyraCardNeutralBrush}"/>
+    </Style>
+
+    <Style Selector="ComboBoxItem:selected">
+        <Setter Property="Background" Value="{DynamicResource VeyraAccentSubtleBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
     </Style>
 
     <Style Selector="ProgressBar">
@@ -436,6 +530,29 @@
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraAccentBrush}"/>
     </Style>
 
+    <Style Selector="ToggleButton.segmented">
+        <Setter Property="MinWidth" Value="74"/>
+        <Setter Property="Padding" Value="12,7"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusSmall}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
+    </Style>
+
+    <Style Selector="ToggleButton.segmented:pointerover">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="ToggleButton.segmented:checked">
+        <Setter Property="Background" Value="{DynamicResource VeyraAccentSubtleBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraAccentBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
+    </Style>
+
     <Style Selector="ListBox.clean-list > ListBoxItem">
         <Setter Property="Padding" Value="0"/>
         <Setter Property="Margin" Value="0,0,0,8"/>
@@ -449,5 +566,6 @@
 
     <Style Selector="ListBox.clean-list > ListBoxItem:selected /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource VeyraAccentSubtleBrush}"/>
+        <Setter Property="Opacity" Value="1"/>
     </Style>
 </Styles>

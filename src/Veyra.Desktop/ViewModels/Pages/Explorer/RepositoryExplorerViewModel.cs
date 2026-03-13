@@ -1082,42 +1082,28 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (item is null || !item.IsDirectory)
             return;
 
-        if (_nodeByPath.TryGetValue(item.RelativePath, out var node))
-        {
-            node.IsExpanded = true;
-            SelectedTreeNode = node;
-            SelectTreeNode(node);
-        }
+        ExpandAndSelectTreePath(item.RelativePath);
     }
+
+    [RelayCommand]
+    private void ActivateItem(ExplorerItemViewModel? item)
+    {
+        if (item is null)
+            return;
+
+        if (item.IsDirectory)
+        {
+            ExpandAndSelectTreePath(item.RelativePath);
+            return;
+        }
+
+        OpenFileOnDisk(item);
+    }
+
     [RelayCommand]
     private void OpenSelectedFile()
     {
-        var fullPath = GetSelectedFileFullPath();
-        if (string.IsNullOrWhiteSpace(fullPath))
-        {
-            VersionPanelError = "Select a file to open.";
-            return;
-        }
-
-        if (!File.Exists(fullPath))
-        {
-            VersionPanelError = "File was not found on disk.";
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = fullPath,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to open file {Path}", fullPath);
-            VersionPanelError = "Unable to open file in default application.";
-        }
+        OpenFileOnDisk(SelectedItem);
     }
 
     [RelayCommand]
@@ -3108,6 +3094,91 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         return fullPath;
     }
+
+    private string? GetFullPathForItem(ExplorerItemViewModel? item)
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryPath) || item is null)
+            return null;
+
+        var root = Path.GetFullPath(RepositoryPath);
+        var normalizedRelative = item.RelativePath.Replace('/', Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        var fullPath = Path.GetFullPath(Path.Combine(root, normalizedRelative));
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return fullPath;
+    }
+
+    private void OpenFileOnDisk(ExplorerItemViewModel? item)
+    {
+        var fullPath = item is null
+            ? GetSelectedFileFullPath()
+            : GetFullPathForItem(item);
+
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            VersionPanelError = "Select a file to open.";
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            VersionPanelError = "File was not found on disk.";
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = fullPath,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open file {Path}", fullPath);
+            VersionPanelError = "Unable to open file in default application.";
+        }
+    }
+
+    private void ExpandAndSelectTreePath(string? relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return;
+
+        var normalized = NormalizeRelativePath(relativePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        var current = normalized;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (_nodeByPath.TryGetValue(current, out var currentNode))
+                currentNode.IsExpanded = true;
+
+            current = GetParentRelativePath(current);
+        }
+
+        if (_nodeByPath.TryGetValue(normalized, out var node))
+        {
+            node.IsExpanded = true;
+            SelectedTreeNode = node;
+            SelectTreeNode(node);
+        }
+    }
+
+    private static string NormalizeRelativePath(string value)
+        => value.Replace('\\', '/').Trim('/');
 
     private void ResetFullFilePreviewState()
     {

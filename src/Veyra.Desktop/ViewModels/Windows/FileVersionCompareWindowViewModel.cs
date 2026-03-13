@@ -31,10 +31,18 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
     private readonly List<string> _tempPreviewFiles = [];
     private CancellationTokenSource? _previewCts;
+    private CancellationTokenSource? _imageDiffRenderCts;
     private FileVersionCompareListItemViewModel? _leftVersion;
     private FileVersionCompareListItemViewModel? _rightVersion;
     private bool _isWordSemanticPreview;
     private bool _isOpeningNativeWordCompare;
+    private PendingBinaryDiffSummaryDto? _lastBinarySummary;
+    private PendingImageDiffPreviewDto? _lastImagePreview;
+    private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+    private int _lastRenderedChangedPixelCount;
+    private double? _lastRenderedChangedPixelRatio;
+    private int _lastRenderedChangedRegionCount;
+    private bool _suspendImageDiffRerender;
 
     private int _repositoryId;
     private string _repositoryPath = string.Empty;
@@ -42,6 +50,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private string _displayName = string.Empty;
 
     public event Action? RequestClose;
+    public event Action? RequestSaveImageDiffPreview;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -74,17 +83,53 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
     [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
     private Bitmap? _leftImagePreview;
 
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
     [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
     private Bitmap? _rightImagePreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
+    [NotifyPropertyChangedFor(nameof(HasOverlayImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    private Bitmap? _overlayImagePreview;
 
     [ObservableProperty] private string _leftImageCaption = string.Empty;
     [ObservableProperty] private string _rightImageCaption = string.Empty;
+    [ObservableProperty] private string _overlayImageCaption = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
+    private double _imageDiffSensitivity = 72;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SplitPositionLabel))]
+    private double _comparisonSplitPercent = 50;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSplitImageDiffMode))]
+    [NotifyPropertyChangedFor(nameof(IsHeatmapImageDiffMode))]
+    private ImageDiffModeOptionViewModel? _selectedImageDiffMode;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageRegionBoxesLabel))]
+    private bool _showImageDiffRegionBoxes = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    private bool _showSourceImagePanels = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
@@ -123,6 +168,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public ObservableCollection<DiffPreviewRowViewModel> PreviewRows { get; } = [];
     public ObservableCollection<WordSemanticDiffRowViewModel> WordPreviewRows { get; } = [];
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
+    public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
 
     public FileVersionCompareWindowViewModel(
         IMediator mediator,
@@ -154,6 +200,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(WrapToggleLabel));
         OnPropertyChanged(nameof(NativeWordCompareHint));
         OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
+        OnPropertyChanged(nameof(ImageSensitivityLabel));
+        OnPropertyChanged(nameof(SplitPositionLabel));
+        OnPropertyChanged(nameof(ImageRegionBoxesLabel));
+        OnPropertyChanged(nameof(SourceImagePanelsLabel));
+        RefreshImageDiffModes();
 
         RefreshVersionsBindings();
         RefreshSelectedPairSummary();
@@ -171,7 +222,20 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 PreviewSummary = Loc.T("compare.choose_versions");
             LeftImageCaption = BuildImageCaption(Loc.T("common.before"), null, null);
             RightImageCaption = BuildImageCaption(Loc.T("common.after"), null, null);
+            OverlayImageCaption = Loc.T("compare.overlay");
         }
+    }
+
+    private void RefreshImageDiffModes()
+    {
+        var selectedMode = SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay;
+        ImageDiffModes.Clear();
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Overlay, Loc.T("compare.image_mode.overlay")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Heatmap, Loc.T("compare.image_mode.heatmap")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Split, Loc.T("compare.image_mode.split")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Composite, Loc.T("compare.image_mode.composite")));
+        SelectedImageDiffMode = ImageDiffModes.FirstOrDefault(x => x.Mode == selectedMode) ?? ImageDiffModes.FirstOrDefault();
+        UpdateImageDiffModeSelection();
     }
 
     private string BuildWindowTitle()
@@ -179,6 +243,87 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(_displayName)
             ? Loc.T("compare.window_title")
             : Loc.F("compare.window_title_with_name", _displayName);
+    }
+
+    partial void OnImageDiffSensitivityChanged(double value)
+    {
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    partial void OnComparisonSplitPercentChanged(double value)
+    {
+        if (_suspendImageDiffRerender)
+            return;
+
+        if (IsSplitImageDiffMode)
+            _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    partial void OnSelectedImageDiffModeChanged(ImageDiffModeOptionViewModel? value)
+    {
+        OverlayImageCaption = BuildImageOverlayCaption();
+        OnPropertyChanged(nameof(IsSplitImageDiffMode));
+        OnPropertyChanged(nameof(IsHeatmapImageDiffMode));
+        UpdateImageDiffModeSelection();
+
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    [RelayCommand]
+    private void SelectImageDiffMode(ImageDiffModeOptionViewModel? option)
+    {
+        if (option is null)
+            return;
+
+        if (ReferenceEquals(SelectedImageDiffMode, option))
+        {
+            UpdateImageDiffModeSelection();
+            return;
+        }
+
+        SelectedImageDiffMode = option;
+    }
+
+    partial void OnShowImageDiffRegionBoxesChanged(bool value)
+    {
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    partial void OnShowSourceImagePanelsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSourceImagePanelsSection));
+    }
+
+    private async Task ReRenderImageDiffPreviewAsync()
+    {
+        if (PreviewKind != PendingDiffPreviewKind.Image || _lastImagePreview is null)
+            return;
+
+        try
+        {
+            await Task.Delay(120);
+            await RenderInteractiveImagePreviewAsync(_lastImagePreview, CancellationToken.None);
+            RebuildPreviewMetrics();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogDebug(ex, "Interactive image preview re-render failed.");
+        }
+    }
+
+    private void UpdateImageDiffModeSelection()
+    {
+        foreach (var option in ImageDiffModes)
+            option.IsSelected = ReferenceEquals(option, SelectedImageDiffMode);
     }
 
     private void RefreshVersionsBindings()
@@ -214,8 +359,22 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
     public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
-    public bool HasNoImagePreviews => !HasImagePreviews;
+    public bool HasOverlayImagePreview => OverlayImagePreview is not null;
+    public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
+    public bool HasNoImagePreviews => !HasAnyImagePreview;
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
+    public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
+    public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
+    public bool ShowSourceImagePanelsSection => HasImagePreviews && ShowSourceImagePanels;
+    public bool CanSaveImageDiffPreview => IsImagePreview && HasOverlayImagePreview && _lastRenderedOverlayPngBytes.Length > 0;
+    public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
+    public string SplitPositionLabel => $"{Math.Round(ComparisonSplitPercent):0}%";
+    public string ImageRegionBoxesLabel => ShowImageDiffRegionBoxes
+        ? Loc.T("compare.image_regions.on")
+        : Loc.T("compare.image_regions.off");
+    public string SourceImagePanelsLabel => ShowSourceImagePanels
+        ? Loc.T("compare.source_panels.on")
+        : Loc.T("compare.source_panels.off");
     public bool HasFullFilePreviewContent
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
     public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
@@ -386,6 +545,45 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ToggleShowImageDiffRegionBoxes()
+    {
+        ShowImageDiffRegionBoxes = !ShowImageDiffRegionBoxes;
+    }
+
+    [RelayCommand]
+    private void ToggleShowSourceImagePanels()
+    {
+        ShowSourceImagePanels = !ShowSourceImagePanels;
+    }
+
+    [RelayCommand]
+    private async Task ResetImageDiffSettingsAsync()
+    {
+        _suspendImageDiffRerender = true;
+        try
+        {
+            SelectedImageDiffMode = ImageDiffModes.FirstOrDefault(x => x.Mode == ImageDiffVisualizationMode.Overlay) ?? ImageDiffModes.FirstOrDefault();
+            ImageDiffSensitivity = 72;
+            ComparisonSplitPercent = 50;
+            ShowImageDiffRegionBoxes = true;
+            ShowSourceImagePanels = true;
+        }
+        finally
+        {
+            _suspendImageDiffRerender = false;
+        }
+
+        if (IsImagePreview)
+            await ReRenderImageDiffPreviewAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSaveImageDiffPreview))]
+    private void SaveImageDiffPreview()
+    {
+        RequestSaveImageDiffPreview?.Invoke();
+    }
+
+    [RelayCommand]
     private async Task ToggleFullFilePreviewAsync()
     {
         if (!CanToggleFullFilePreview)
@@ -536,6 +734,64 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         RequestClose?.Invoke();
     }
 
+    public string BuildSuggestedImageDiffFileName()
+    {
+        var baseName = string.IsNullOrWhiteSpace(_displayName)
+            ? "image-diff"
+            : Path.GetFileNameWithoutExtension(_displayName);
+
+        if (string.IsNullOrWhiteSpace(baseName))
+            baseName = "image-diff";
+
+        var modeSuffix = (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) switch
+        {
+            ImageDiffVisualizationMode.Heatmap => "heatmap",
+            ImageDiffVisualizationMode.Split => "split",
+            ImageDiffVisualizationMode.Composite => "composite",
+            _ => "overlay"
+        };
+
+        return $"{baseName}-diff-{modeSuffix}.png";
+    }
+
+    public async Task SaveCurrentImageDiffPreviewAsync(string outputPath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+            return;
+
+        if (_lastRenderedOverlayPngBytes.Length == 0)
+        {
+            ErrorMessage = Loc.T("compare.image_save_missing");
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            await File.WriteAllBytesAsync(outputPath, _lastRenderedOverlayPngBytes, ct);
+            ErrorMessage = null;
+            PreviewSummary = Loc.F("compare.image_save_success", Path.GetFileName(outputPath));
+            _log.LogInformation(
+                "Saved interactive image diff preview. RepositoryId {RepositoryId}. Path {Path}. Output {Output}",
+                _repositoryId,
+                _relativePath,
+                outputPath);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Failed to save interactive image diff preview. RepositoryId {RepositoryId}. Path {Path}. Output {Output}",
+                _repositoryId,
+                _relativePath,
+                outputPath);
+            ErrorMessage = Loc.T("compare.image_save_failed");
+        }
+    }
+
     public void CleanupPreviewResources()
     {
         _previewCts?.Cancel();
@@ -626,7 +882,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     break;
 
                 case PendingDiffPreviewKind.Binary:
-                    ApplyBinaryMetrics(preview.BinarySummary, null);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastRenderedChangedPixelCount = 0;
+                    _lastRenderedChangedPixelRatio = null;
+                    _lastRenderedChangedRegionCount = 0;
+                    RebuildPreviewMetrics();
                     PreviewKind = PendingDiffPreviewKind.Binary;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("compare.preview.binary_ready")
@@ -634,8 +895,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     break;
 
                 case PendingDiffPreviewKind.Image:
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = preview.ImagePreview;
                     await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
-                    ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview);
+                    await RenderInteractiveImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    RebuildPreviewMetrics();
                     PreviewKind = PendingDiffPreviewKind.Image;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("compare.preview.image_ready")
@@ -788,6 +1052,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     {
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
+        OverlayImageCaption = BuildImageOverlayCaption();
 
         if (imagePreview is null)
             return;
@@ -804,53 +1069,150 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             TrackTempFile(imagePreview.CurrentImagePath, imagePreview.IsCurrentTempFile);
         }
 
+        if (!string.IsNullOrWhiteSpace(imagePreview.OverlayImagePath) && File.Exists(imagePreview.OverlayImagePath))
+            TrackTempFile(imagePreview.OverlayImagePath, imagePreview.IsOverlayTempFile);
+
         LeftImageCaption = BuildImageCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
         RightImageCaption = BuildImageCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
     }
 
-    private void ApplyBinaryMetrics(PendingBinaryDiffSummaryDto? summary, PendingImageDiffPreviewDto? imagePreview)
+    private async Task RenderInteractiveImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
+    {
+        _imageDiffRenderCts?.Cancel();
+
+        if (imagePreview is null
+            || string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath)
+            || string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath))
+        {
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = null;
+            _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+            _lastRenderedChangedPixelCount = 0;
+            _lastRenderedChangedPixelRatio = null;
+            _lastRenderedChangedRegionCount = 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        var localCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _imageDiffRenderCts = localCts;
+
+        try
+        {
+            var renderResult = await InteractiveImageDiffRenderer.TryRenderAsync(
+                imagePreview.BaselineImagePath,
+                imagePreview.CurrentImagePath,
+                ImageDiffSensitivity,
+                SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay,
+                ComparisonSplitPercent,
+                ShowImageDiffRegionBoxes,
+                Loc.T("common.before"),
+                Loc.T("common.after"),
+                localCts.Token);
+
+            if (localCts.IsCancellationRequested)
+                return;
+
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = renderResult?.Bitmap;
+            OverlayImageCaption = BuildImageOverlayCaption();
+            _lastRenderedOverlayPngBytes = renderResult?.PngBytes ?? Array.Empty<byte>();
+
+            _lastRenderedChangedPixelCount = renderResult?.ChangedPixelCount ?? 0;
+            _lastRenderedChangedPixelRatio = renderResult?.ChangedPixelRatio;
+            _lastRenderedChangedRegionCount = renderResult?.ChangedRegionCount ?? 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Failed to render interactive image diff preview. Path {Path}. Mode {Mode}. Sensitivity {Sensitivity}",
+                _relativePath,
+                SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay,
+                ImageDiffSensitivity);
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = null;
+            _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+            _lastRenderedChangedPixelCount = 0;
+            _lastRenderedChangedPixelRatio = null;
+            _lastRenderedChangedRegionCount = 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private string BuildImageOverlayCaption()
+    {
+        var modeLabel = SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay");
+        return $"{Loc.T("compare.overlay")} - {modeLabel}";
+    }
+
+    private void RebuildPreviewMetrics()
     {
         PreviewMetrics.Clear();
 
-        if (summary is null)
+        if (_lastBinarySummary is null)
             return;
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
             Loc.T("metric.size"),
-            $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})"));
+            $"{FormatBytes(_lastBinarySummary.BaselineSizeBytes)} -> {FormatBytes(_lastBinarySummary.CurrentSizeBytes)} ({FormatSignedBytes(_lastBinarySummary.SizeDeltaBytes)})"));
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
             Loc.T("metric.blocks"),
-            $"{summary.BaselineBlockCount} -> {summary.CurrentBlockCount}, shared {summary.SharedBlockCount}"));
+            $"{_lastBinarySummary.BaselineBlockCount} -> {_lastBinarySummary.CurrentBlockCount}, shared {_lastBinarySummary.SharedBlockCount}"));
 
-        var dedupRatio = summary.DedupRatio ?? ComputeDedupRatio(summary);
-        var changedRatio = summary.ChangedBlockRatio ?? ComputeChangedBlockRatio(summary, dedupRatio);
+        var dedupRatio = _lastBinarySummary.DedupRatio ?? ComputeDedupRatio(_lastBinarySummary);
+        var changedRatio = _lastBinarySummary.ChangedBlockRatio ?? ComputeChangedBlockRatio(_lastBinarySummary, dedupRatio);
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
             Loc.T("metric.dedup_changed"),
             $"{FormatRatio(dedupRatio)} / {FormatRatio(changedRatio)}"));
 
-        if (summary.ByteSimilarityRatio.HasValue)
+        if (_lastBinarySummary.ByteSimilarityRatio.HasValue)
         {
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 Loc.T("metric.byte_similarity"),
-                $"{summary.ByteSimilarityRatio.Value * 100:F1}%"));
+                $"{_lastBinarySummary.ByteSimilarityRatio.Value * 100:F1}%"));
         }
 
-        if (imagePreview is null)
+        if (_lastImagePreview is null)
             return;
 
-        var before = imagePreview.BaselineWidth is null || imagePreview.BaselineHeight is null
+        var before = _lastImagePreview.BaselineWidth is null || _lastImagePreview.BaselineHeight is null
             ? Loc.T("common.not_available_short")
-            : $"{imagePreview.BaselineWidth} x {imagePreview.BaselineHeight}";
+            : $"{_lastImagePreview.BaselineWidth} x {_lastImagePreview.BaselineHeight}";
 
-        var after = imagePreview.CurrentWidth is null || imagePreview.CurrentHeight is null
+        var after = _lastImagePreview.CurrentWidth is null || _lastImagePreview.CurrentHeight is null
             ? Loc.T("common.not_available_short")
-            : $"{imagePreview.CurrentWidth} x {imagePreview.CurrentHeight}";
+            : $"{_lastImagePreview.CurrentWidth} x {_lastImagePreview.CurrentHeight}";
 
         PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
             Loc.T("metric.dimensions"),
-            $"{before} -> {after}" + (imagePreview.HasDimensionMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+            $"{before} -> {after}" + (_lastImagePreview.HasDimensionMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+
+        if (_lastImagePreview.SimilarityRatio.HasValue)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.image_similarity"),
+                $"{_lastImagePreview.SimilarityRatio.Value * 100:F1}%"));
+        }
+
+        if (_lastRenderedChangedPixelRatio.HasValue || _lastRenderedChangedPixelCount > 0)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_area"),
+                _lastRenderedChangedPixelRatio.HasValue
+                    ? $"{_lastRenderedChangedPixelRatio.Value * 100:F1}% ({_lastRenderedChangedPixelCount:N0} px)"
+                    : $"{_lastRenderedChangedPixelCount:N0} px"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_regions"),
+                $"{_lastRenderedChangedRegionCount:N0}"));
+        }
     }
 
     private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
@@ -1015,31 +1377,49 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         _isWordSemanticPreview = false;
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
+        _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+        _lastRenderedChangedPixelCount = 0;
+        _lastRenderedChangedPixelRatio = null;
+        _lastRenderedChangedRegionCount = 0;
         ResetFullPreviewState();
         OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
     }
 
     private void ReleasePreviewResources()
     {
+        _imageDiffRenderCts?.Cancel();
         PreviewRows.Clear();
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
         _isWordSemanticPreview = false;
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
+        _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+        _lastRenderedChangedPixelCount = 0;
+        _lastRenderedChangedPixelRatio = null;
+        _lastRenderedChangedRegionCount = 0;
         ResetFullPreviewState();
 
         LeftImagePreview?.Dispose();
         RightImagePreview?.Dispose();
+        OverlayImagePreview?.Dispose();
         LeftImagePreview = null;
         RightImagePreview = null;
+        OverlayImagePreview = null;
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
+        OverlayImageCaption = Loc.T("compare.overlay");
 
         foreach (var path in _tempPreviewFiles)
             TryDelete(path);
 
         _tempPreviewFiles.Clear();
+        SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
     }
 
     private void TrackTempFile(string? path, bool isTemp)

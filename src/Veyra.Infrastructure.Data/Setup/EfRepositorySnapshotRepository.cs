@@ -1089,20 +1089,28 @@ public sealed class EfRepositorySnapshotRepository(
                 var baselineSize = TryReadImageDimensions(baselineTempImage);
                 var currentSize = TryReadImageDimensions(absolutePath);
 
-                var imagePreview = new PendingImageDiffPreviewDto(
-                    BaselineImagePath: baselineTempImage,
-                    IsBaselineTempFile: true,
-                    CurrentImagePath: absolutePath,
-                    IsCurrentTempFile: false,
-                    BaselineWidth: baselineSize?.Width,
-                    BaselineHeight: baselineSize?.Height,
-                    CurrentWidth: currentSize?.Width,
-                    CurrentHeight: currentSize?.Height,
-                    HasDimensionMismatch: baselineSize.HasValue
-                                          && currentSize.HasValue
-                                          && (baselineSize.Value.Width != currentSize.Value.Width
-                                              || baselineSize.Value.Height != currentSize.Value.Height),
-                    SimilarityRatio: byteSimilarity);
+                var overlay = await ImageDiffOverlayBuilder.TryBuildAsync(baselineTempImage, absolutePath, ct);
+                var imagePreview = new PendingImageDiffPreviewDto
+                {
+                    BaselineImagePath = baselineTempImage,
+                    IsBaselineTempFile = true,
+                    CurrentImagePath = absolutePath,
+                    IsCurrentTempFile = false,
+                    OverlayImagePath = overlay?.OverlayImagePath,
+                    IsOverlayTempFile = overlay?.IsOverlayTempFile ?? false,
+                    BaselineWidth = baselineSize?.Width,
+                    BaselineHeight = baselineSize?.Height,
+                    CurrentWidth = currentSize?.Width,
+                    CurrentHeight = currentSize?.Height,
+                    HasDimensionMismatch = baselineSize.HasValue
+                                           && currentSize.HasValue
+                                           && (baselineSize.Value.Width != currentSize.Value.Width
+                                               || baselineSize.Value.Height != currentSize.Value.Height),
+                    SimilarityRatio = byteSimilarity,
+                    ChangedPixelCount = overlay?.ChangedPixelCount ?? 0,
+                    ChangedPixelRatio = overlay?.ChangedPixelRatio,
+                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0
+                };
 
                 var imageMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "image", extension);
                 imageTempToCleanup = null;
@@ -1235,20 +1243,28 @@ public sealed class EfRepositorySnapshotRepository(
                 var baselineSize = TryReadImageDimensions(leftTemp);
                 var currentSize = TryReadImageDimensions(rightTemp);
 
-                var imagePreview = new PendingImageDiffPreviewDto(
-                    BaselineImagePath: leftTemp,
-                    IsBaselineTempFile: true,
-                    CurrentImagePath: rightTemp,
-                    IsCurrentTempFile: true,
-                    BaselineWidth: baselineSize?.Width,
-                    BaselineHeight: baselineSize?.Height,
-                    CurrentWidth: currentSize?.Width,
-                    CurrentHeight: currentSize?.Height,
-                    HasDimensionMismatch: baselineSize.HasValue
-                                          && currentSize.HasValue
-                                          && (baselineSize.Value.Width != currentSize.Value.Width
-                                              || baselineSize.Value.Height != currentSize.Value.Height),
-                    SimilarityRatio: byteSimilarity);
+                var overlay = await ImageDiffOverlayBuilder.TryBuildAsync(leftTemp, rightTemp, ct);
+                var imagePreview = new PendingImageDiffPreviewDto
+                {
+                    BaselineImagePath = leftTemp,
+                    IsBaselineTempFile = true,
+                    CurrentImagePath = rightTemp,
+                    IsCurrentTempFile = true,
+                    OverlayImagePath = overlay?.OverlayImagePath,
+                    IsOverlayTempFile = overlay?.IsOverlayTempFile ?? false,
+                    BaselineWidth = baselineSize?.Width,
+                    BaselineHeight = baselineSize?.Height,
+                    CurrentWidth = currentSize?.Width,
+                    CurrentHeight = currentSize?.Height,
+                    HasDimensionMismatch = baselineSize.HasValue
+                                           && currentSize.HasValue
+                                           && (baselineSize.Value.Width != currentSize.Value.Width
+                                               || baselineSize.Value.Height != currentSize.Value.Height),
+                    SimilarityRatio = byteSimilarity,
+                    ChangedPixelCount = overlay?.ChangedPixelCount ?? 0,
+                    ChangedPixelRatio = overlay?.ChangedPixelRatio,
+                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0
+                };
 
                 var imageMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "image", extension);
                 keepLeftTemp = true;

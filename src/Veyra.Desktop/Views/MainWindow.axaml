@@ -27,24 +27,31 @@
 
                     <StackPanel Spacing="2">
                         <TextBlock Text="{loc:Tr main.product_name}" FontSize="17" FontWeight="SemiBold"/>
-                        <TextBlock Text="{loc:Tr main.product_subtitle}" Classes="muted" FontSize="11"/>
+                        <TextBlock Text="{loc:Tr main.product_subtitle}" Classes="muted hide-on-narrow" FontSize="11"/>
                     </StackPanel>
                 </StackPanel>
 
                 <TextBlock Grid.Column="1"
                            VerticalAlignment="Center"
                            HorizontalAlignment="Center"
-                           Classes="muted"
+                           Classes="muted hide-on-narrow"
                            Text="{loc:Tr app.brand}"/>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <Button Content="{Binding LanguageToggleLabel}"
+                    <Button
                             MinWidth="56"
                             Height="36"
                             FontWeight="SemiBold"
                             Command="{Binding ToggleLanguageCommand}"
                             ToolTip.Tip="{loc:Tr main.toggle_language}"
-                            Classes="subtle"/>
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE909;"/>
+                                <TextBlock Classes="button-label" Text="{Binding LanguageToggleLabel}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
                     <Button Content="{Binding ThemeToggleGlyph}"
                             Command="{Binding ToggleThemeCommand}"
                             ToolTip.Tip="{loc:Tr main.toggle_theme}"

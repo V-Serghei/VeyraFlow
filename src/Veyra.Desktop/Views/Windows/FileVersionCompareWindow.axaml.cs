@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.ViewModels.Windows;
@@ -9,6 +10,8 @@ namespace Veyra.Desktop.Views.Windows;
 
 public partial class FileVersionCompareWindow : Window
 {
+    private const double CompactWidth = 1160;
+    private const double NarrowWidth = 980;
     private bool _isSyncingDiffScroll;
     private ScrollViewer? _leftDiffScrollViewer;
     private ScrollViewer? _rightDiffScrollViewer;
@@ -18,6 +21,7 @@ public partial class FileVersionCompareWindow : Window
     public FileVersionCompareWindow()
     {
         InitializeComponent();
+        SizeChanged += OnSizeChanged;
 
         Opened += (_, _) =>
         {
@@ -41,13 +45,18 @@ public partial class FileVersionCompareWindow : Window
                     minHeightDip: 560d),
                 DispatcherPriority.Background);
 
+            ApplyResponsiveLayout(Bounds.Width);
+
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
             _leftWordDiffScrollViewer = this.FindControl<ScrollViewer>("LeftWordDiffScrollViewer");
             _rightWordDiffScrollViewer = this.FindControl<ScrollViewer>("RightWordDiffScrollViewer");
 
             if (DataContext is FileVersionCompareWindowViewModel vm)
+            {
                 vm.RequestClose += OnRequestClose;
+                vm.RequestSaveImageDiffPreview += OnRequestSaveImageDiffPreview;
+            }
         };
 
         Closed += (_, _) =>
@@ -55,12 +64,65 @@ public partial class FileVersionCompareWindow : Window
             if (DataContext is FileVersionCompareWindowViewModel vm)
             {
                 vm.RequestClose -= OnRequestClose;
+                vm.RequestSaveImageDiffPreview -= OnRequestSaveImageDiffPreview;
                 vm.CleanupPreviewResources();
             }
         };
     }
 
+    private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        ApplyResponsiveLayout(e.NewSize.Width);
+    }
+
+    private void ApplyResponsiveLayout(double width)
+    {
+        ToggleRootClass("compact-layout", width < CompactWidth);
+        ToggleRootClass("narrow-layout", width < NarrowWidth);
+    }
+
+    private void ToggleRootClass(string className, bool enabled)
+    {
+        if (enabled)
+        {
+            if (!Classes.Contains(className))
+                Classes.Add(className);
+
+            return;
+        }
+
+        if (Classes.Contains(className))
+            Classes.Remove(className);
+    }
+
     private void OnRequestClose() => Close();
+
+    private async void OnRequestSaveImageDiffPreview()
+    {
+        if (DataContext is not FileVersionCompareWindowViewModel vm)
+            return;
+
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save diff preview",
+            SuggestedFileName = vm.BuildSuggestedImageDiffFileName(),
+            DefaultExtension = "png",
+            ShowOverwritePrompt = true,
+            FileTypeChoices =
+            [
+                new FilePickerFileType("PNG image")
+                {
+                    Patterns = ["*.png"]
+                }
+            ]
+        });
+
+        var outputPath = file?.Path.LocalPath;
+        if (string.IsNullOrWhiteSpace(outputPath))
+            return;
+
+        await vm.SaveCurrentImageDiffPreviewAsync(outputPath);
+    }
 
     private void OnVersionItemPointerPressed(object? sender, PointerPressedEventArgs e)
     {
