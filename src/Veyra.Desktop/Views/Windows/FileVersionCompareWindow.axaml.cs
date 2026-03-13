@@ -1,8 +1,12 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.Controls.Primitives;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.ViewModels.Windows;
 
@@ -12,11 +16,22 @@ public partial class FileVersionCompareWindow : Window
 {
     private const double CompactWidth = 1160;
     private const double NarrowWidth = 980;
+    private const double MinOverlayZoomPercent = 10;
+    private const double MaxOverlayZoomPercent = 500;
     private bool _isSyncingDiffScroll;
+    private bool _suppressOverlayZoomEvents;
+    private bool _overlayZoomInitialized;
+    private bool _overlayZoomUserAdjusted;
+    private double _overlayZoomPercent = 100;
     private ScrollViewer? _leftDiffScrollViewer;
     private ScrollViewer? _rightDiffScrollViewer;
     private ScrollViewer? _leftWordDiffScrollViewer;
     private ScrollViewer? _rightWordDiffScrollViewer;
+    private ScrollViewer? _overlayImageScrollViewer;
+    private Image? _overlayImageControl;
+    private Slider? _overlayZoomSlider;
+    private TextBlock? _overlayZoomValueText;
+    private FileVersionCompareWindowViewModel? _viewModel;
 
     public FileVersionCompareWindow()
     {
@@ -51,12 +66,20 @@ public partial class FileVersionCompareWindow : Window
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
             _leftWordDiffScrollViewer = this.FindControl<ScrollViewer>("LeftWordDiffScrollViewer");
             _rightWordDiffScrollViewer = this.FindControl<ScrollViewer>("RightWordDiffScrollViewer");
+            _overlayImageScrollViewer = this.FindControl<ScrollViewer>("OverlayImageScrollViewer");
+            _overlayImageControl = this.FindControl<Image>("OverlayImageControl");
+            _overlayZoomSlider = this.FindControl<Slider>("OverlayZoomSlider");
+            _overlayZoomValueText = this.FindControl<TextBlock>("OverlayZoomValueText");
 
             if (DataContext is FileVersionCompareWindowViewModel vm)
             {
+                AttachViewModel(vm);
                 vm.RequestClose += OnRequestClose;
                 vm.RequestSaveImageDiffPreview += OnRequestSaveImageDiffPreview;
             }
+
+            UpdateOverlayZoomUi();
+            QueueFitOverlayImageToView();
         };
 
         Closed += (_, _) =>
@@ -67,12 +90,18 @@ public partial class FileVersionCompareWindow : Window
                 vm.RequestSaveImageDiffPreview -= OnRequestSaveImageDiffPreview;
                 vm.CleanupPreviewResources();
             }
+
+            if (_viewModel is not null)
+                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         };
     }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         ApplyResponsiveLayout(e.NewSize.Width);
+
+        if (!_overlayZoomUserAdjusted)
+            QueueFitOverlayImageToView();
     }
 
     private void ApplyResponsiveLayout(double width)
@@ -202,4 +231,148 @@ public partial class FileVersionCompareWindow : Window
 
     private static bool AreClose(double left, double right)
         => System.Math.Abs(left - right) < 0.5d;
+
+    private void AttachViewModel(FileVersionCompareWindowViewModel vm)
+    {
+        if (_viewModel is not null)
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+        _viewModel = vm;
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(FileVersionCompareWindowViewModel.OverlayImagePreview))
+            return;
+
+        if (!_overlayZoomInitialized || !_overlayZoomUserAdjusted)
+        {
+            _overlayZoomUserAdjusted = false;
+            QueueFitOverlayImageToView();
+            return;
+        }
+
+        ApplyOverlayZoom(_overlayZoomPercent, preserveViewport: false);
+    }
+
+    private void OnOverlayZoomSliderValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressOverlayZoomEvents)
+            return;
+
+        _overlayZoomUserAdjusted = true;
+        ApplyOverlayZoom(e.NewValue, preserveViewport: true);
+    }
+
+    private void OnOverlayImagePointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if ((e.KeyModifiers & KeyModifiers.Control) == 0)
+            return;
+
+        e.Handled = true;
+        var factor = e.Delta.Y >= 0 ? 1.1d : 1d / 1.1d;
+        var newPercent = _overlayZoomPercent * factor;
+        _overlayZoomUserAdjusted = true;
+        ApplyOverlayZoom(newPercent, preserveViewport: true, focusPoint: e.GetPosition(_overlayImageScrollViewer));
+    }
+
+    private void OnOverlayImageViewportSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (!_overlayZoomUserAdjusted)
+            QueueFitOverlayImageToView();
+    }
+
+    private void OnFitOverlayImageToViewClicked(object? sender, RoutedEventArgs e)
+    {
+        _overlayZoomUserAdjusted = false;
+        QueueFitOverlayImageToView();
+    }
+
+    private void QueueFitOverlayImageToView()
+    {
+        Dispatcher.UIThread.Post(FitOverlayImageToView, DispatcherPriority.Background);
+    }
+
+    private void FitOverlayImageToView()
+    {
+        if (_overlayImageScrollViewer is null || _overlayImageControl?.Source is not Bitmap bitmap)
+            return;
+
+        var viewport = _overlayImageScrollViewer.Viewport;
+        var availableWidth = viewport.Width > 1 ? viewport.Width : _overlayImageScrollViewer.Bounds.Width;
+        var availableHeight = viewport.Height > 1 ? viewport.Height : _overlayImageScrollViewer.Bounds.Height;
+        if (availableWidth <= 1 || availableHeight <= 1)
+            return;
+
+        var bitmapWidth = bitmap.PixelSize.Width;
+        var bitmapHeight = bitmap.PixelSize.Height;
+        if (bitmapWidth <= 0 || bitmapHeight <= 0)
+            return;
+
+        var scale = System.Math.Min(availableWidth / bitmapWidth, availableHeight / bitmapHeight);
+        var targetPercent = System.Math.Clamp(scale * 100d, MinOverlayZoomPercent, MaxOverlayZoomPercent);
+        ApplyOverlayZoom(targetPercent, preserveViewport: false);
+
+        _overlayImageScrollViewer.Offset = new Vector(0, 0);
+        _overlayZoomInitialized = true;
+    }
+
+    private void ApplyOverlayZoom(double percent, bool preserveViewport, Point? focusPoint = null)
+    {
+        if (_overlayImageScrollViewer is null || _overlayImageControl?.Source is not Bitmap bitmap)
+            return;
+
+        var clampedPercent = System.Math.Clamp(percent, MinOverlayZoomPercent, MaxOverlayZoomPercent);
+        var oldWidth = _overlayImageControl.Width > 0 ? _overlayImageControl.Width : bitmap.PixelSize.Width;
+        var oldHeight = _overlayImageControl.Height > 0 ? _overlayImageControl.Height : bitmap.PixelSize.Height;
+        var oldOffset = _overlayImageScrollViewer.Offset;
+        var viewport = _overlayImageScrollViewer.Viewport;
+        var focus = focusPoint ?? new Point(viewport.Width / 2d, viewport.Height / 2d);
+
+        var relativeX = oldWidth > 0 ? (oldOffset.X + focus.X) / oldWidth : 0d;
+        var relativeY = oldHeight > 0 ? (oldOffset.Y + focus.Y) / oldHeight : 0d;
+
+        var newWidth = System.Math.Max(1d, bitmap.PixelSize.Width * clampedPercent / 100d);
+        var newHeight = System.Math.Max(1d, bitmap.PixelSize.Height * clampedPercent / 100d);
+
+        _overlayImageControl.Width = newWidth;
+        _overlayImageControl.Height = newHeight;
+        _overlayZoomPercent = clampedPercent;
+        _overlayZoomInitialized = true;
+        UpdateOverlayZoomUi();
+
+        if (!preserveViewport)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_overlayImageScrollViewer is null)
+                return;
+
+            var currentViewport = _overlayImageScrollViewer.Viewport;
+            var targetX = System.Math.Max(0d, System.Math.Min(newWidth - currentViewport.Width, (newWidth * relativeX) - focus.X));
+            var targetY = System.Math.Max(0d, System.Math.Min(newHeight - currentViewport.Height, (newHeight * relativeY) - focus.Y));
+            _overlayImageScrollViewer.Offset = new Vector(targetX, targetY);
+        }, DispatcherPriority.Background);
+    }
+
+    private void UpdateOverlayZoomUi()
+    {
+        if (_overlayZoomSlider is not null)
+        {
+            _suppressOverlayZoomEvents = true;
+            try
+            {
+                _overlayZoomSlider.Value = _overlayZoomPercent;
+            }
+            finally
+            {
+                _suppressOverlayZoomEvents = false;
+            }
+        }
+
+        if (_overlayZoomValueText is not null)
+            _overlayZoomValueText.Text = $"{System.Math.Round(_overlayZoomPercent):0}%";
+    }
 }

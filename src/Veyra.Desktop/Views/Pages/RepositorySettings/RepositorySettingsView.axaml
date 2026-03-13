@@ -65,7 +65,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <Grid x:Name="RepositorySettingsLayoutGrid" ColumnDefinitions="1.05*,0.95*" ColumnSpacing="14">
                 <StackPanel x:Name="RepositorySettingsPrimaryColumn" Grid.Column="0" Spacing="14">
-                    <Border Classes="card" Padding="16">
+                    <Border x:Name="RepositorySettingsRepositoryCard" Classes="card" Padding="16">
                         <StackPanel Spacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{loc:Tr repo_settings.repository_section_title}" Classes="section-title"/>
@@ -99,7 +99,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Classes="card" Padding="16">
+                    <Border x:Name="RepositorySettingsFormatsCard" Classes="card" Padding="16">
                         <StackPanel Spacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{loc:Tr repo_settings.tracked_formats}" Classes="section-title"/>
@@ -200,18 +200,26 @@
                 </StackPanel>
 
                 <StackPanel x:Name="RepositorySettingsSecondaryColumn" Grid.Column="1" Spacing="14">
-                    <Border Classes="card" Padding="16">
+                    <Border x:Name="RepositorySettingsCloudSyncCard" Classes="card" Padding="16">
                         <StackPanel Spacing="12">
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="{loc:Tr dashboard.cloud_sync}" Classes="section-title"/>
-                                <TextBlock Text="{loc:Tr repo_settings.sync_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
-                            </StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <StackPanel Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="{loc:Tr dashboard.cloud_sync}" Classes="section-title"/>
+                                    <TextBlock Text="{Binding CloudSyncSectionHint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Classes="ghost icon"
+                                        Content="?"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Top"
+                                        ToolTip.Tip="{loc:Tr repo_settings.help_sync_section}"/>
+                            </Grid>
 
                             <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                                 <Border Grid.Column="0" Classes="metric-card">
                                     <StackPanel Spacing="4">
                                         <TextBlock Text="{Binding CloudSyncStatusText}" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
-                                        <TextBlock Text="{loc:Tr repo_settings.sync_status}" Classes="caption"/>
+                                        <TextBlock Text="{Binding CloudSyncStatusLabel}" Classes="caption"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Classes="metric-card">
@@ -222,7 +230,7 @@
                                 </Border>
                             </Grid>
 
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding ShowAdvancedSyncSettings}">
                                 <StackPanel Grid.Column="0" Spacing="6">
                                     <TextBlock Text="{loc:Tr repo_settings.conflict_strategy}" Classes="label"/>
                                     <ComboBox ItemsSource="{Binding SyncConflictStrategies}"
@@ -241,7 +249,7 @@
                                 </StackPanel>
                             </Grid>
 
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10" IsVisible="{Binding ShowAdvancedSyncSettings}">
                                 <StackPanel Grid.Column="0" Spacing="6">
                                     <TextBlock Text="{loc:Tr repo_settings.retry_max_attempts}" Classes="label"/>
                                     <TextBox Text="{Binding SyncRetryMaxAttempts, Mode=TwoWay}"/>
@@ -252,15 +260,34 @@
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock Text="{Binding CloudSyncErrorText}"
-                                       Foreground="{DynamicResource VeyraWarningBrush}"
-                                       TextWrapping="Wrap"
-                                       IsVisible="{Binding CloudSyncErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                            <StackPanel Spacing="6" IsVisible="{Binding IsBasicMode}">
+                                <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                    <TextBlock Grid.Column="0" Text="{Binding CloudSyncQueueLabel}" Classes="label"/>
+                                    <Button Grid.Column="1"
+                                            Classes="ghost icon"
+                                            Content="?"
+                                            VerticalAlignment="Center"
+                                            ToolTip.Tip="{loc:Tr repo_settings.help_queue_basic}"/>
+                                </Grid>
+                                <TextBlock Text="{Binding CloudSyncQueueText}" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Border Classes="metric-card"
+                                    IsVisible="{Binding CloudSyncErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr repo_settings.sync_attention_title}"
+                                               Classes="label"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                    <TextBlock Text="{Binding CloudSyncErrorText}"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
 
                             <Border Classes="metric-card">
                                 <StackPanel Spacing="4">
-                                    <TextBlock Text="{loc:Tr repo_settings.cloud_repair_title}" Classes="label"/>
-                                    <TextBlock Text="{loc:Tr repo_settings.cloud_repair_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding CloudRepairTitle}" Classes="label"/>
+                                    <TextBlock Text="{Binding CloudRepairHint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 
@@ -270,11 +297,11 @@
                                         IsEnabled="{Binding IsSyncNowRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                         Classes="primary compact responsive-icon"
                                         Margin="0,0,8,8"
-                                        ToolTip.Tip="{loc:Tr repo_settings.sync_now}">
+                                        ToolTip.Tip="{Binding SyncNowLabel}">
                                     <Button.Content>
                                         <StackPanel Classes="button-content">
                                             <TextBlock Classes="button-icon" Text="&#xE895;"/>
-                                            <TextBlock Classes="button-label" Text="{loc:Tr repo_settings.sync_now}"/>
+                                            <TextBlock Classes="button-label" Text="{Binding SyncNowLabel}"/>
                                         </StackPanel>
                                     </Button.Content>
                                 </Button>
@@ -283,11 +310,11 @@
                                         IsEnabled="{Binding IsCloudRepairRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
                                         Classes="subtle compact responsive-icon"
                                         Margin="0,0,8,8"
-                                        ToolTip.Tip="{loc:Tr repo_settings.cloud_repair_button}">
+                                        ToolTip.Tip="{Binding CloudRepairButtonLabel}">
                                     <Button.Content>
                                         <StackPanel Classes="button-content">
                                             <TextBlock Classes="button-icon" Text="&#xE90F;"/>
-                                            <TextBlock Classes="button-label" Text="{loc:Tr repo_settings.cloud_repair_button}"/>
+                                            <TextBlock Classes="button-label" Text="{Binding CloudRepairButtonLabel}"/>
                                         </StackPanel>
                                     </Button.Content>
                                 </Button>
@@ -308,7 +335,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Classes="card" Padding="16">
+                    <Border x:Name="RepositorySettingsBundleCard" Classes="card" Padding="16">
                         <StackPanel Spacing="12">
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{loc:Tr repo_settings.bundle_title}" Classes="section-title"/>
@@ -355,39 +382,83 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Classes="card" Padding="16">
+                    <Border x:Name="RepositorySettingsRetentionPolicyCard" Classes="card" Padding="16">
                         <StackPanel Spacing="12">
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="{loc:Tr repo_settings.retention_policy}" Classes="section-title"/>
-                                <TextBlock Text="{loc:Tr repo_settings.retention_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
-                            </StackPanel>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <StackPanel Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="{loc:Tr repo_settings.retention_policy}" Classes="section-title"/>
+                                    <TextBlock Text="{Binding RetentionSectionHint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Classes="ghost icon"
+                                        Content="?"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Top"
+                                        ToolTip.Tip="{loc:Tr repo_settings.help_retention_section}"/>
+                            </Grid>
 
-                            <CheckBox Content="{loc:Tr repo_settings.enable_retention}"
-                                      IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
+                            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                <CheckBox Grid.Column="0"
+                                          Content="{loc:Tr repo_settings.enable_retention}"
+                                          IsChecked="{Binding RetentionEnabled, Mode=TwoWay}"/>
+                                <Button Grid.Column="1"
+                                        Classes="ghost icon"
+                                        Content="?"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="{loc:Tr repo_settings.help_retention_toggle}"/>
+                            </Grid>
 
-                            <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Grid x:Name="RepositorySettingsCloudSyncStatusGrid" ColumnDefinitions="*,*" ColumnSpacing="10">
                                 <StackPanel Grid.Column="0" Spacing="6">
-                                    <TextBlock Text="{loc:Tr repo_settings.max_age_days}" Classes="label"/>
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.max_age_days}" Classes="label"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.help_retention_max_age}"/>
+                                    </Grid>
                                     <TextBox Text="{Binding RetentionMaxAgeDays, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_30}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="6">
-                                    <TextBlock Text="{loc:Tr repo_settings.max_snapshots}" Classes="label"/>
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.max_snapshots}" Classes="label"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.help_retention_max_snapshots}"/>
+                                    </Grid>
                                     <TextBox Text="{Binding RetentionMaxSnapshots, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_200}"/>
                                 </StackPanel>
                             </Grid>
 
                             <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                                 <StackPanel Grid.Column="0" Spacing="6">
-                                    <TextBlock Text="{loc:Tr repo_settings.max_total_size_mb}" Classes="label"/>
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.max_total_size_mb}" Classes="label"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.help_retention_max_size}"/>
+                                    </Grid>
                                     <TextBox Text="{Binding RetentionMaxTotalSizeMb, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.example_2048}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="6">
-                                    <TextBlock Text="{loc:Tr repo_settings.run_interval_minutes}" Classes="label"/>
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.run_interval_minutes}" Classes="label"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.help_retention_interval}"/>
+                                    </Grid>
                                     <TextBox Text="{Binding RetentionRunIntervalMinutes, Mode=TwoWay}"/>
                                 </StackPanel>
                             </Grid>
 
-                            <StackPanel Spacing="6">
+                            <StackPanel Spacing="6" IsVisible="{Binding ShowAdvancedRetentionSettings}">
                                 <TextBlock Text="{loc:Tr repo_settings.trigger_filter}" Classes="label"/>
                                 <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.trigger_placeholder}"/>
                             </StackPanel>

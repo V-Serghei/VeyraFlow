@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Onboarding;
+using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Pages.AuthWindow;
 using Veyra.Desktop.ViewModels.Pages.SetupWizard;
 using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
@@ -21,19 +23,23 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
     private readonly IWindowService _windows;
     private readonly IMediator _mediator;
     private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
+    private readonly OnboardingStateService _onboardingState;
+    private readonly UserExperienceManager _experience = UserExperienceManager.Instance;
 
     public WelcomeWindowViewModel(
         IServiceProvider sp,
         INavigationService nav,
         IWindowService windows,
         IMediator mediator,
-        IRepositoryCloudSyncOrchestrator cloudSync)
+        IRepositoryCloudSyncOrchestrator cloudSync,
+        OnboardingStateService onboardingState)
     {
         _sp = sp;
         _nav = nav;
         _windows = windows;
         _mediator = mediator;
         _cloudSync = cloudSync;
+        _onboardingState = onboardingState;
         NavigateToIntro();
     }
 
@@ -54,9 +60,14 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
         CurrentPage = vm;
     }
 
-    private void OnContinueFromTips(bool enableTips)
+    private void OnContinueFromTips(WelcomeTipsSelection selection)
     {
-        EnableTipsSelected = enableTips;
+        EnableTipsSelected = selection.EnableTips;
+        _experience.SetMode(selection.ExperienceModeCode);
+
+        if (selection.EnableTips)
+            _onboardingState.RequestFirstRunTour();
+
         NavigateToLogin();
     }
 

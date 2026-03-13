@@ -17,6 +17,7 @@ using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.State;
+using Veyra.Desktop.Styling;
 using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -29,6 +30,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly IRepositoryDashboardFilterStore _filterStore;
     private readonly LocalizationManager _localization;
+    private readonly UserExperienceManager _experience;
     private readonly List<RepositoryCardViewModel> _allRepositories = [];
 
     private bool _presetsLoaded;
@@ -83,7 +85,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         _sensitiveActionGuard = sensitiveActionGuard;
         _filterStore = filterStore;
         _localization = LocalizationManager.Instance;
+        _experience = UserExperienceManager.Instance;
         _localization.LanguageChanged += OnLanguageChanged;
+        _experience.ModeChanged += OnExperienceModeChanged;
     }
 
     [RelayCommand]
@@ -117,6 +121,15 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                 var queueDeadLetter = r.CloudSync?.DeadLetterQueueCount ?? 0;
                 var queueFailed = r.CloudSync?.FailedQueueCount ?? 0;
                 var queueCompleted = r.CloudSync?.CompletedQueueCount ?? 0;
+                var statusBadge = BuildRepositoryStatusBadge(
+                    isAvailable,
+                    r.CloudSync?.LastStatus,
+                    queuePending,
+                    queueRunning,
+                    queueRetry,
+                    queueConflict,
+                    queueDeadLetter,
+                    queueFailed);
 
                 var card = new RepositoryCardViewModel
                 {
@@ -125,8 +138,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                     Description = r.Description,
                     DirectoryPath = r.DirectoryPath,
                     LastActivityUtc = r.LastScannedAt,
-                    StatusText = isAvailable ? Loc.T("common.local") : Loc.T("common.unavailable"),
-                    StatusColor = isAvailable ? "#4CAF50" : "#F44336",
+                    StatusText = statusBadge.Text,
+                    StatusColor = statusBadge.Color,
                     LastActivity = FormatLastActivity(r.LastScannedAt),
                     FileCount = r.FileCount,
                     VersionCount = r.VersionCount,
@@ -687,9 +700,22 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private static string FormatCloudSyncStatus(string? status)
     {
         if (string.IsNullOrWhiteSpace(status))
-            return Loc.T("dashboard.sync.idle");
+            return UserExperienceManager.Instance.IsBasicMode
+                ? Loc.T("dashboard.sync.simple.local_only")
+                : Loc.T("dashboard.sync.idle");
 
         var normalized = status.Trim().ToLowerInvariant();
+        if (UserExperienceManager.Instance.IsBasicMode)
+        {
+            return normalized switch
+            {
+                "queued" or "syncing" or "offline_retry" or "retrying" => Loc.T("dashboard.sync.simple.in_progress"),
+                "auth_required" or "conflict" or "dead_letter" or "failed" => Loc.T("dashboard.sync.simple.attention"),
+                _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.simple.ready"),
+                _ => Loc.T("dashboard.sync.simple.local_only")
+            };
+        }
+
         return normalized switch
         {
             "queued" => Loc.T("dashboard.sync.queued"),
@@ -708,9 +734,50 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     }
 
     private static string BuildQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
-        => Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    {
+        if (UserExperienceManager.Instance.IsBasicMode)
+        {
+            var total = pending + running + retry + conflict + deadLetter;
+            return total <= 0
+                ? Loc.T("dashboard.queue_summary_simple_idle")
+                : Loc.F("dashboard.queue_summary_simple_active", total);
+        }
+
+        return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    }
+
+    private static (string Text, string Color) BuildRepositoryStatusBadge(
+        bool isDirectoryAvailable,
+        string? cloudStatus,
+        int pending,
+        int running,
+        int retry,
+        int conflict,
+        int deadLetter,
+        int failed)
+    {
+        if (!isDirectoryAvailable)
+            return (Loc.T("common.unavailable"), "#F44336");
+
+        var normalized = NormalizeCloudSyncStateKey(cloudStatus);
+        if (conflict > 0 || deadLetter > 0 || failed > 0 || normalized is "conflict" or "auth_required" or "dead_letter" or "failed")
+            return (Loc.T("dashboard.sync.simple.attention"), "#F59E0B");
+
+        if (pending > 0 || running > 0 || retry > 0 || normalized is "queued" or "syncing" or "retrying")
+            return (Loc.T("dashboard.sync.simple.in_progress"), "#6EA8FF");
+
+        if (normalized == "synced")
+            return (Loc.T("dashboard.sync.simple.ready"), "#4CAF50");
+
+        return (Loc.T("dashboard.sync.simple.local_only"), "#4CAF50");
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void OnExperienceModeChanged(object? sender, EventArgs e)
     {
         RefreshLocalizationState();
     }
@@ -721,7 +788,17 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
         foreach (var card in _allRepositories)
         {
-            card.StatusText = card.IsDirectoryAvailable ? Loc.T("common.local") : Loc.T("common.unavailable");
+            var statusBadge = BuildRepositoryStatusBadge(
+                card.IsDirectoryAvailable,
+                card.CloudSyncStateKey,
+                card.QueuePendingCount,
+                card.QueueRunningCount,
+                card.QueueRetryCount,
+                card.QueueConflictCount,
+                card.QueueDeadLetterCount,
+                card.QueueFailedCount);
+            card.StatusText = statusBadge.Text;
+            card.StatusColor = statusBadge.Color;
             card.LastActivity = FormatLastActivity(card.LastActivityUtc);
             card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey);
             card.CloudQueueSummary = BuildQueueSummary(

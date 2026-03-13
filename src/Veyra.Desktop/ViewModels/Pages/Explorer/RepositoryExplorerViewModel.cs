@@ -3174,6 +3174,21 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             node.IsExpanded = true;
             SelectedTreeNode = node;
             SelectTreeNode(node);
+            return;
+        }
+
+        var fallback = GetParentRelativePath(normalized);
+        while (!string.IsNullOrWhiteSpace(fallback))
+        {
+            if (_nodeByPath.TryGetValue(fallback, out var fallbackNode))
+            {
+                fallbackNode.IsExpanded = true;
+                SelectedTreeNode = fallbackNode;
+                SelectTreeNode(fallbackNode);
+                return;
+            }
+
+            fallback = GetParentRelativePath(fallback);
         }
     }
 

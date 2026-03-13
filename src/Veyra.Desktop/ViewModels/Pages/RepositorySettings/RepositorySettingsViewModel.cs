@@ -22,6 +22,7 @@ using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
 
@@ -35,6 +36,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly ILogger<RepositorySettingsViewModel> _log;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
+    private readonly UserExperienceManager _experience = UserExperienceManager.Instance;
 
     private CancellationTokenSource? _retentionCts;
     private RepositoryRetentionPolicyDto? _lastAppliedRetentionPolicy;
@@ -107,8 +109,38 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         _log = log;
         SelectedFormats.CollectionChanged += OnSelectedFormatsCollectionChanged;
         _localization.LanguageChanged += OnLanguageChanged;
+        _experience.ModeChanged += OnExperienceModeChanged;
         RefreshLocalizationState();
     }
+
+    public bool IsBasicMode => _experience.IsBasicMode;
+    public bool IsProfessionalMode => _experience.IsProfessionalMode;
+    public bool ShowAdvancedSyncSettings => IsProfessionalMode;
+    public bool ShowAdvancedRetentionSettings => IsProfessionalMode;
+    public string CloudSyncSectionHint => IsBasicMode
+        ? Loc.T("repo_settings.sync_hint_basic")
+        : Loc.T("repo_settings.sync_hint");
+    public string CloudSyncStatusLabel => IsBasicMode
+        ? Loc.T("repo_settings.cloud_copy_status")
+        : Loc.T("repo_settings.sync_status");
+    public string CloudSyncQueueLabel => IsBasicMode
+        ? Loc.T("repo_settings.sync_queue_status")
+        : Loc.T("repo_settings.queue");
+    public string SyncNowLabel => IsBasicMode
+        ? Loc.T("repo_settings.sync_now_basic")
+        : Loc.T("repo_settings.sync_now");
+    public string CloudRepairTitle => IsBasicMode
+        ? Loc.T("repo_settings.cloud_repair_title_basic")
+        : Loc.T("repo_settings.cloud_repair_title");
+    public string CloudRepairButtonLabel => IsBasicMode
+        ? Loc.T("repo_settings.cloud_repair_button_basic")
+        : Loc.T("repo_settings.cloud_repair_button");
+    public string CloudRepairHint => IsBasicMode
+        ? Loc.T("repo_settings.cloud_repair_hint_basic")
+        : Loc.T("repo_settings.cloud_repair_hint");
+    public string RetentionSectionHint => IsBasicMode
+        ? Loc.T("repo_settings.retention_hint_basic")
+        : Loc.T("repo_settings.retention_hint");
 
     public async Task LoadAsync(int repositoryId)
     {
@@ -787,6 +819,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     private static string FormatCloudSyncStatus(string? status)
     {
+        if (UserExperienceManager.Instance.IsBasicMode)
+            return FormatCloudSyncStatusBasic(status);
+
         if (string.IsNullOrWhiteSpace(status))
             return Loc.T("dashboard.sync.idle");
 
@@ -806,7 +841,27 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         };
     }
 
+    private static string FormatCloudSyncStatusBasic(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return Loc.T("repo_settings.sync_status_basic_local");
+
+        var normalized = status.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "queued" or "syncing" or "offline_retry" or "retrying" => Loc.T("repo_settings.sync_status_basic_working"),
+            "auth_required" or "conflict" or "failed" or "dead_letter" => Loc.T("repo_settings.sync_status_basic_attention"),
+            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_ready"),
+            _ => Loc.T("repo_settings.sync_status_basic_local")
+        };
+    }
+
     private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void OnExperienceModeChanged(object? sender, EventArgs e)
     {
         RefreshLocalizationState();
     }
@@ -820,6 +875,19 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         SyncConflictStrategy = RepositorySyncConflictStrategies.All.Contains(selectedStrategy, StringComparer.OrdinalIgnoreCase)
             ? selectedStrategy
             : RepositorySyncConflictStrategies.LastWriteWins;
+
+        OnPropertyChanged(nameof(IsBasicMode));
+        OnPropertyChanged(nameof(IsProfessionalMode));
+        OnPropertyChanged(nameof(ShowAdvancedSyncSettings));
+        OnPropertyChanged(nameof(ShowAdvancedRetentionSettings));
+        OnPropertyChanged(nameof(CloudSyncSectionHint));
+        OnPropertyChanged(nameof(CloudSyncStatusLabel));
+        OnPropertyChanged(nameof(CloudSyncQueueLabel));
+        OnPropertyChanged(nameof(SyncNowLabel));
+        OnPropertyChanged(nameof(CloudRepairTitle));
+        OnPropertyChanged(nameof(CloudRepairButtonLabel));
+        OnPropertyChanged(nameof(CloudRepairHint));
+        OnPropertyChanged(nameof(RetentionSectionHint));
 
         if (_lastAppliedRetentionPolicy is not null)
             ApplyRetentionPolicy(_lastAppliedRetentionPolicy);
@@ -835,7 +903,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
     private static string FormatCloudQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
-        => Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    {
+        if (UserExperienceManager.Instance.IsBasicMode)
+            return pending == 0 && running == 0 && retry == 0 && conflict == 0 && deadLetter == 0
+                ? Loc.T("repo_settings.queue_basic_idle")
+                : Loc.T("repo_settings.queue_basic_active");
+
+        return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    }
 
     private async Task<bool> ConfirmRepositoryDeletionAsync()
     {

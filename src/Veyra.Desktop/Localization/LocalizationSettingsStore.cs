@@ -8,6 +8,7 @@ internal sealed class LocalizationSettingsStore
 {
     private const string LanguageProperty = "language";
     private const string ThemeProperty = "theme";
+    private const string ExperienceProperty = "experience";
 
     private readonly string _settingsPath;
 
@@ -34,7 +35,7 @@ internal sealed class LocalizationSettingsStore
     }
 
     public void SaveLanguageCode(string languageCode)
-        => SaveModel(languageCode, LoadThemeCode());
+        => SaveModel(languageCode, LoadThemeCode(), LoadExperienceCode());
 
     public string? LoadThemeCode()
     {
@@ -50,9 +51,25 @@ internal sealed class LocalizationSettingsStore
     }
 
     public void SaveThemeCode(string themeCode)
-        => SaveModel(LoadLanguageCode(), themeCode);
+        => SaveModel(LoadLanguageCode(), themeCode, LoadExperienceCode());
 
-    private void SaveModel(string? languageCode, string? themeCode)
+    public string? LoadExperienceCode()
+    {
+        try
+        {
+            var model = LoadModel();
+            return model?.experience;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public void SaveExperienceCode(string experienceCode)
+        => SaveModel(LoadLanguageCode(), LoadThemeCode(), experienceCode);
+
+    private void SaveModel(string? languageCode, string? themeCode, string? experienceCode)
     {
         try
         {
@@ -63,6 +80,7 @@ internal sealed class LocalizationSettingsStore
             var model = new SettingsModel(
                 language: string.IsNullOrWhiteSpace(languageCode) ? null : languageCode.Trim(),
                 theme: string.IsNullOrWhiteSpace(themeCode) ? null : themeCode.Trim(),
+                experience: string.IsNullOrWhiteSpace(experienceCode) ? null : experienceCode.Trim(),
                 updatedAtUtc: DateTime.UtcNow);
 
             var json = JsonSerializer.Serialize(model, new JsonSerializerOptions
@@ -96,11 +114,16 @@ internal sealed class LocalizationSettingsStore
             ? themeElement.GetString()
             : null;
 
+        var experience = document.RootElement.TryGetProperty(ExperienceProperty, out var experienceElement)
+            ? experienceElement.GetString()
+            : null;
+
         return new SettingsModel(
             language: language,
             theme: theme,
+            experience: experience,
             updatedAtUtc: DateTime.UtcNow);
     }
 
-    private sealed record SettingsModel(string? language, string? theme, DateTime updatedAtUtc);
+    private sealed record SettingsModel(string? language, string? theme, string? experience, DateTime updatedAtUtc);
 }

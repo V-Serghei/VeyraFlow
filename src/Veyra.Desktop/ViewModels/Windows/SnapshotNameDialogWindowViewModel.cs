@@ -89,25 +89,34 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private double _imageDiffSensitivity = 72;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SplitPositionLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private double _comparisonSplitPercent = 50;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSplitImageDiffMode))]
     [NotifyPropertyChangedFor(nameof(IsHeatmapImageDiffMode))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private ImageDiffModeOptionViewModel? _selectedImageDiffMode;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageRegionBoxesLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
     private bool _showImageDiffRegionBoxes = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
     private bool _showSourceImagePanels = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffSettingsToggleLabel))]
+    private bool _showImageDiffSettings;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
@@ -170,6 +179,13 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     public string WrapToggleLabel => IsWrapEnabled ? Loc.T("compare.wrap.on") : Loc.T("compare.wrap.off");
     public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
+    public string ImageDiffCompactSummary => (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
+        ? Loc.F("compare.image_quick_summary_split", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel, SplitPositionLabel)
+        : Loc.F("compare.image_quick_summary", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel);
+    public string ImageDiffCompactStateText => $"{ImageRegionBoxesLabel} · {SourceImagePanelsLabel}";
+    public string ImageDiffSettingsToggleLabel => ShowImageDiffSettings
+        ? Loc.T("compare.hide_diff_settings")
+        : Loc.T("compare.show_diff_settings");
     public string SplitPositionLabel => $"{Math.Round(ComparisonSplitPercent):0}%";
     public string ImageRegionBoxesLabel => ShowImageDiffRegionBoxes
         ? Loc.T("compare.image_regions.on")
@@ -239,6 +255,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SplitPositionLabel));
         OnPropertyChanged(nameof(ImageRegionBoxesLabel));
         OnPropertyChanged(nameof(SourceImagePanelsLabel));
+        OnPropertyChanged(nameof(ImageDiffCompactSummary));
+        OnPropertyChanged(nameof(ImageDiffCompactStateText));
+        OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
         RefreshImageDiffModes();
 
         var changedFiles = ChangedFiles.ToList();
@@ -397,6 +416,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void ToggleShowSourceImagePanels()
     {
         ShowSourceImagePanels = !ShowSourceImagePanels;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffSettings()
+    {
+        ShowImageDiffSettings = !ShowImageDiffSettings;
     }
 
     [RelayCommand]

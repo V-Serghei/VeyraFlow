@@ -80,7 +80,7 @@
                         <TextBlock Text="{Binding SelectedTab.Title}" FontSize="20" FontWeight="SemiBold"/>
                         <TextBlock Text="{Binding SelectedTab.Subtitle}" Opacity="0.75"/>
 
-                        <Border Classes="card" Padding="12" IsVisible="{Binding IsUserTabSelected}">
+                        <Border x:Name="AppSettingsUserSessionCard" Classes="card" Padding="12" IsVisible="{Binding IsUserTabSelected}">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="{loc:Tr app_settings.current_session}" FontSize="16" FontWeight="SemiBold"/>
                                 <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
@@ -91,16 +91,16 @@
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.active_email}" Opacity="0.8"/>
                                     <TextBlock Grid.Column="1" Text="{Binding ActiveEmail}" FontWeight="SemiBold"/>
                                 </Grid>
-                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10" IsVisible="{Binding ShowTechnicalProfileDetails}">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_user_id}" Opacity="0.8"/>
                                     <TextBlock Grid.Column="1" Text="{Binding ActiveCloudUserText}"/>
                                 </Grid>
-                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10" IsVisible="{Binding ShowTechnicalProfileDetails}">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.token_state}" Opacity="0.8"/>
                                     <TextBlock Grid.Column="1" Text="{Binding ActiveSessionTokenState}" TextWrapping="Wrap"/>
                                 </Grid>
 
-                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap" IsVisible="{Binding ShowTechnicalProfileDetails}"/>
 
                                 <WrapPanel Orientation="Horizontal">
                                     <Button
@@ -176,8 +176,8 @@
                                                         <TextBlock Text="{Binding Username}" FontWeight="SemiBold"/>
                                                         <TextBlock Text="{Binding EmailText}" Opacity="0.75"/>
                                                         <TextBlock Text="{Binding LastLoginText}" Opacity="0.75"/>
-                                                        <TextBlock Text="{Binding CloudUserLabel}" Opacity="0.75"/>
-                                                        <TextBlock Text="{Binding TokenStateText}" Opacity="0.75" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{Binding CloudUserLabel}" Opacity="0.75" IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowTechnicalProfileDetails}"/>
+                                                        <TextBlock Text="{Binding TokenStateText}" Opacity="0.75" TextWrapping="Wrap" IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowTechnicalProfileDetails}"/>
                                                         <TextBlock Text="{loc:Tr app_settings.token_available}"
                                                                    Foreground="{DynamicResource VeyraSuccessBrush}"
                                                                    IsVisible="{Binding HasAccessToken}"/>
@@ -208,9 +208,19 @@
 
                         <Border Classes="card" Padding="12" IsVisible="{Binding IsSyncTabSelected}">
                             <StackPanel Spacing="12">
-                                <TextBlock Text="{loc:Tr app_settings.pseudo_cloud_sync}" FontSize="16" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.pseudo_cloud_sync}" FontSize="16" FontWeight="SemiBold"/>
+                                    <Button Grid.Column="1"
+                                            Classes="ghost"
+                                            Width="24"
+                                            Height="24"
+                                            Padding="0"
+                                            Content="?"
+                                            ToolTip.Tip="{Binding SyncSectionHelpText}"/>
+                                </Grid>
+                                <TextBlock Text="{Binding SyncSectionIntroText}" Classes="muted" TextWrapping="Wrap"/>
 
-                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10" IsVisible="{Binding ShowTechnicalCloudDetails}">
                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_api}" Opacity="0.8"/>
                                     <TextBlock Grid.Column="1" Text="{Binding CloudApiBaseUrl}" TextWrapping="Wrap"/>
                                 </Grid>
@@ -220,24 +230,48 @@
                                     <TextBlock Grid.Column="1" Text="{Binding LocalRepositoryCount}"/>
                                 </Grid>
 
-                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding TokenPolicyHint}" Opacity="0.75" TextWrapping="Wrap" IsVisible="{Binding ShowTechnicalCloudDetails}"/>
 
-                                <WrapPanel Orientation="Horizontal">
-                                    <Button Content="{loc:Tr app_settings.restore_from_cloud}"
+                                <WrapPanel x:Name="AppSettingsSyncActionsPanel" Orientation="Horizontal">
+                                    <Button
                                             Command="{Binding RestoreFromCloudCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"
-                                            Margin="0,0,8,8"/>
-                                    <Button Content="{loc:Tr app_settings.push_all_latest}"
+                                            Classes="subtle compact responsive-icon"
+                                            Margin="0,0,8,8"
+                                            ToolTip.Tip="{Binding SyncSectionHelpText}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE8B7;"/>
+                                                <TextBlock Classes="button-label" Text="{Binding RestoreFromCloudLabel}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                    <Button
                                             Command="{Binding PushAllRepositoriesCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"
-                                            Margin="0,0,8,8"/>
-                                    <Button Content="{loc:Tr app_settings.process_queue}"
+                                            Classes="subtle compact responsive-icon"
+                                            Margin="0,0,8,8"
+                                            ToolTip.Tip="{Binding SyncSectionHelpText}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE898;"/>
+                                                <TextBlock Classes="button-label" Text="{Binding PushAllRepositoriesLabel}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+                                    <Button
                                             Command="{Binding ProcessQueueCommand}"
                                             IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                            Classes="subtle"
-                                            Margin="0,0,8,8"/>
+                                            Classes="subtle compact responsive-icon"
+                                            Margin="0,0,8,8"
+                                            ToolTip.Tip="{Binding RepositorySyncHealthHelpText}">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE768;"/>
+                                                <TextBlock Classes="button-label" Text="{Binding ProcessQueueLabel}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
                                 </WrapPanel>
 
                                 <TextBlock Text="{loc:Tr common.running}"
@@ -248,12 +282,21 @@
                                            Foreground="{DynamicResource VeyraInfoBrush}"
                                            TextWrapping="Wrap"/>
 
-                                <Border Classes="filter-sheet" Padding="12">
+                                <Border Classes="filter-sheet" Padding="12" IsVisible="{Binding ShowCloudStorageDiagnostics}">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <StackPanel Spacing="2">
-                                                <TextBlock Text="{loc:Tr app_settings.cloud_storage_title}" FontSize="16" FontWeight="SemiBold"/>
-                                                <TextBlock Text="{loc:Tr app_settings.cloud_storage_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.cloud_storage_title}" FontSize="16" FontWeight="SemiBold"/>
+                                                    <Button Grid.Column="1"
+                                                            Classes="ghost"
+                                                            Width="24"
+                                                            Height="24"
+                                                            Padding="0"
+                                                            Content="?"
+                                                            ToolTip.Tip="{Binding CloudStorageHelpText}"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding CloudStorageHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
                                             <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -351,8 +394,17 @@
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <StackPanel Spacing="2">
-                                                <TextBlock Text="{loc:Tr app_settings.repository_sync_health_title}" FontSize="16" FontWeight="SemiBold"/>
-                                                <TextBlock Text="{loc:Tr app_settings.repository_sync_health_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_title}" FontSize="16" FontWeight="SemiBold"/>
+                                                    <Button Grid.Column="1"
+                                                            Classes="ghost"
+                                                            Width="24"
+                                                            Height="24"
+                                                            Padding="0"
+                                                            Content="?"
+                                                            ToolTip.Tip="{Binding RepositorySyncHealthHelpText}"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding RepositorySyncHealthHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
                                             <Border Classes="badge" VerticalAlignment="Top">
@@ -380,7 +432,8 @@
                                                                 </Border>
                                                             </Grid>
 
-                                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                            <Grid ColumnDefinitions="150,*" ColumnSpacing="10"
+                                                                  IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowDetailedRepositorySyncIssueDiagnostics}">
                                                                 <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.queue}" Opacity="0.8"/>
                                                                 <TextBlock Grid.Column="1" Text="{Binding QueueText}" TextWrapping="Wrap"/>
                                                             </Grid>
@@ -392,7 +445,15 @@
 
                                                             <StackPanel Spacing="6" IsVisible="{Binding HasProgress}">
                                                                 <Grid ColumnDefinitions="150,*,Auto" ColumnSpacing="10">
-                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_progress_label}" Opacity="0.8"/>
+                                                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                                                        <TextBlock Text="{loc:Tr app_settings.repository_sync_health_progress_label}" Opacity="0.8"/>
+                                                                        <Button Classes="ghost"
+                                                                                Content="?"
+                                                                                Width="22"
+                                                                                Height="22"
+                                                                                Padding="0"
+                                                                                ToolTip.Tip="{Binding #Root.((settings:AppSettingsViewModel)DataContext).RepositorySyncProgressHelpText}"/>
+                                                                    </StackPanel>
                                                                     <ProgressBar Grid.Column="1"
                                                                                  Minimum="0"
                                                                                  Maximum="100"
@@ -409,17 +470,20 @@
                                                                     <TextBlock Grid.Column="1" Text="{Binding EtaText}" TextWrapping="Wrap"/>
                                                                 </Grid>
 
-                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10"
+                                                                      IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowDetailedRepositorySyncIssueDiagnostics}">
                                                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_elapsed_label}" Opacity="0.8"/>
                                                                     <TextBlock Grid.Column="1" Text="{Binding ElapsedText}" TextWrapping="Wrap"/>
                                                                 </Grid>
 
-                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                                <Grid ColumnDefinitions="150,*" ColumnSpacing="10"
+                                                                      IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowDetailedRepositorySyncIssueDiagnostics}">
                                                                     <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_finish_at_label}" Opacity="0.8"/>
                                                                     <TextBlock Grid.Column="1" Text="{Binding FinishAtText}" TextWrapping="Wrap"/>
                                                                 </Grid>
 
-                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10"
+                                                          IsVisible="{Binding #Root.((settings:AppSettingsViewModel)DataContext).ShowDetailedRepositorySyncIssueDiagnostics}">
                                                         <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_last_update_label}" Opacity="0.8"/>
                                                         <TextBlock Grid.Column="1" Text="{Binding LastProgressUpdateText}" TextWrapping="Wrap"/>
                                                     </Grid>
@@ -510,6 +574,48 @@
 
                                 <TextBlock Text="{loc:Tr app_settings.language_hint}" Opacity="0.72" TextWrapping="Wrap"/>
 
+                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.experience_mode_label}" Opacity="0.8"/>
+                                    <ComboBox x:Name="AppSettingsExperienceComboBox"
+                                              Grid.Column="1"
+                                              ItemsSource="{Binding ExperienceModes}"
+                                              SelectedItem="{Binding SelectedExperienceMode, Mode=TwoWay}">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppExperienceOptionItemViewModel">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding DisplayName}"/>
+                                                    <TextBlock Text="{Binding Description}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                        <ComboBox.SelectionBoxItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppExperienceOptionItemViewModel">
+                                                <TextBlock Text="{Binding DisplayName}"/>
+                                            </DataTemplate>
+                                        </ComboBox.SelectionBoxItemTemplate>
+                                    </ComboBox>
+                                </Grid>
+
+                                <TextBlock Text="{Binding ExperienceModeHint}" Opacity="0.72" TextWrapping="Wrap"/>
+
+                                <Border x:Name="AppSettingsGuidedTourCard" Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.guided_tour_title}" FontWeight="SemiBold"/>
+                                        <Button x:Name="AppSettingsGuidedTourButton"
+                                                Command="{Binding ReplayGuidedTourCommand}"
+                                                Classes="subtle compact responsive-icon"
+                                                HorizontalAlignment="Left"
+                                                ToolTip.Tip="{loc:Tr app_settings.guided_tour_replay}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr app_settings.guided_tour_replay}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+
                                 <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="{loc:Tr app_settings.sensitive_actions_title}" FontWeight="SemiBold"/>
@@ -529,7 +635,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" IsVisible="{Binding ShowLocalizationDiagnostics}">
                                     <StackPanel Spacing="6">
                                         <TextBlock Text="{loc:Tr app_settings.localization_diagnostics_title}" FontWeight="SemiBold"/>
                                         <TextBlock Text="{loc:Tr app_settings.localization_diagnostics_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
@@ -587,16 +693,23 @@
                                                    IsVisible="{Binding HasLocalizationExtraSample}"/>
                                     </StackPanel>
                                 </Border>
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" IsVisible="{Binding IsBasicMode}">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{loc:Tr app_settings.localization_simple_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding LocalizationSummaryText}" Classes="muted" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
 
                                 <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="8">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                        <Grid x:Name="AppSettingsOperationJournalHeader" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                                             <StackPanel Spacing="4">
                                                 <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <Button Grid.Column="1"
+                                            <Button x:Name="AppSettingsOperationJournalButton"
+                                                    Grid.Column="1"
                                                     Command="{Binding ShowOperationJournalCommand}"
                                                     Classes="subtle compact responsive-icon"
                                                     VerticalAlignment="Top"

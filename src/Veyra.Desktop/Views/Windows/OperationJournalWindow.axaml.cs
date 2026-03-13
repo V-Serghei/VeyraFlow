@@ -1,3 +1,4 @@
+using System;
 using Avalonia;
 using Avalonia.Controls;
 using Veyra.Desktop.ViewModels.Windows;
@@ -8,10 +9,19 @@ public partial class OperationJournalWindow : Window
 {
     private const double CompactWidth = 1320;
     private const double NarrowWidth = 1060;
+    private readonly Grid _contentGrid;
+    private readonly Border _entriesPanel;
+    private readonly Border _detailsPanel;
 
     public OperationJournalWindow()
     {
         InitializeComponent();
+        _contentGrid = this.FindControl<Grid>("OperationJournalContentGrid")
+            ?? throw new InvalidOperationException("OperationJournalContentGrid was not found.");
+        _entriesPanel = this.FindControl<Border>("OperationJournalEntriesPanel")
+            ?? throw new InvalidOperationException("OperationJournalEntriesPanel was not found.");
+        _detailsPanel = this.FindControl<Border>("OperationJournalDetailsPanel")
+            ?? throw new InvalidOperationException("OperationJournalDetailsPanel was not found.");
         SizeChanged += OnSizeChanged;
 
         Opened += (_, _) =>
@@ -41,27 +51,27 @@ public partial class OperationJournalWindow : Window
 
         if (width < NarrowWidth)
         {
-            OperationJournalContentGrid.ColumnDefinitions = new ColumnDefinitions("*");
-            OperationJournalContentGrid.RowDefinitions = new RowDefinitions("1.05*,12,0.95*");
+            _contentGrid.ColumnDefinitions = new ColumnDefinitions("*");
+            _contentGrid.RowDefinitions = new RowDefinitions("1.05*,12,0.95*");
 
-            Grid.SetColumn(OperationJournalEntriesPanel, 0);
-            Grid.SetRow(OperationJournalEntriesPanel, 0);
+            Grid.SetColumn(_entriesPanel, 0);
+            Grid.SetRow(_entriesPanel, 0);
 
-            Grid.SetColumn(OperationJournalDetailsPanel, 0);
-            Grid.SetRow(OperationJournalDetailsPanel, 2);
+            Grid.SetColumn(_detailsPanel, 0);
+            Grid.SetRow(_detailsPanel, 2);
             return;
         }
 
-        OperationJournalContentGrid.RowDefinitions = new RowDefinitions("*");
-        OperationJournalContentGrid.ColumnDefinitions = width < CompactWidth
+        _contentGrid.RowDefinitions = new RowDefinitions("*");
+        _contentGrid.ColumnDefinitions = width < CompactWidth
             ? new ColumnDefinitions("1.05*,0.95*")
             : new ColumnDefinitions("1.15*,0.95*");
 
-        Grid.SetColumn(OperationJournalEntriesPanel, 0);
-        Grid.SetRow(OperationJournalEntriesPanel, 0);
+        Grid.SetColumn(_entriesPanel, 0);
+        Grid.SetRow(_entriesPanel, 0);
 
-        Grid.SetColumn(OperationJournalDetailsPanel, 1);
-        Grid.SetRow(OperationJournalDetailsPanel, 0);
+        Grid.SetColumn(_detailsPanel, 1);
+        Grid.SetRow(_detailsPanel, 0);
     }
 
     private void ToggleRootClass(string className, bool enabled)

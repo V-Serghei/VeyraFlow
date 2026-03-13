@@ -20,6 +20,7 @@ using Veyra.Desktop.Views;
 using Veyra.Desktop.Views.Pages.SetupWizard;
 using Veyra.Desktop.Views.Windows;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Onboarding;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
@@ -72,6 +73,7 @@ public static class DependencyInjection
         services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
         services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
         services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
+        services.AddSingleton<OnboardingStateService>();
 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();

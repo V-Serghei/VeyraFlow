@@ -111,25 +111,38 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private double _imageDiffSensitivity = 72;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SplitPositionLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private double _comparisonSplitPercent = 50;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSplitImageDiffMode))]
     [NotifyPropertyChangedFor(nameof(IsHeatmapImageDiffMode))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private ImageDiffModeOptionViewModel? _selectedImageDiffMode;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageRegionBoxesLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
     private bool _showImageDiffRegionBoxes = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
-    private bool _showSourceImagePanels = true;
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
+    private bool _showSourceImagePanels = false;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffSettingsToggleLabel))]
+    private bool _showImageDiffSettings;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffDetailsToggleLabel))]
+    private bool _showImageDiffDetails;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
@@ -204,6 +217,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(SplitPositionLabel));
         OnPropertyChanged(nameof(ImageRegionBoxesLabel));
         OnPropertyChanged(nameof(SourceImagePanelsLabel));
+        OnPropertyChanged(nameof(ImageDiffCompactSummary));
+        OnPropertyChanged(nameof(ImageDiffCompactStateText));
+        OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
         RefreshImageDiffModes();
 
         RefreshVersionsBindings();
@@ -368,6 +384,16 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool ShowSourceImagePanelsSection => HasImagePreviews && ShowSourceImagePanels;
     public bool CanSaveImageDiffPreview => IsImagePreview && HasOverlayImagePreview && _lastRenderedOverlayPngBytes.Length > 0;
     public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
+    public string ImageDiffCompactSummary => (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
+        ? Loc.F("compare.image_quick_summary_split", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel, SplitPositionLabel)
+        : Loc.F("compare.image_quick_summary", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel);
+    public string ImageDiffCompactStateText => $"{ImageRegionBoxesLabel} · {SourceImagePanelsLabel}";
+    public string ImageDiffSettingsToggleLabel => ShowImageDiffSettings
+        ? Loc.T("compare.hide_diff_settings")
+        : Loc.T("compare.show_diff_settings");
+    public string ImageDiffDetailsToggleLabel => ShowImageDiffDetails
+        ? Loc.T("compare.hide_details")
+        : Loc.T("compare.show_details");
     public string SplitPositionLabel => $"{Math.Round(ComparisonSplitPercent):0}%";
     public string ImageRegionBoxesLabel => ShowImageDiffRegionBoxes
         ? Loc.T("compare.image_regions.on")
@@ -557,6 +583,18 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ToggleShowImageDiffSettings()
+    {
+        ShowImageDiffSettings = !ShowImageDiffSettings;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffDetails()
+    {
+        ShowImageDiffDetails = !ShowImageDiffDetails;
+    }
+
+    [RelayCommand]
     private async Task ResetImageDiffSettingsAsync()
     {
         _suspendImageDiffRerender = true;
@@ -566,7 +604,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             ImageDiffSensitivity = 72;
             ComparisonSplitPercent = 50;
             ShowImageDiffRegionBoxes = true;
-            ShowSourceImagePanels = true;
+            ShowSourceImagePanels = false;
+            ShowImageDiffDetails = false;
         }
         finally
         {

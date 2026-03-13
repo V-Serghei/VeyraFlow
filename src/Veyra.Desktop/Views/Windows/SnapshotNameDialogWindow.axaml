@@ -337,20 +337,38 @@
 
                             <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">
                                 <StackPanel Spacing="10">
-                                    <Border Classes="toolbar"
-                                            Background="{DynamicResource VeyraSurfaceSoftBrush}"
-                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="10"
-                                            Padding="10">
-                                        <WrapPanel Orientation="Horizontal">
-                                            <StackPanel Spacing="4" MinWidth="160" Margin="0,0,10,10">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="{Binding ImageDiffCompactSummary}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding ImageDiffCompactStateText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <Button Grid.Column="1"
+                                                Classes="subtle compact responsive-icon"
+                                                Command="{Binding ToggleShowImageDiffSettingsCommand}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE713;"/>
+                                                    <TextBlock Classes="button-label" Text="{Binding ImageDiffSettingsToggleLabel}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                    </Grid>
+
+                                    <Border Classes="popover-panel"
+                                            HorizontalAlignment="Right"
+                                            MaxWidth="540"
+                                            IsVisible="{Binding ShowImageDiffSettings}">
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="{loc:Tr compare.image_diff_settings_title}" FontWeight="SemiBold"/>
+
+                                            <StackPanel Spacing="4">
                                                 <TextBlock Text="{loc:Tr compare.image_mode}" Classes="muted" FontSize="11"/>
-                                                <Border Classes="segmented-control" MinWidth="322">
+                                                <Border Classes="segmented-control">
                                                     <ItemsControl ItemsSource="{Binding ImageDiffModes}">
                                                         <ItemsControl.ItemsPanel>
                                                             <ItemsPanelTemplate>
-                                                                <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                                                <WrapPanel Orientation="Horizontal" ItemWidth="140"/>
                                                             </ItemsPanelTemplate>
                                                         </ItemsControl.ItemsPanel>
                                                         <ItemsControl.ItemTemplate>
@@ -366,26 +384,29 @@
                                                 </Border>
                                             </StackPanel>
 
-                                            <StackPanel Spacing="4" MinWidth="190" Margin="0,0,10,10">
-                                                <TextBlock Text="{loc:Tr compare.image_sensitivity}" Classes="muted" FontSize="11"/>
-                                                <Slider Minimum="1"
-                                                        Maximum="100"
-                                                        Value="{Binding ImageDiffSensitivity}"
-                                                        TickFrequency="5"
-                                                        IsSnapToTickEnabled="False"/>
-                                                <TextBlock Text="{Binding ImageSensitivityLabel}" Classes="muted" FontSize="11"/>
-                                            </StackPanel>
+                                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                                <StackPanel Grid.Column="0" Spacing="4">
+                                                    <TextBlock Text="{loc:Tr compare.image_sensitivity}" Classes="muted" FontSize="11"/>
+                                                    <Slider Minimum="1"
+                                                            Maximum="100"
+                                                            Value="{Binding ImageDiffSensitivity}"
+                                                            TickFrequency="5"
+                                                            IsSnapToTickEnabled="False"/>
+                                                    <TextBlock Text="{Binding ImageSensitivityLabel}" Classes="muted" FontSize="11"/>
+                                                </StackPanel>
 
-                                            <StackPanel Spacing="4" MinWidth="160" Margin="0,0,10,10" IsVisible="{Binding IsSplitImageDiffMode}">
-                                                <TextBlock Text="{loc:Tr compare.image_split}" Classes="muted" FontSize="11"/>
-                                                <Slider Minimum="0"
-                                                        Maximum="100"
-                                                        Value="{Binding ComparisonSplitPercent}"/>
-                                                <TextBlock Text="{Binding SplitPositionLabel}" Classes="muted" FontSize="11"/>
-                                            </StackPanel>
+                                                <StackPanel Grid.Column="1" Spacing="4" IsVisible="{Binding IsSplitImageDiffMode}">
+                                                    <TextBlock Text="{loc:Tr compare.image_split}" Classes="muted" FontSize="11"/>
+                                                    <Slider Minimum="0"
+                                                            Maximum="100"
+                                                            Value="{Binding ComparisonSplitPercent}"/>
+                                                    <TextBlock Text="{Binding SplitPositionLabel}" Classes="muted" FontSize="11"/>
+                                                </StackPanel>
+                                            </Grid>
 
-                                            <StackPanel Spacing="6" VerticalAlignment="Bottom" Margin="0,0,10,10">
+                                            <WrapPanel Orientation="Horizontal">
                                                 <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,8,8"
                                                         Command="{Binding ToggleShowImageDiffRegionBoxesCommand}">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
@@ -395,6 +416,7 @@
                                                     </Button.Content>
                                                 </Button>
                                                 <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,8,8"
                                                         Command="{Binding ToggleShowSourceImagePanelsCommand}">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
@@ -403,10 +425,8 @@
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
-                                            </StackPanel>
-
-                                            <StackPanel Spacing="6" VerticalAlignment="Bottom" Margin="0,0,10,10">
                                                 <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,0,8"
                                                         Command="{Binding ResetImageDiffSettingsCommand}">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
@@ -415,8 +435,8 @@
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
-                                            </StackPanel>
-                                        </WrapPanel>
+                                            </WrapPanel>
+                                        </StackPanel>
                                     </Border>
 
                                     <ItemsControl ItemsSource="{Binding PreviewMetrics}">
@@ -443,7 +463,15 @@
                                             IsVisible="{Binding HasOverlayImagePreview}">
                                         <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                             <TextBlock Grid.Row="0" Text="{Binding OverlayImageCaption}" FontWeight="SemiBold"/>
-                                            <Image Grid.Row="1" Source="{Binding OverlayImagePreview}" Stretch="Uniform"/>
+                                            <ScrollViewer Grid.Row="1"
+                                                          HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          MaxHeight="360">
+                                                <Image Source="{Binding OverlayImagePreview}"
+                                                       Stretch="None"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Top"/>
+                                            </ScrollViewer>
                                         </Grid>
                                     </Border>
 
@@ -451,14 +479,30 @@
                                         <Border Grid.Column="0" Background="{DynamicResource VeyraSurfaceSoftBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
-                                                <Image Grid.Row="1" Source="{Binding LeftImagePreview}" Stretch="Uniform"/>
+                                                <ScrollViewer Grid.Row="1"
+                                                              HorizontalScrollBarVisibility="Auto"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              MaxHeight="260">
+                                                    <Image Source="{Binding LeftImagePreview}"
+                                                           Stretch="None"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Top"/>
+                                                </ScrollViewer>
                                             </Grid>
                                         </Border>
 
                                         <Border Grid.Column="1" Background="{DynamicResource VeyraSurfaceSoftBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{Binding RightImageCaption}" FontWeight="SemiBold"/>
-                                                <Image Grid.Row="1" Source="{Binding RightImagePreview}" Stretch="Uniform"/>
+                                                <ScrollViewer Grid.Row="1"
+                                                              HorizontalScrollBarVisibility="Auto"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              MaxHeight="260">
+                                                    <Image Source="{Binding RightImagePreview}"
+                                                           Stretch="None"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Top"/>
+                                                </ScrollViewer>
                                             </Grid>
                                         </Border>
                                     </Grid>

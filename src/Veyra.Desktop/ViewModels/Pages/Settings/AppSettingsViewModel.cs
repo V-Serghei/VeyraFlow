@@ -18,6 +18,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Onboarding;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
@@ -51,6 +52,7 @@ public sealed partial class AppSettingsTabViewModel : ObservableObject
 
 public sealed record AppLanguageOptionItemViewModel(string Code, string DisplayName);
 public sealed record AppThemeOptionItemViewModel(string Code, string DisplayName);
+public sealed record AppExperienceOptionItemViewModel(string Code, string DisplayName, string Description);
 
 public sealed record AppUserProfileItemViewModel(
     string Username,
@@ -105,12 +107,15 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly IWindowService _windows;
     private readonly IMediator _mediator;
     private readonly ILogger<AppSettingsViewModel> _log;
+    private readonly OnboardingStateService _onboardingState;
     private readonly LocalizationManager _localization;
     private readonly ThemeManager _theme;
+    private readonly UserExperienceManager _experience;
     private readonly SemaphoreSlim _syncStatusRefreshGate = new(1, 1);
 
     private bool _suppressLanguageSelectionChanged;
     private bool _suppressThemeSelectionChanged;
+    private bool _suppressExperienceSelectionChanged;
     private bool _suppressSensitiveActionToggleChanged;
     private bool _hasActiveSyncWork;
     private readonly Dictionary<int, bool> _stallStateByRepositoryId = [];
@@ -197,6 +202,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private AppThemeOptionItemViewModel? _selectedTheme;
 
     [ObservableProperty]
+    private AppExperienceOptionItemViewModel? _selectedExperienceMode;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasLocalizationIssues))]
     private int _localizationResourceFilesCount;
 
@@ -244,6 +252,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public ObservableCollection<AppUserProfileItemViewModel> Profiles { get; } = [];
     public ObservableCollection<AppLanguageOptionItemViewModel> Languages { get; } = [];
     public ObservableCollection<AppThemeOptionItemViewModel> Themes { get; } = [];
+    public ObservableCollection<AppExperienceOptionItemViewModel> ExperienceModes { get; } = [];
     public ObservableCollection<AppOperationJournalItemViewModel> OperationJournalItems { get; } = [];
     public ObservableCollection<AppRepositorySyncIssueItemViewModel> RepositorySyncIssues { get; } = [];
 
@@ -254,6 +263,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         IOperationJournalService journal,
         IRepositoryCloudSyncOrchestrator sync,
         ICloudSyncService cloudSyncService,
+        OnboardingStateService onboardingState,
         ISensitiveActionGuard sensitiveActionGuard,
         IWindowService windows,
         IMediator mediator,
@@ -266,12 +276,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _journal = journal;
         _sync = sync;
         _cloudSyncService = cloudSyncService;
+        _onboardingState = onboardingState;
         _sensitiveActionGuard = sensitiveActionGuard;
         _windows = windows;
         _mediator = mediator;
         _log = log;
         _localization = LocalizationManager.Instance;
         _theme = ThemeManager.Instance;
+        _experience = UserExperienceManager.Instance;
 
         CloudApiBaseUrl = config["CloudApi:BaseUrl"]
                           ?? Environment.GetEnvironmentVariable("VEYRA_CLOUDAPI_URL")
@@ -283,8 +295,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         _localization.LanguageChanged += OnLanguageChanged;
         _theme.ThemeChanged += OnThemeChanged;
+        _experience.ModeChanged += OnExperienceModeChanged;
         RebuildLanguageOptions();
         RebuildThemeOptions();
+        RebuildExperienceOptions();
         UpdateLocalizationDiagnostics();
     }
 
@@ -301,6 +315,43 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool HasKnownProfiles => Profiles.Count > 0;
     public bool IsGuestMode => !HasActiveProfile;
     public bool HasOperationJournalItems => OperationJournalItems.Count > 0;
+    public bool IsBasicMode => _experience.IsBasicMode;
+    public bool IsProfessionalMode => _experience.IsProfessionalMode;
+    public bool ShowLocalizationDiagnostics => IsProfessionalMode;
+    public bool ShowTechnicalCloudDetails => IsProfessionalMode;
+    public bool ShowTechnicalProfileDetails => IsProfessionalMode;
+    public bool ShowCloudStorageDiagnostics => IsProfessionalMode;
+    public bool ShowDetailedRepositorySyncIssueDiagnostics => IsProfessionalMode;
+    public string ExperienceModeHint => IsBasicMode
+        ? Loc.T("app_settings.experience_basic_hint")
+        : Loc.T("app_settings.experience_professional_hint");
+    public string LocalizationSummaryText => HasLocalizationIssues
+        ? Loc.T("app_settings.localization_user_warning")
+        : Loc.T("app_settings.localization_user_ok");
+    public string SyncSectionIntroText => IsBasicMode
+        ? Loc.T("app_settings.sync_intro_basic")
+        : Loc.T("app_settings.sync_intro_professional");
+    public string SyncSectionHelpText => IsBasicMode
+        ? Loc.T("app_settings.sync_help_basic")
+        : Loc.T("app_settings.sync_help_professional");
+    public string CloudStorageHelpText => IsBasicMode
+        ? Loc.T("app_settings.cloud_storage_help_basic")
+        : Loc.T("app_settings.cloud_storage_help_professional");
+    public string RepositorySyncHealthHelpText => IsBasicMode
+        ? Loc.T("app_settings.repository_sync_health_help_basic")
+        : Loc.T("app_settings.repository_sync_health_help_professional");
+    public string RepositorySyncProgressHelpText => IsBasicMode
+        ? Loc.T("app_settings.repository_sync_health_progress_help_basic")
+        : Loc.T("app_settings.repository_sync_health_progress_help_professional");
+    public string RestoreFromCloudLabel => IsBasicMode
+        ? Loc.T("app_settings.restore_from_cloud_basic")
+        : Loc.T("app_settings.restore_from_cloud");
+    public string PushAllRepositoriesLabel => IsBasicMode
+        ? Loc.T("app_settings.push_all_latest_basic")
+        : Loc.T("app_settings.push_all_latest");
+    public string ProcessQueueLabel => IsBasicMode
+        ? Loc.T("app_settings.process_queue_basic")
+        : Loc.T("app_settings.process_queue");
 
     public bool IsConfirmPasswordVisible => IsRegisterMode;
     public string SubmitAuthLabel => IsRegisterMode ? Loc.T("app_settings.auth_create_account") : Loc.T("auth.sign_in");
@@ -339,6 +390,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             return;
 
         _theme.SetTheme(value.Code);
+    }
+
+    partial void OnSelectedExperienceModeChanged(AppExperienceOptionItemViewModel? value)
+    {
+        if (_suppressExperienceSelectionChanged || value is null)
+            return;
+
+        _experience.SetMode(value.Code);
     }
 
     partial void OnRequirePasswordForSensitiveActionsChanged(bool value)
@@ -431,6 +490,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void Back() => BackRequested?.Invoke();
+
+    [RelayCommand]
+    private void ReplayGuidedTour()
+    {
+        _log.LogInformation("Guided tour replay requested from app settings");
+        _onboardingState.RequestFirstRunTour();
+        GeneralMessage = Loc.T("app_settings.guided_tour_replay_started");
+    }
+
+    public void SelectTabByKey(string key)
+    {
+        var tab = Tabs.FirstOrDefault(item =>
+            string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+
+        if (tab is not null)
+            SelectTab(tab);
+    }
 
     [RelayCommand]
     private async Task OpenRepositorySyncIssueSettingsAsync(AppRepositorySyncIssueItemViewModel? issue)
@@ -1019,6 +1095,30 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         RebuildThemeOptions();
     }
 
+    private void OnExperienceModeChanged(object? sender, EventArgs e)
+    {
+        RebuildExperienceOptions();
+        OnPropertyChanged(nameof(IsBasicMode));
+        OnPropertyChanged(nameof(IsProfessionalMode));
+        OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
+        OnPropertyChanged(nameof(ShowTechnicalCloudDetails));
+        OnPropertyChanged(nameof(ShowTechnicalProfileDetails));
+        OnPropertyChanged(nameof(ShowCloudStorageDiagnostics));
+        OnPropertyChanged(nameof(ShowDetailedRepositorySyncIssueDiagnostics));
+        OnPropertyChanged(nameof(ExperienceModeHint));
+        OnPropertyChanged(nameof(LocalizationSummaryText));
+        OnPropertyChanged(nameof(SyncSectionIntroText));
+        OnPropertyChanged(nameof(SyncSectionHelpText));
+        OnPropertyChanged(nameof(CloudStorageHelpText));
+        OnPropertyChanged(nameof(RepositorySyncHealthHelpText));
+        OnPropertyChanged(nameof(RepositorySyncProgressHelpText));
+        OnPropertyChanged(nameof(RestoreFromCloudLabel));
+        OnPropertyChanged(nameof(PushAllRepositoriesLabel));
+        OnPropertyChanged(nameof(ProcessQueueLabel));
+        _ = LoadOperationJournalAsync();
+        _ = RefreshSyncSectionAsync(silentMetrics: true, refreshStorageMetrics: false, CancellationToken.None);
+    }
+
     private void RefreshLocalizationState()
     {
         foreach (var tab in Tabs)
@@ -1026,7 +1126,25 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         RebuildLanguageOptions();
         RebuildThemeOptions();
+        RebuildExperienceOptions();
         UpdateLocalizationDiagnostics();
+        OnPropertyChanged(nameof(IsBasicMode));
+        OnPropertyChanged(nameof(IsProfessionalMode));
+        OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
+        OnPropertyChanged(nameof(ShowTechnicalCloudDetails));
+        OnPropertyChanged(nameof(ShowTechnicalProfileDetails));
+        OnPropertyChanged(nameof(ShowCloudStorageDiagnostics));
+        OnPropertyChanged(nameof(ShowDetailedRepositorySyncIssueDiagnostics));
+        OnPropertyChanged(nameof(ExperienceModeHint));
+        OnPropertyChanged(nameof(LocalizationSummaryText));
+        OnPropertyChanged(nameof(SyncSectionIntroText));
+        OnPropertyChanged(nameof(SyncSectionHelpText));
+        OnPropertyChanged(nameof(CloudStorageHelpText));
+        OnPropertyChanged(nameof(RepositorySyncHealthHelpText));
+        OnPropertyChanged(nameof(RepositorySyncProgressHelpText));
+        OnPropertyChanged(nameof(RestoreFromCloudLabel));
+        OnPropertyChanged(nameof(PushAllRepositoriesLabel));
+        OnPropertyChanged(nameof(ProcessQueueLabel));
 
         OnPropertyChanged(nameof(SubmitAuthLabel));
         OnPropertyChanged(nameof(ToggleAuthLabel));
@@ -1348,6 +1466,21 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private static string FormatCloudSyncStatus(string? status)
     {
+        if (UserExperienceManager.Instance.IsBasicMode)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+                return Loc.T("repo_settings.sync_status_basic_local");
+
+            var normalizedBasic = status.Trim().ToLowerInvariant();
+            return normalizedBasic switch
+            {
+                "queued" or "syncing" or "offline_retry" or "retrying" => Loc.T("repo_settings.sync_status_basic_working"),
+                "auth_required" or "conflict" or "failed" or "dead_letter" => Loc.T("repo_settings.sync_status_basic_attention"),
+                _ when normalizedBasic.StartsWith("synced", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_ready"),
+                _ => Loc.T("repo_settings.sync_status_basic_local")
+            };
+        }
+
         if (string.IsNullOrWhiteSpace(status))
             return Loc.T("dashboard.sync.idle");
 
@@ -1368,7 +1501,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     }
 
     private static string FormatCloudQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
-        => Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    {
+        if (UserExperienceManager.Instance.IsBasicMode)
+            return pending == 0 && running == 0 && retry == 0 && conflict == 0 && deadLetter == 0
+                ? Loc.T("repo_settings.queue_basic_idle")
+                : Loc.T("repo_settings.queue_basic_active");
+
+        return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+    }
 
     private static string FormatUploadProgress(int current, int total)
     {
@@ -1592,6 +1732,29 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
     }
 
+    private void RebuildExperienceOptions()
+    {
+        _suppressExperienceSelectionChanged = true;
+        try
+        {
+            ExperienceModes.Clear();
+            foreach (var option in _experience.AvailableModes)
+            {
+                ExperienceModes.Add(new AppExperienceOptionItemViewModel(
+                    option.Code,
+                    Loc.T(option.LocalizationKey),
+                    Loc.T(option.DescriptionKey)));
+            }
+
+            SelectedExperienceMode = ExperienceModes.FirstOrDefault(x =>
+                string.Equals(x.Code, _experience.CurrentModeCode, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            _suppressExperienceSelectionChanged = false;
+        }
+    }
+
     private async Task LoadOperationJournalAsync()
     {
         try
@@ -1602,16 +1765,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             foreach (var entry in entries)
             {
                 var scope = entry.RepositoryId.HasValue
-                    ? $"repo:{entry.RepositoryId.Value}"
+                    ? Loc.F("operation_journal.scope_repository", entry.RepositoryId.Value)
                     : string.IsNullOrWhiteSpace(entry.Username)
-                        ? "-"
+                        ? Loc.T("common.not_available_short")
                         : entry.Username!;
 
                 OperationJournalItems.Add(new AppOperationJournalItemViewModel(
                     entry.OccurredAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
-                    entry.Level,
-                    entry.Category,
-                    entry.Action,
+                    HumanizeJournalValue(entry.Level),
+                    HumanizeJournalValue(entry.Category),
+                    HumanizeJournalAction(entry.Action),
                     scope,
                     entry.Message));
             }
@@ -1702,6 +1865,35 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             return false;
         }
+    }
+
+    private static string HumanizeJournalAction(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Loc.T("common.not_available_short");
+
+        return value.Trim() switch
+        {
+            "ScanRepositoryCommand" => Loc.T("operation_journal.action.scan_repository"),
+            "EnsureRepositoriesCommand" => Loc.T("operation_journal.action.refresh_repositories"),
+            "CreateRepositoryWithFormatsCommand" => Loc.T("operation_journal.action.create_repository"),
+            "dialog_login" => Loc.T("operation_journal.action.sign_in"),
+            "dialog_register" => Loc.T("operation_journal.action.register"),
+            "settings_cloud_storage_refresh" => Loc.T("operation_journal.action.refresh_cloud_status"),
+            "settings_cloud_storage_repair" => Loc.T("operation_journal.action.repair_cloud_storage"),
+            _ => HumanizeJournalValue(value)
+        };
+    }
+
+    private static string HumanizeJournalValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Loc.T("common.not_available_short");
+
+        var normalized = value.Trim().Replace('_', ' ').Replace('-', ' ');
+        return string.Join(" ", normalized
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => char.ToUpperInvariant(segment[0]) + segment[1..].ToLowerInvariant()));
     }
 
     private static string FormatBytes(long bytes)

@@ -17,7 +17,8 @@
                     <TextBlock Text="{Binding RepositoryResultsSummary}" Classes="muted" FontSize="12"/>
                 </StackPanel>
 
-                <Button Grid.Row="1"
+                <Button x:Name="DashboardCreateRepositoryButton"
+                        Grid.Row="1"
                         Content="{loc:Tr dashboard.create_repository}"
                         HorizontalAlignment="Stretch"
                         Padding="12,11"
@@ -82,7 +83,8 @@
             <Border Grid.Row="0" Classes="toolbar" Padding="18">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
                     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                        <TextBox Grid.Column="0"
+                        <TextBox x:Name="DashboardSearchBox"
+                                 Grid.Column="0"
                                  Text="{Binding SearchQuery, Mode=TwoWay}"
                                  Watermark="{loc:Tr dashboard.search_placeholder}"
                                  ToolTip.Tip="{loc:Tr dashboard.search_tokens_hint}"/>
@@ -272,21 +274,21 @@
                                         <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="10">
                                             <Border Grid.Column="0" Classes="metric-card">
                                                 <StackPanel Spacing="4">
-                                                    <TextBlock Text="{Binding FileCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentStrongBrush}"/>
+                                                    <TextBlock Text="{Binding FileCount}" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentStrongBrush}"/>
                                                     <TextBlock Text="{loc:Tr dashboard.files}" Classes="caption"/>
                                                 </StackPanel>
                                             </Border>
 
                                             <Border Grid.Column="1" Classes="metric-card">
                                                 <StackPanel Spacing="4">
-                                                    <TextBlock Text="{Binding VersionCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
+                                                    <TextBlock Text="{Binding VersionCount}" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
                                                     <TextBlock Text="{loc:Tr dashboard.versions}" Classes="caption"/>
                                                 </StackPanel>
                                             </Border>
 
                                             <Border Grid.Column="2" Classes="metric-card">
                                                 <StackPanel Spacing="4">
-                                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                                <TextBlock Text="{Binding SizeDisplay}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource VeyraSuccessBrush}" TextTrimming="CharacterEllipsis"/>
                                                     <TextBlock Text="{loc:Tr common.size}" Classes="caption"/>
                                                 </StackPanel>
                                             </Border>
@@ -299,7 +301,8 @@
                                                 <TextBlock Text="{Binding CloudQueueSummary}"
                                                            FontSize="11"
                                                            Classes="muted"
-                                                           TextWrapping="Wrap"/>
+                                                           TextWrapping="Wrap"
+                                                           IsVisible="{Binding CloudQueueSummary, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
                                             </StackPanel>
                                         </Border>
 
@@ -331,12 +334,6 @@
                                                     Padding="12,7"
                                                     Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
                                                     CommandParameter="{Binding .}"/>
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding CloudSyncStatus}"
-                                                       HorizontalAlignment="Right"
-                                                       VerticalAlignment="Center"
-                                                       Classes="muted"
-                                                       FontSize="11"/>
                                         </Grid>
                                     </Grid>
                                 </Border>

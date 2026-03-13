@@ -194,6 +194,14 @@
         <Setter Property="Padding" Value="12"/>
     </Style>
 
+    <Style Selector="Border.popover-panel">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
+        <Setter Property="Padding" Value="12"/>
+    </Style>
+
     <Style Selector="Border.segmented-control">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceSoftBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
@@ -245,6 +253,13 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
         <Setter Property="Padding" Value="14"/>
+    </Style>
+
+    <Style Selector="Border.guided-tour-bubble">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraAccentBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
     </Style>
 
     <Style Selector="Border.diff-side">

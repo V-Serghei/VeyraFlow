@@ -1,8 +1,11 @@
+using System;
 using System.Linq;
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 
@@ -14,12 +17,14 @@ public partial class RepositoryExplorerView : UserControl
     private const double NarrowWidth = 980;
     private const double SnapshotCompactWidth = 1440;
     private const double SnapshotNarrowWidth = 1120;
+    private INotifyPropertyChanged? _observedViewModel;
 
     public RepositoryExplorerView()
     {
         InitializeComponent();
         SizeChanged += OnSizeChanged;
         AttachedToVisualTree += (_, _) => ApplyResponsiveLayout(Bounds.Width);
+        DataContextChanged += OnDataContextChanged;
     }
 
     private void OnExplorerItemPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -35,6 +40,9 @@ public partial class RepositoryExplorerView : UserControl
         {
             if (vm.ActivateItemCommand.CanExecute(item))
                 vm.ActivateItemCommand.Execute(item);
+
+            if (item.IsDirectory)
+                Dispatcher.UIThread.Post(RefreshTreeState, DispatcherPriority.Background);
 
             e.Handled = true;
             return;
@@ -205,5 +213,38 @@ public partial class RepositoryExplorerView : UserControl
 
         if (Classes.Contains(className))
             Classes.Remove(className);
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (_observedViewModel is not null)
+            _observedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+        _observedViewModel = DataContext as INotifyPropertyChanged;
+        if (_observedViewModel is not null)
+            _observedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+        Dispatcher.UIThread.Post(RefreshTreeState, DispatcherPriority.Background);
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(RepositoryExplorerViewModel.SelectedTreeNode)
+            or nameof(RepositoryExplorerViewModel.TreeNodes))
+        {
+            Dispatcher.UIThread.Post(RefreshTreeState, DispatcherPriority.Background);
+        }
+    }
+
+    private void RefreshTreeState()
+    {
+        foreach (var item in ExplorerTreeView.GetVisualDescendants().OfType<TreeViewItem>())
+        {
+            if (item.DataContext is not ExplorerTreeNodeViewModel node)
+                continue;
+
+            item.IsExpanded = node.IsExpanded;
+            item.IsSelected = node.IsSelected;
+        }
     }
 }

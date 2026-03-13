@@ -118,12 +118,12 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
         LevelFilters.Clear();
         LevelFilters.Add(new OperationJournalFilterOptionItem("all", Loc.T("filter.option.all")));
         foreach (var level in _allItems.Select(x => x.Level).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
-            LevelFilters.Add(new OperationJournalFilterOptionItem(level, Humanize(level)));
+            LevelFilters.Add(new OperationJournalFilterOptionItem(level, HumanizeValue(level)));
 
         CategoryFilters.Clear();
         CategoryFilters.Add(new OperationJournalFilterOptionItem("all", Loc.T("filter.option.all")));
         foreach (var category in _allItems.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
-            CategoryFilters.Add(new OperationJournalFilterOptionItem(category, Humanize(category)));
+            CategoryFilters.Add(new OperationJournalFilterOptionItem(category, HumanizeValue(category)));
 
         SelectedLevelFilter ??= LevelFilters.FirstOrDefault();
         SelectedCategoryFilter ??= CategoryFilters.FirstOrDefault();
@@ -179,20 +179,24 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
     {
         var occurredLocal = entry.OccurredAtUtc.ToLocalTime();
         var scope = entry.RepositoryId.HasValue
-            ? $"repo:{entry.RepositoryId.Value}"
+            ? Loc.F("operation_journal.scope_repository", entry.RepositoryId.Value)
             : string.IsNullOrWhiteSpace(entry.Username)
                 ? "-"
                 : entry.Username!;
 
         var details = string.IsNullOrWhiteSpace(entry.Details) ? "-" : entry.Details!;
         var timestamp = occurredLocal.ToString("yyyy-MM-dd HH:mm:ss");
-        var levelLabel = Humanize(entry.Level);
-        var categoryLabel = Humanize(entry.Category);
+        var levelLabel = HumanizeValue(entry.Level);
+        var categoryLabel = HumanizeValue(entry.Category);
+        var actionLabel = HumanizeAction(entry.Action);
         var searchText = string.Join(' ',
             timestamp,
             entry.Level,
             entry.Category,
             entry.Action,
+            levelLabel,
+            categoryLabel,
+            actionLabel,
             scope,
             entry.Message,
             details);
@@ -205,14 +209,32 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
             levelLabel,
             entry.Category,
             categoryLabel,
-            entry.Action,
+            actionLabel,
             scope,
             entry.Message,
             details,
             searchText);
     }
 
-    private static string Humanize(string? value)
+    private static string HumanizeAction(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "-";
+
+        return value.Trim() switch
+        {
+            "ScanRepositoryCommand" => Loc.T("operation_journal.action.scan_repository"),
+            "EnsureRepositoriesCommand" => Loc.T("operation_journal.action.refresh_repositories"),
+            "CreateRepositoryWithFormatsCommand" => Loc.T("operation_journal.action.create_repository"),
+            "dialog_login" or "settings_login" => Loc.T("operation_journal.action.sign_in"),
+            "dialog_register" or "settings_register" => Loc.T("operation_journal.action.register"),
+            "settings_cloud_storage_refresh" => Loc.T("operation_journal.action.refresh_cloud_status"),
+            "settings_cloud_storage_repair" => Loc.T("operation_journal.action.repair_cloud_storage"),
+            _ => HumanizeValue(value)
+        };
+    }
+
+    private static string HumanizeValue(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
             return "-";

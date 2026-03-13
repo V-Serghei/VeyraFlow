@@ -1,15 +1,54 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using System;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Veyra.Desktop.Styling;
 
 namespace Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
 
+public sealed record WelcomeTipsSelection(bool EnableTips, string ExperienceModeCode);
+
 public partial class WelcomeTipsOptInViewModel : ObservableObject
 {
-    [ObservableProperty]
-    private bool _enableTips  = true;
+    private readonly UserExperienceManager _experience = UserExperienceManager.Instance;
 
-    public event System.Action<bool>? ContinueRequested;
+    [ObservableProperty]
+    private bool _enableTips = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBasicModeSelected))]
+    [NotifyPropertyChangedFor(nameof(IsProfessionalModeSelected))]
+    private string _selectedExperienceModeCode = UserExperienceManager.Instance.CurrentModeCode;
+
+    public bool IsBasicModeSelected
+    {
+        get => string.Equals(SelectedExperienceModeCode, "basic", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value)
+                SelectedExperienceModeCode = "basic";
+        }
+    }
+
+    public bool IsProfessionalModeSelected
+    {
+        get => string.Equals(SelectedExperienceModeCode, "professional", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            if (value)
+                SelectedExperienceModeCode = "professional";
+        }
+    }
+
+    public event Action<WelcomeTipsSelection>? ContinueRequested;
+
+    public WelcomeTipsOptInViewModel()
+    {
+        SelectedExperienceModeCode = _experience.CurrentModeCode;
+    }
 
     [RelayCommand]
-    private void Continue() => ContinueRequested?.Invoke(EnableTips);
+    private void Continue() => ContinueRequested?.Invoke(
+        new WelcomeTipsSelection(
+            EnableTips,
+            string.IsNullOrWhiteSpace(SelectedExperienceModeCode) ? "basic" : SelectedExperienceModeCode));
 }
