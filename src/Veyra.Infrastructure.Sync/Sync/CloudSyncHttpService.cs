@@ -1,3 +1,4 @@
+using System;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -448,8 +449,10 @@ public sealed class CloudSyncHttpService : ICloudSyncService
 
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _log.LogWarning("Cloud storage metrics request unauthorized. DurationMs {DurationMs}", requestTimer.ElapsedMilliseconds);
-            return null;
+            _log.LogInformation(
+                "Cloud storage metrics request requires re-authentication. DurationMs {DurationMs}",
+                requestTimer.ElapsedMilliseconds);
+            throw new UnauthorizedAccessException("Cloud session expired. Sign in again.");
         }
 
         await EnsureSuccessAsync(resp, "storage_metrics", ct);
@@ -541,8 +544,10 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         requestTimer.Stop();
         if (resp.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _log.LogWarning("Cloud storage repair request unauthorized. DurationMs {DurationMs}", requestTimer.ElapsedMilliseconds);
-            return null;
+            _log.LogInformation(
+                "Cloud storage repair request requires re-authentication. DurationMs {DurationMs}",
+                requestTimer.ElapsedMilliseconds);
+            throw new UnauthorizedAccessException("Cloud session expired. Sign in again.");
         }
 
         await EnsureSuccessAsync(resp, "storage_repair", ct, ("ScanLimit", scanLimit), ("CompactLimit", compactLimit));

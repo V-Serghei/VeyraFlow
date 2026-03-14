@@ -35,9 +35,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private FileVersionCompareListItemViewModel? _leftVersion;
     private FileVersionCompareListItemViewModel? _rightVersion;
     private bool _isWordSemanticPreview;
-    private bool _isOpeningNativeWordCompare;
     private PendingBinaryDiffSummaryDto? _lastBinarySummary;
     private PendingImageDiffPreviewDto? _lastImagePreview;
+    private PendingAudioDiffPreviewDto? _lastAudioPreview;
     private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
     private int _lastRenderedChangedPixelCount;
     private double? _lastRenderedChangedPixelRatio;
@@ -68,12 +68,34 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
+    [NotifyPropertyChangedFor(nameof(IsBusyOverlayVisible))]
     private bool _isPreviewLoading;
+
+    [ObservableProperty]
+    private string _loadingTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _loadingDetail = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    [NotifyPropertyChangedFor(nameof(LoadingProgressLabel))]
+    private double _loadingProgressValue;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    private bool _isLoadingProgressIndeterminate;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBusyOverlayVisible))]
+    [NotifyPropertyChangedFor(nameof(CanOpenNativeWordCompare))]
+    private bool _isOpeningNativeWordCompare;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPreview))]
     [NotifyPropertyChangedFor(nameof(IsWordRichPreview))]
     [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
     [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
@@ -104,6 +126,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
     private Bitmap? _overlayImagePreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioWaveformPreview))]
+    private Bitmap? _audioWaveformPreview;
 
     [ObservableProperty] private string _leftImageCaption = string.Empty;
     [ObservableProperty] private string _rightImageCaption = string.Empty;
@@ -350,9 +376,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var leftId = _leftVersion?.FileVersionId;
         var rightId = _rightVersion?.FileVersionId;
         var versions = Versions.ToList();
-        Versions.Clear();
         foreach (var version in versions)
-            Versions.Add(version);
+            version.RefreshLocalization();
 
         _leftVersion = leftId is > 0
             ? Versions.FirstOrDefault(x => x.FileVersionId == leftId.Value)
@@ -370,15 +395,20 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasPreviewRows => PreviewRows.Count > 0;
     public bool HasWordPreviewRows => WordPreviewRows.Count > 0;
     public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
+    public bool IsBusyOverlayVisible => IsPreviewLoading || IsOpeningNativeWordCompare;
+    public bool HasDeterminateLoadingProgress => !IsLoadingProgressIndeterminate;
+    public string LoadingProgressLabel => $"{Math.Clamp(Math.Round(LoadingProgressValue), 0, 100):0}%";
     public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && (HasPreviewRows || HasWordPreviewRows);
     public bool IsWordRichPreview => IsTextPreview && _isWordSemanticPreview && HasWordPreviewRows;
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
+    public bool IsAudioPreview => PreviewKind == PendingDiffPreviewKind.Audio;
     public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
     public bool HasOverlayImagePreview => OverlayImagePreview is not null;
     public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
     public bool HasNoImagePreviews => !HasAnyImagePreview;
-    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
+    public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
+    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview;
     public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
     public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
     public bool ShowSourceImagePanelsSection => HasImagePreviews && ShowSourceImagePanels;
@@ -405,7 +435,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
     public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
     public bool ShowWordDiffRowsPanel => !IsFullFilePreviewMode && IsWordRichPreview && HasWordPreviewRows;
-    public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && !IsPreviewLoading && !HasPreviewRows && !HasWordPreviewRows;
+    public bool ShowNoDiffPreviewMessage
+        => !IsFullFilePreviewMode
+           && !IsPreviewLoading
+           && !HasPreviewRows
+           && !HasWordPreviewRows
+           && !IsBinaryPreview
+           && !IsImagePreview
+           && !IsAudioPreview;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode && !IsWordRichPreview;
     public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
     public bool CanToggleFullFilePreview
@@ -427,7 +464,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     public bool CanOpenNativeWordCompare
         => IsWordDocument
-           && !_isOpeningNativeWordCompare
+           && !IsOpeningNativeWordCompare
            && _leftVersion is not null
            && _rightVersion is not null
            && _leftVersion.FileVersionId != _rightVersion.FileVersionId;
@@ -468,6 +505,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         IsVersionListLoading = true;
 
         CleanupPreviewResources();
+        SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.fetch_versions"), 8);
 
         Versions.Clear();
         PreviewRows.Clear();
@@ -529,6 +567,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         finally
         {
             IsVersionListLoading = false;
+            ClearLoadingState();
             OnPropertyChanged(nameof(CanOpenSourceFileOnDisk));
             OnPropertyChanged(nameof(IsWordDocument));
             OnPropertyChanged(nameof(CanOpenNativeWordCompare));
@@ -701,8 +740,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         }
 
         ErrorMessage = null;
-        _isOpeningNativeWordCompare = true;
-        OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+        IsOpeningNativeWordCompare = true;
+        SetLoadingState(Loc.T("compare.word_loading_title"), Loc.T("compare.word_loading_prepare_left"), 20);
 
         var extension = Path.GetExtension(_relativePath);
         var tempRoot = Path.Combine(Path.GetTempPath(), "VeyraFlow", "word-native-compare");
@@ -723,9 +762,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!leftRestore.Success || string.IsNullOrWhiteSpace(leftRestore.Value))
             {
-                ErrorMessage = leftRestore.Error ?? Loc.T("compare.native_word.prepare_left_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(leftRestore.Error, "compare.native_word.prepare_left_failed");
                 return;
             }
+
+            SetLoadingState(Loc.T("compare.word_loading_title"), Loc.T("compare.word_loading_prepare_right"), 52);
 
             var rightRestore = await _mediator.Send(new RestoreFileVersionCommand(
                 _repositoryId,
@@ -736,14 +777,15 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!rightRestore.Success || string.IsNullOrWhiteSpace(rightRestore.Value))
             {
-                ErrorMessage = rightRestore.Error ?? Loc.T("compare.native_word.prepare_right_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(rightRestore.Error, "compare.native_word.prepare_right_failed");
                 return;
             }
 
+            SetLoadingState(Loc.T("compare.word_loading_title"), Loc.T("compare.word_loading_launch"), 84, indeterminate: true);
             var launch = await _nativeWordCompare.OpenCompareAsync(leftRestore.Value, rightRestore.Value, options);
             if (!launch.Success)
             {
-                ErrorMessage = launch.ErrorMessage ?? Loc.T("compare.native_word.open_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(launch.ErrorMessage, "compare.native_word.open_failed");
                 return;
             }
 
@@ -761,8 +803,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         }
         finally
         {
-            _isOpeningNativeWordCompare = false;
-            OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+            IsOpeningNativeWordCompare = false;
+            ClearLoadingState();
             OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
         }
     }
@@ -886,6 +928,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         PreviewKind = PendingDiffPreviewKind.None;
         ResetFullPreviewState();
         ReleasePreviewResources();
+        SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.fetch"), 14);
 
         try
         {
@@ -898,7 +941,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                ResetPreview(result.Error ?? Loc.T("compare.preview.build_failed"));
+                ResetPreview(UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "compare.preview.build_failed"));
                 return;
             }
 
@@ -912,6 +955,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             switch (preview.Kind)
             {
                 case PendingDiffPreviewKind.Text:
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.text"), 72);
                     PreviewRows.Clear();
                     WordPreviewRows.Clear();
                     _isWordSemanticPreview = false;
@@ -946,8 +990,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     break;
 
                 case PendingDiffPreviewKind.Binary:
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.binary"), 80);
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = null;
+                    _lastAudioPreview = null;
                     _lastRenderedChangedPixelCount = 0;
                     _lastRenderedChangedPixelRatio = null;
                     _lastRenderedChangedRegionCount = 0;
@@ -959,14 +1005,32 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     break;
 
                 case PendingDiffPreviewKind.Image:
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.images"), 48);
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = preview.ImagePreview;
+                    _lastAudioPreview = null;
                     await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.render"), 82);
                     await RenderInteractiveImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.finalize"), 96);
                     RebuildPreviewMetrics();
                     PreviewKind = PendingDiffPreviewKind.Image;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("compare.preview.image_ready")
+                        : preview.Message;
+                    break;
+
+                case PendingDiffPreviewKind.Audio:
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.audio"), 58);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = preview.AudioPreview;
+                    await LoadAudioPreviewAsync(preview.AudioPreview, cts.Token);
+                    SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.finalize"), 96);
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Audio;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.audio_ready")
                         : preview.Message;
                     break;
 
@@ -989,7 +1053,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         finally
         {
             if (!cts.IsCancellationRequested)
+            {
                 IsPreviewLoading = false;
+                ClearLoadingState();
+            }
 
             OnPropertyChanged(nameof(CanToggleFullFilePreview));
         }
@@ -1008,6 +1075,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         FullPreviewSummary = string.Empty;
         PreviewSummary = Loc.F("compare.full_preview.loading", _leftVersion.VersionName, _rightVersion.VersionName);
         ErrorMessage = null;
+        SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.full_text"), 20);
 
         try
         {
@@ -1015,6 +1083,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000));
 
             await Task.WhenAll(beforeTask, afterTask);
+            SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.finalize"), 88);
 
             var before = beforeTask.Result;
             var after = afterTask.Result;
@@ -1068,6 +1137,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         {
             IsPreviewLoading = false;
             IsFullFilePreviewLoading = false;
+            ClearLoadingState();
             OnPropertyChanged(nameof(CanToggleFullFilePreview));
         }
     }
@@ -1138,6 +1208,24 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         LeftImageCaption = BuildImageCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
         RightImageCaption = BuildImageCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
+    }
+
+    private async Task LoadAudioPreviewAsync(PendingAudioDiffPreviewDto? audioPreview, CancellationToken ct)
+    {
+        if (audioPreview is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.WaveformImagePath) && File.Exists(audioPreview.WaveformImagePath))
+        {
+            AudioWaveformPreview = await Task.Run(() => new Bitmap(audioPreview.WaveformImagePath), ct);
+            TrackTempFile(audioPreview.WaveformImagePath, audioPreview.IsWaveformTempFile);
+        }
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath))
+            TrackTempFile(audioPreview.BaselineAudioPath, audioPreview.IsBaselineTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.CurrentAudioPath) && File.Exists(audioPreview.CurrentAudioPath))
+            TrackTempFile(audioPreview.CurrentAudioPath, audioPreview.IsCurrentTempFile);
     }
 
     private async Task RenderInteractiveImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
@@ -1260,6 +1348,49 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 $"{_lastBinarySummary.ByteSimilarityRatio.Value * 100:F1}%"));
         }
 
+        if (_lastAudioPreview is not null)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.duration"),
+                $"{FormatAudioDuration(_lastAudioPreview.BaselineDurationSeconds)} -> {FormatAudioDuration(_lastAudioPreview.CurrentDurationSeconds)}"
+                + (_lastAudioPreview.HasDurationMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.sample_rate"),
+                $"{FormatSampleRate(_lastAudioPreview.BaselineSampleRate)} -> {FormatSampleRate(_lastAudioPreview.CurrentSampleRate)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.channels"),
+                $"{FormatChannels(_lastAudioPreview.BaselineChannels)} -> {FormatChannels(_lastAudioPreview.CurrentChannels)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.peak"),
+                $"{FormatAmplitude(_lastAudioPreview.BaselinePeakAmplitude)} -> {FormatAmplitude(_lastAudioPreview.CurrentPeakAmplitude)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.rms"),
+                $"{FormatAmplitude(_lastAudioPreview.BaselineRmsAmplitude)} -> {FormatAmplitude(_lastAudioPreview.CurrentRmsAmplitude)}"));
+
+            if (_lastAudioPreview.SignalSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.audio_similarity"),
+                    $"{_lastAudioPreview.SignalSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.ChangedTimeRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.changed_timeline"),
+                    $"{_lastAudioPreview.ChangedTimeRatio.Value * 100:F1}%"));
+            }
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_segments"),
+                $"{_lastAudioPreview.ChangedSegmentCount:N0}"));
+            return;
+        }
+
         if (_lastImagePreview is null)
             return;
 
@@ -1293,6 +1424,17 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 Loc.T("metric.changed_regions"),
                 $"{_lastRenderedChangedRegionCount:N0}"));
+        }
+
+        if (_lastImagePreview.IsVectorImage)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.svg_structure"),
+                $"+{_lastImagePreview.AddedElementCount:N0} / -{_lastImagePreview.RemovedElementCount:N0} / ~{_lastImagePreview.ModifiedElementCount:N0}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.svg_attributes"),
+                $"{_lastImagePreview.ChangedAttributeCount:N0}"));
         }
     }
 
@@ -1453,6 +1595,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     {
         PreviewKind = PendingDiffPreviewKind.None;
         IsPreviewLoading = false;
+        ClearLoadingState();
         PreviewSummary = message;
         PreviewRows.Clear();
         WordPreviewRows.Clear();
@@ -1460,6 +1603,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
         _lastImagePreview = null;
+        _lastAudioPreview = null;
         _lastRenderedOverlayPngBytes = Array.Empty<byte>();
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
@@ -1472,6 +1616,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void ReleasePreviewResources()
     {
         _imageDiffRenderCts?.Cancel();
+        ClearLoadingState();
         PreviewRows.Clear();
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
@@ -1479,6 +1624,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
         _lastImagePreview = null;
+        _lastAudioPreview = null;
         _lastRenderedOverlayPngBytes = Array.Empty<byte>();
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
@@ -1488,14 +1634,17 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var leftImage = LeftImagePreview;
         var rightImage = RightImagePreview;
         var overlayImage = OverlayImagePreview;
+        var audioWaveform = AudioWaveformPreview;
 
         LeftImagePreview = null;
         RightImagePreview = null;
         OverlayImagePreview = null;
+        AudioWaveformPreview = null;
 
         leftImage?.Dispose();
         rightImage?.Dispose();
         overlayImage?.Dispose();
+        audioWaveform?.Dispose();
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
@@ -1559,6 +1708,22 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     private static string NormalizeRelativePath(string value)
         => value.Replace('\\', '/').Trim();
+
+    private void SetLoadingState(string title, string detail, double progress, bool indeterminate = false)
+    {
+        LoadingTitle = title;
+        LoadingDetail = detail;
+        LoadingProgressValue = Math.Clamp(progress, 0, 100);
+        IsLoadingProgressIndeterminate = indeterminate;
+    }
+
+    private void ClearLoadingState()
+    {
+        LoadingTitle = string.Empty;
+        LoadingDetail = string.Empty;
+        LoadingProgressValue = 0;
+        IsLoadingProgressIndeterminate = false;
+    }
 
     private static string BuildImageCaption(string title, int? width, int? height)
         => width is null || height is null ? title : $"{title} - {width} x {height}";
@@ -1632,6 +1797,48 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string FormatAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return Loc.T("common.not_available_short");
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss")
+            : duration.ToString(@"m\:ss");
+    }
+
+    private static string FormatSampleRate(int? sampleRate)
+    {
+        if (!sampleRate.HasValue || sampleRate.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return sampleRate.Value >= 1000
+            ? $"{sampleRate.Value / 1000d:F1} kHz"
+            : $"{sampleRate.Value} Hz";
+    }
+
+    private static string FormatChannels(int? channels)
+    {
+        if (!channels.HasValue || channels.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return channels.Value switch
+        {
+            1 => "mono",
+            2 => "stereo",
+            _ => $"{channels.Value}"
+        };
+    }
+
+    private static string FormatAmplitude(double? amplitude)
+    {
+        if (!amplitude.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(amplitude.Value, 0d, 1d):F3}";
     }
 
     private static void TryDelete(string path)

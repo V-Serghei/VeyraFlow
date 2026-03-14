@@ -16,9 +16,37 @@ public sealed class SensitiveActionGuard(
     IWindowService windows,
     ILogger<SensitiveActionGuard> log) : ISensitiveActionGuard
 {
+    public Task<SensitiveActionGuardResult> AuthorizeIfRequiredLocalizedAsync(
+        string actionTitleKey,
+        string actionDescriptionKey,
+        object[]? actionDescriptionArgs = null,
+        CancellationToken ct = default)
+        => AuthorizeCoreAsync(
+            actionTitle: null,
+            actionDescription: null,
+            actionTitleKey,
+            actionDescriptionKey,
+            actionDescriptionArgs,
+            ct);
+
     public async Task<SensitiveActionGuardResult> AuthorizeIfRequiredAsync(
         string actionTitle,
         string actionDescription,
+        CancellationToken ct = default)
+        => await AuthorizeCoreAsync(
+            actionTitle,
+            actionDescription,
+            actionTitleKey: null,
+            actionDescriptionKey: null,
+            actionDescriptionArgs: null,
+            ct);
+
+    private async Task<SensitiveActionGuardResult> AuthorizeCoreAsync(
+        string? actionTitle,
+        string? actionDescription,
+        string? actionTitleKey,
+        string? actionDescriptionKey,
+        object[]? actionDescriptionArgs,
         CancellationToken ct = default)
     {
         var activeProfile = await userProfiles.GetActiveProfileAsync(ct);
@@ -34,7 +62,20 @@ public sealed class SensitiveActionGuard(
 
         var prompt = windows.Create<PasswordVerificationWindow>();
         if (prompt.DataContext is PasswordVerificationWindowViewModel vm)
-            vm.Configure(actionTitle, actionDescription, activeProfile.Username);
+        {
+            if (!string.IsNullOrWhiteSpace(actionTitleKey) && !string.IsNullOrWhiteSpace(actionDescriptionKey))
+            {
+                vm.ConfigureLocalized(
+                    actionTitleKey,
+                    actionDescriptionKey,
+                    actionDescriptionArgs,
+                    activeProfile.Username);
+            }
+            else
+            {
+                vm.Configure(actionTitle ?? string.Empty, actionDescription ?? string.Empty, activeProfile.Username);
+            }
+        }
 
         await windows.ShowDialogAsync(prompt, owner);
 

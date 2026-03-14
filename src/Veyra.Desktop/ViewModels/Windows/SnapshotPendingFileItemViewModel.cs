@@ -1,9 +1,10 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
-public sealed class SnapshotPendingFileItemViewModel
+public sealed class SnapshotPendingFileItemViewModel : ObservableObject
 {
     public string RelativePath { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
@@ -36,7 +37,7 @@ public sealed class SnapshotPendingFileItemViewModel
             {
                 > 0 => "+",
                 < 0 => "-",
-                _ => ""
+                _ => string.Empty
             };
 
             return ChangeKind switch
@@ -56,6 +57,14 @@ public sealed class SnapshotPendingFileItemViewModel
         "modified" => Loc.T("snapshot.placeholder.modified"),
         _ => Loc.T("snapshot.placeholder.unavailable")
     };
+
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(ChangeKindLabel));
+        OnPropertyChanged(nameof(SizeDeltaLabel));
+        OnPropertyChanged(nameof(ComparisonHint));
+        OnPropertyChanged(nameof(DiffPreviewPlaceholder));
+    }
 
     private static string FormatBytes(long bytes)
     {

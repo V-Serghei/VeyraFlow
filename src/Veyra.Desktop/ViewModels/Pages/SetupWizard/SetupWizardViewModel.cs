@@ -364,7 +364,7 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
                     "Setup wizard final save failed. RepositoryName {RepositoryName}. Error {Error}",
                     repoName,
                     result.Error);
-                ErrorMessage = result.Error ?? Loc.T("setup_wizard.save_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "setup_wizard.save_failed");
                 ProgressMessage = Loc.T("create_repo.error_progress_label");
                 IsProgressIndeterminate = false;
                 AppendProgressLog(ErrorMessage, FilesFoundCount);
@@ -387,7 +387,9 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to save initial setup");
-            ErrorMessage = Loc.F("setup_wizard.error_with_message", ex.Message);
+            ErrorMessage = Loc.F(
+                "setup_wizard.error_with_message",
+                UserFacingMessageLocalizer.TryLocalize(ex.Message) ?? ex.Message);
             ProgressMessage = Loc.T("create_repo.error_progress_label");
             IsProgressIndeterminate = false;
             AppendProgressLog(ErrorMessage, FilesFoundCount);

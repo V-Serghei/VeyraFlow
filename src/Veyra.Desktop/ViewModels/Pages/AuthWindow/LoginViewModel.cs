@@ -28,6 +28,8 @@ public partial class LoginViewModel : ObservableObject
 
     public string ActionTitle => IsRegisterMode ? Loc.T("login.action_title_register") : Loc.T("login.action_title_sign_in");
     public string SubmitLabel => IsRegisterMode ? Loc.T("auth.register") : Loc.T("auth.sign_in");
+    public string BusyTitle => IsRegisterMode ? Loc.T("login.loading_title_register") : Loc.T("login.loading_title_sign_in");
+    public string BusyDetail => IsRegisterMode ? Loc.T("login.loading_detail_register") : Loc.T("login.loading_detail_sign_in");
     public string ToggleLabel => IsRegisterMode
         ? Loc.T("login.toggle_to_sign_in")
         : Loc.T("login.toggle_to_register");
@@ -43,6 +45,8 @@ public partial class LoginViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(ActionTitle));
             OnPropertyChanged(nameof(SubmitLabel));
+            OnPropertyChanged(nameof(BusyTitle));
+            OnPropertyChanged(nameof(BusyDetail));
             OnPropertyChanged(nameof(ToggleLabel));
         };
     }
@@ -52,6 +56,8 @@ public partial class LoginViewModel : ObservableObject
         Error = string.Empty;
         OnPropertyChanged(nameof(ActionTitle));
         OnPropertyChanged(nameof(SubmitLabel));
+        OnPropertyChanged(nameof(BusyTitle));
+        OnPropertyChanged(nameof(BusyDetail));
         OnPropertyChanged(nameof(ToggleLabel));
     }
 
@@ -70,7 +76,7 @@ public partial class LoginViewModel : ObservableObject
             var result = await _mediator.Send(new LoginCommand(Username, Password));
             if (!result.Success)
             {
-                Error = result.Error ?? Loc.T("login.error_sign_in_failed");
+                Error = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "login.error_sign_in_failed");
                 return;
             }
 
@@ -78,7 +84,9 @@ public partial class LoginViewModel : ObservableObject
         }
         catch (FluentValidation.ValidationException vex)
         {
-            Error = string.Join("\n", vex.Errors.Select(e => e.ErrorMessage));
+            Error = UserFacingMessageLocalizer.LocalizeLinesOrFallback(
+                vex.Errors.Select(static e => e.ErrorMessage),
+                "login.error_sign_in_failed");
         }
         finally
         {
@@ -102,7 +110,7 @@ public partial class LoginViewModel : ObservableObject
             var result = await _mediator.Send(new RegisterCommand(Username, Email, Password));
             if (!result.Success)
             {
-                Error = result.Error ?? Loc.T("login.error_registration_failed");
+                Error = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "login.error_registration_failed");
                 return;
             }
 
@@ -110,7 +118,9 @@ public partial class LoginViewModel : ObservableObject
         }
         catch (FluentValidation.ValidationException vex)
         {
-            Error = string.Join("\n", vex.Errors.Select(e => e.ErrorMessage));
+            Error = UserFacingMessageLocalizer.LocalizeLinesOrFallback(
+                vex.Errors.Select(static e => e.ErrorMessage),
+                "login.error_registration_failed");
         }
         finally
         {

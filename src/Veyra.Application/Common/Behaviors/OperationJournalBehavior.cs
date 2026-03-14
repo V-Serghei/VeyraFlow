@@ -28,6 +28,16 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
 
         try
         {
+            await TryAppendAsync(
+                "info",
+                category,
+                action,
+                repositoryId,
+                username,
+                "Operation started.",
+                details: null,
+                cancellationToken);
+
             var response = await next();
             var (success, message) = ExtractOutcome(response);
 

@@ -1,5 +1,6 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using Veyra.Infrastructure.Data.Preview;
 
 namespace Veyra.Infrastructure.Data.Setup;
 
@@ -12,10 +13,8 @@ internal sealed record ImageDiffOverlayResult(
 
 internal static class ImageDiffOverlayBuilder
 {
-    private const int ChannelDeltaThreshold = 18;
-    private const int AlphaDeltaThreshold = 14;
     private const int MaxPixelsForOverlay = 24_000_000;
-    private const int MinimumHighlightedRegionPixels = 12;
+    private const int MinimumHighlightedRegionPixels = 1;
 
     public static async Task<ImageDiffOverlayResult?> TryBuildAsync(
         string baselinePath,
@@ -30,8 +29,8 @@ internal static class ImageDiffOverlayBuilder
             return null;
         }
 
-        using var baselineImage = await Image.LoadAsync<Rgba32>(baselinePath, ct);
-        using var currentImage = await Image.LoadAsync<Rgba32>(currentPath, ct);
+        using var baselineImage = await DiffImageLoader.LoadForDiffAsync(baselinePath, ct);
+        using var currentImage = await DiffImageLoader.LoadForDiffAsync(currentPath, ct);
 
         var width = Math.Max(baselineImage.Width, currentImage.Width);
         var height = Math.Max(baselineImage.Height, currentImage.Height);
@@ -91,14 +90,10 @@ internal static class ImageDiffOverlayBuilder
     }
 
     private static bool IsPixelChanged(Rgba32 baselinePixel, Rgba32 currentPixel)
-    {
-        if (Math.Abs(baselinePixel.A - currentPixel.A) > AlphaDeltaThreshold)
-            return true;
-
-        return Math.Abs(baselinePixel.R - currentPixel.R) > ChannelDeltaThreshold
-               || Math.Abs(baselinePixel.G - currentPixel.G) > ChannelDeltaThreshold
-               || Math.Abs(baselinePixel.B - currentPixel.B) > ChannelDeltaThreshold;
-    }
+        => baselinePixel.R != currentPixel.R
+           || baselinePixel.G != currentPixel.G
+           || baselinePixel.B != currentPixel.B
+           || baselinePixel.A != currentPixel.A;
 
     private static Rgba32 BuildBaseDisplayPixel(Rgba32 pixel)
     {

@@ -9,6 +9,7 @@
         WindowStartupLocation="CenterOwner"
         SystemDecorations="Full"
         CanResize="True"
+        Topmost="True"
         Background="{DynamicResource VeyraCanvasBrush}"
         Foreground="{DynamicResource VeyraTextPrimaryBrush}">
 
@@ -111,9 +112,17 @@
                 CornerRadius="12"
                 Padding="8">
             <ScrollViewer x:Name="ImageScrollViewer"
+                          Focusable="True"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto"
+                          PointerPressed="OnImagePointerPressed"
+                          PointerMoved="OnImagePointerMoved"
+                          PointerReleased="OnImagePointerReleased"
+                          PointerCaptureLost="OnImagePointerCaptureLost"
                           PointerWheelChanged="OnImagePointerWheelChanged"
+                          KeyDown="OnImageKeyDown"
+                          KeyUp="OnImageKeyUp"
+                          LostFocus="OnImageLostFocus"
                           SizeChanged="OnImageViewportSizeChanged">
                 <Grid x:Name="ImageViewportHost"
                       HorizontalAlignment="Left"

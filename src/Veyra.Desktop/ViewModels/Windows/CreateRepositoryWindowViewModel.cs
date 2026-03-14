@@ -303,7 +303,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? Loc.T("create_repo.error_create_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "create_repo.error_create_failed");
                 ProgressMessage = Loc.T("create_repo.error_progress_label");
                 IsProgressIndeterminate = false;
                 AppendProgressLog(ErrorMessage, FilesFoundCount);

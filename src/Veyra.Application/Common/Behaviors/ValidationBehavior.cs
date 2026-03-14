@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace Veyra.Application.Common.Behaviors;
 
 public sealed class ValidationBehavior<TReq, TRes> : IPipelineBehavior<TReq, TRes>
+    where TReq : notnull
 {
     private readonly IEnumerable<IValidator<TReq>> _validators;
     private readonly ILogger<ValidationBehavior<TReq, TRes>> _log;

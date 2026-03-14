@@ -32,6 +32,7 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
 {
     private readonly IOperationJournalService _journal;
     private readonly ILogger<OperationJournalWindowViewModel> _log;
+    private readonly LocalizationManager _localization;
     private readonly List<OperationJournalWindowItemViewModel> _allItems = [];
 
     public event Action? RequestClose;
@@ -56,6 +57,8 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
     {
         _journal = journal;
         _log = log;
+        _localization = LocalizationManager.Instance;
+        _localization.LanguageChanged += OnLanguageChanged;
     }
 
     partial void OnSearchQueryChanged(string value) => ApplyFilters();
@@ -111,6 +114,11 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
         SelectedLevelFilter = LevelFilters.FirstOrDefault();
         SelectedCategoryFilter = CategoryFilters.FirstOrDefault();
         ApplyFilters();
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        _ = LoadAsync();
     }
 
     private void RebuildFilterOptions()
@@ -184,7 +192,10 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
                 ? "-"
                 : entry.Username!;
 
-        var details = string.IsNullOrWhiteSpace(entry.Details) ? "-" : entry.Details!;
+        var message = UserFacingMessageLocalizer.TryLocalize(entry.Message) ?? entry.Message;
+        var details = string.IsNullOrWhiteSpace(entry.Details)
+            ? "-"
+            : UserFacingMessageLocalizer.TryLocalize(entry.Details) ?? entry.Details!;
         var timestamp = occurredLocal.ToString("yyyy-MM-dd HH:mm:ss");
         var levelLabel = HumanizeValue(entry.Level);
         var categoryLabel = HumanizeValue(entry.Category);
@@ -198,7 +209,7 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
             categoryLabel,
             actionLabel,
             scope,
-            entry.Message,
+            message,
             details);
 
         return new OperationJournalWindowItemViewModel(
@@ -211,7 +222,7 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
             categoryLabel,
             actionLabel,
             scope,
-            entry.Message,
+            message,
             details,
             searchText);
     }
@@ -230,6 +241,7 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
             "dialog_register" or "settings_register" => Loc.T("operation_journal.action.register"),
             "settings_cloud_storage_refresh" => Loc.T("operation_journal.action.refresh_cloud_status"),
             "settings_cloud_storage_repair" => Loc.T("operation_journal.action.repair_cloud_storage"),
+            "scheduled_integrity_verification" => Loc.T("operation_journal.action.scheduled_integrity_verification"),
             _ => HumanizeValue(value)
         };
     }

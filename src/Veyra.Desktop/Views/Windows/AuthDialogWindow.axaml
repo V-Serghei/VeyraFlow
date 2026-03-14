@@ -13,58 +13,77 @@
         WindowStartupLocation="CenterOwner"
         Title="{Binding TitleText}">
 
-    <Border Classes="dialog-shell" Margin="14" Padding="18">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
-            <Border Grid.Row="0" Classes="hero">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{Binding TitleText}" Classes="h2"/>
-                    <TextBlock Text="{Binding SubtitleText}" Classes="muted" TextWrapping="Wrap"/>
+    <Grid>
+        <Border Classes="dialog-shell" Margin="14" Padding="18">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="12">
+                <Border Grid.Row="0" Classes="hero">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding TitleText}" Classes="h2"/>
+                        <TextBlock Text="{Binding SubtitleText}" Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <TextBox Grid.Row="1"
+                         Text="{Binding UsernameInput, Mode=TwoWay}"
+                         Watermark="{Binding UsernamePlaceholderText}"/>
+
+                <TextBox Grid.Row="2"
+                         Text="{Binding EmailInput, Mode=TwoWay}"
+                         Watermark="{Binding EmailPlaceholderText}"
+                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
+
+                <TextBox Grid.Row="3"
+                         Text="{Binding PasswordInput, Mode=TwoWay}"
+                         PasswordChar="*"
+                         Watermark="{Binding PasswordPlaceholderText}"/>
+
+                <TextBox Grid.Row="4"
+                         Text="{Binding ConfirmPasswordInput, Mode=TwoWay}"
+                         PasswordChar="*"
+                         Watermark="{Binding ConfirmPasswordPlaceholderText}"
+                         IsVisible="{Binding IsConfirmPasswordVisible}"/>
+
+                <StackPanel Grid.Row="5" Spacing="8">
+                    <Button Content="{Binding ToggleModeLabel}"
+                            Command="{Binding ToggleModeCommand}"
+                            Classes="subtle compact"
+                            HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="{Binding MessageText}"
+                               IsVisible="{Binding MessageText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                               Foreground="{DynamicResource VeyraInfoBrush}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Grid Grid.Row="6" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" VerticalAlignment="Bottom">
+                    <Border Grid.Column="0" Background="Transparent"/>
+                    <Button Grid.Column="1"
+                            Content="{Binding CancelButtonText}"
+                            Command="{Binding CancelCommand}"
+                            Classes="subtle"/>
+                    <Button Grid.Column="2"
+                            Content="{Binding SubmitLabel}"
+                            Command="{Binding SubmitCommand}"
+                            Classes="primary"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="360">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding BusyTitle}" FontSize="18" FontWeight="SemiBold" TextAlignment="Center"/>
+                    <TextBlock Text="{Binding BusyDetail}"
+                               Classes="muted"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
                 </StackPanel>
             </Border>
-
-            <TextBox Grid.Row="1"
-                     Text="{Binding UsernameInput, Mode=TwoWay}"
-                     Watermark="{loc:Tr auth.username_placeholder}"/>
-
-            <TextBox Grid.Row="2"
-                     Text="{Binding EmailInput, Mode=TwoWay}"
-                     Watermark="{loc:Tr auth.email_placeholder}"
-                     IsVisible="{Binding IsConfirmPasswordVisible}"/>
-
-            <TextBox Grid.Row="3"
-                     Text="{Binding PasswordInput, Mode=TwoWay}"
-                     PasswordChar="*"
-                     Watermark="{loc:Tr auth.password_placeholder}"/>
-
-            <TextBox Grid.Row="4"
-                     Text="{Binding ConfirmPasswordInput, Mode=TwoWay}"
-                     PasswordChar="*"
-                     Watermark="{loc:Tr auth.confirm_password}"
-                     IsVisible="{Binding IsConfirmPasswordVisible}"/>
-
-            <StackPanel Grid.Row="5" Spacing="8">
-                <Button Content="{Binding ToggleModeLabel}"
-                        Command="{Binding ToggleModeCommand}"
-                        Classes="subtle compact"
-                        HorizontalAlignment="Left"/>
-
-                <TextBlock Text="{Binding MessageText}"
-                           IsVisible="{Binding MessageText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                           Foreground="{DynamicResource VeyraInfoBrush}"
-                           TextWrapping="Wrap"/>
-            </StackPanel>
-
-            <Grid Grid.Row="6" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" VerticalAlignment="Bottom">
-                <Border Grid.Column="0" Background="Transparent"/>
-                <Button Grid.Column="1"
-                        Content="{loc:Tr common.cancel}"
-                        Command="{Binding CancelCommand}"
-                        Classes="subtle"/>
-                <Button Grid.Column="2"
-                        Content="{Binding SubmitLabel}"
-                        Command="{Binding SubmitCommand}"
-                        Classes="primary"/>
-            </Grid>
-        </Grid>
-    </Border>
+        </Border>
+    </Grid>
 </Window>

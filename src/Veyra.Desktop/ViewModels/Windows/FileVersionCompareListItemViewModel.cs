@@ -84,6 +84,14 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
     partial void OnIsSelectedRightChanged(bool value)
         => RaiseSelectionChanged();
 
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(SizeDisplay));
+        OnPropertyChanged(nameof(StateLabel));
+        OnPropertyChanged(nameof(SelectionBadge));
+        OnPropertyChanged(nameof(HintLabel));
+    }
+
     private void RaiseSelectionChanged()
     {
         OnPropertyChanged(nameof(HasSelectionBadge));

@@ -85,6 +85,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private bool _isRetentionRunning;
     [ObservableProperty] private string _retentionProgressText = string.Empty;
     [ObservableProperty] private string _retentionResultText = string.Empty;
+    [ObservableProperty] private double _retentionProgressValue;
+    [ObservableProperty] private bool _isRetentionProgressIndeterminate;
 
     public ObservableCollection<string> SelectedFormats { get; } = [];
     public ObservableCollection<string> AvailableFormats { get; } = [];
@@ -296,7 +298,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success)
             {
-                ErrorMessage = result.Error ?? Loc.T("repo_settings.error_save_failed");
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "repo_settings.error_save_failed");
                 return;
             }
 
@@ -327,9 +329,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         try
         {
-            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
-                Loc.T("security.action_cloud_sync"),
-                Loc.F("security.action_cloud_sync_body", RepositoryName));
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_cloud_sync",
+                "security.action_cloud_sync_body");
 
             if (!guardResult.IsAllowed)
             {
@@ -367,9 +369,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         try
         {
-            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
-                Loc.T("security.action_repository_cloud_repair"),
-                Loc.F("security.action_repository_cloud_repair_body", RepositoryName));
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_repository_cloud_repair",
+                "security.action_repository_cloud_repair_body",
+                [RepositoryName]);
 
             if (!guardResult.IsAllowed)
             {
@@ -402,7 +405,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                     result.FailedUploads);
 
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !result.Success)
-                ErrorMessage = result.ErrorMessage;
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.ErrorMessage, "repo_settings.cloud_repair_failed");
 
             _log.LogInformation(
                 "Repository cloud repair finished. RepositoryId {RepositoryId}. Success {Success}. ReferencedBlocks {ReferencedBlocks}. UploadedBlocks {UploadedBlocks}. MissingLocalBlocks {MissingLocalBlocks}. FailedUploads {FailedUploads}",
@@ -497,8 +500,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var validation = await _mediator.Send(new ValidateRepositoryBundleQuery(bundlePath));
         if (!validation.IsValid)
         {
-            ErrorMessage = validation.Message;
-            BundleOperationMessage = validation.Message;
+            var validationMessage = UserFacingMessageLocalizer.LocalizeOrFallback(validation.Message, "repo_settings.bundle_validation_failed");
+            ErrorMessage = validationMessage;
+            BundleOperationMessage = validationMessage;
             return;
         }
 
@@ -536,9 +540,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             if (!await ConfirmRepositoryDeletionAsync())
                 return;
 
-            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
-                Loc.T("security.action_delete_repository"),
-                Loc.F("security.action_delete_repository_body", RepositoryName));
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_delete_repository",
+                "security.action_delete_repository_body",
+                [RepositoryName]);
 
             if (!guardResult.IsAllowed)
             {
@@ -666,7 +671,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var result = await operation();
             if (!result.Success || result.Value is null)
             {
-                var message = result.Error ?? Loc.T("repo_settings.error_bundle_failed");
+                var message = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "repo_settings.error_bundle_failed");
                 ErrorMessage = message;
                 BundleOperationMessage = message;
                 return;
@@ -695,6 +700,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsRetentionRunning = true;
             RetentionResultText = string.Empty;
             RetentionProgressText = Loc.T("repo_settings.retention_running");
+            RetentionProgressValue = 0;
+            IsRetentionProgressIndeterminate = true;
             ErrorMessage = null;
 
             _retentionCts?.Dispose();
@@ -703,6 +710,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var progress = new Progress<RepositoryRetentionProgressDto>(p =>
             {
                 RetentionProgressText = $"{p.Percent}% {p.Message}";
+                RetentionProgressValue = Math.Clamp(p.Percent, 0, 100);
+                IsRetentionProgressIndeterminate = false;
             });
 
             var result = await _mediator.Send(
@@ -711,12 +720,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                RetentionResultText = result.Error ?? Loc.T("repo_settings.retention_failed");
+                RetentionResultText = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "repo_settings.retention_failed");
                 return;
             }
 
             RetentionResultText = result.Value.Summary;
             RetentionProgressText = Loc.T("repo_settings.retention_completed");
+            RetentionProgressValue = 100;
+            IsRetentionProgressIndeterminate = false;
 
             if (!dryRun)
             {
@@ -737,6 +748,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         finally
         {
             IsRetentionRunning = false;
+            RetentionProgressValue = 0;
+            IsRetentionProgressIndeterminate = false;
             _retentionCts?.Dispose();
             _retentionCts = null;
         }
@@ -830,15 +843,36 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             "queued" => Loc.T("dashboard.sync.queued"),
             "syncing" => Loc.T("dashboard.sync.syncing"),
+            _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => FormatSyncingUploadStatus(status),
             "offline_retry" => Loc.T("dashboard.sync.offline_retry"),
             "retrying" => Loc.T("dashboard.sync.retrying"),
             "auth_required" => Loc.T("dashboard.sync.auth_required"),
             "conflict" => Loc.T("dashboard.sync.conflict"),
             "failed" => Loc.T("dashboard.sync.failed"),
             "skipped" => Loc.T("dashboard.sync.skipped"),
-            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => status,
+            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.synced"),
             _ => status.Replace('_', ' ')
         };
+    }
+
+    private static string FormatSyncingUploadStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return Loc.T("dashboard.sync.syncing");
+
+        var parts = status.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+        {
+            var progress = parts[^1].Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (progress.Length == 2 &&
+                int.TryParse(progress[0], out var current) &&
+                int.TryParse(progress[1], out var total))
+            {
+                return Loc.F("dashboard.sync.syncing_upload", current, total);
+            }
+        }
+
+        return Loc.T("dashboard.sync.syncing");
     }
 
     private static string FormatCloudSyncStatusBasic(string? status)
@@ -921,11 +955,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var window = _windows.Create<ConfirmActionWindow>();
         if (window.DataContext is ConfirmActionWindowViewModel vm)
         {
-            vm.Configure(
-                Loc.T("repo_settings.delete_confirm_title"),
-                Loc.F("repo_settings.delete_confirm_body", RepositoryName),
-                Loc.T("repo_settings.delete_confirm_warning"),
-                Loc.T("repo_settings.delete_confirm_button"));
+            vm.ConfigureLocalized(
+                "repo_settings.delete_confirm_title",
+                "repo_settings.delete_confirm_body",
+                [RepositoryName],
+                "repo_settings.delete_confirm_warning",
+                "repo_settings.delete_confirm_button");
         }
 
         await _windows.ShowDialogAsync(window, owner);

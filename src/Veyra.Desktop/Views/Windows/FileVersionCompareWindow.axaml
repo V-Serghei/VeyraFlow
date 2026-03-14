@@ -47,10 +47,14 @@
                         <TextBlock Grid.Row="1" Classes="muted" Text="{loc:Tr compare.selection_instruction}"/>
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
-                            <TextBlock Grid.Row="0"
-                                       Text="{loc:Tr explorer.loading_versions}"
-                                       Classes="muted"
-                                       IsVisible="{Binding IsVersionListLoading}"/>
+                            <StackPanel Grid.Row="0"
+                                        Spacing="6"
+                                        IsVisible="{Binding IsVersionListLoading}">
+                                <TextBlock Text="{loc:Tr explorer.loading_versions}"
+                                           Classes="muted"/>
+                                <ProgressBar IsIndeterminate="True"
+                                             Height="8"/>
+                            </StackPanel>
 
                             <ListBox Grid.Row="1"
                                      Classes="clean-list"
@@ -468,6 +472,61 @@
                                     </ItemsControl>
                                 </Border>
 
+                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsAudioPreview}">
+                                    <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
+                                        <TextBlock Grid.Row="0"
+                                                   Text="{loc:Tr compare.audio_waveform}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="14"/>
+
+                                        <Border Grid.Row="1"
+                                                Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10"
+                                                IsVisible="{Binding HasAudioWaveformPreview}">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          MaxHeight="360">
+                                                <Image Source="{Binding AudioWaveformPreview}"
+                                                       Stretch="None"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Top"/>
+                                            </ScrollViewer>
+                                        </Border>
+
+                                        <TextBlock Grid.Row="1"
+                                                   Text="{loc:Tr compare.audio_preview_unavailable}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasAudioWaveformPreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                        <Border Grid.Row="2"
+                                                Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10">
+                                            <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                        <Grid ColumnDefinitions="180,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding Label}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding Value}"
+                                                                       TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">
                                     <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10">
                                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
@@ -687,12 +746,16 @@
 
                                                 <ScrollViewer x:Name="OverlayImageScrollViewer"
                                                               Grid.Row="1"
+                                                              Focusable="True"
                                                               HorizontalScrollBarVisibility="Auto"
                                                               VerticalScrollBarVisibility="Auto"
                                                               PointerPressed="OnOverlayImagePointerPressed"
                                                               PointerMoved="OnOverlayImagePointerMoved"
                                                               PointerReleased="OnOverlayImagePointerReleased"
                                                               PointerCaptureLost="OnOverlayImagePointerCaptureLost"
+                                                              KeyDown="OnOverlayImageKeyDown"
+                                                              KeyUp="OnOverlayImageKeyUp"
+                                                              LostFocus="OnOverlayImageLostFocus"
                                                               SizeChanged="OnOverlayImageViewportSizeChanged">
                                                     <Grid x:Name="OverlayImageViewportHost"
                                                           HorizontalAlignment="Left"
@@ -756,7 +819,7 @@
                                                 BorderThickness="1"
                                                 CornerRadius="10"
                                                 Padding="10"
-                                                IsVisible="{Binding ShowSourceImagePanels}">
+                                                IsVisible="{Binding ShowSourceImagePanelsSection}">
                                             <Grid RowDefinitions="Auto,*" RowSpacing="8">
                                                 <TextBlock Grid.Row="0" Text="{loc:Tr compare.image_sources}" FontWeight="SemiBold"/>
                                                 <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
@@ -840,6 +903,38 @@
                                            IsVisible="{Binding IsWordDocument}"
                                            TextWrapping="Wrap"/>
                             </Grid>
+
+                            <Border Grid.RowSpan="2"
+                                    Classes="loading-overlay"
+                                    IsVisible="{Binding IsBusyOverlayVisible}">
+                                <Border Classes="loading-card"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Width="360"
+                                        MaxWidth="420">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="{Binding LoadingTitle}"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                        <TextBlock Text="{Binding LoadingDetail}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                        <ProgressBar Minimum="0"
+                                                     Maximum="100"
+                                                     Height="10"
+                                                     Value="{Binding LoadingProgressValue}"
+                                                     IsIndeterminate="{Binding IsLoadingProgressIndeterminate}"/>
+                                        <TextBlock Text="{Binding LoadingProgressLabel}"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right"
+                                                   IsVisible="{Binding HasDeterminateLoadingProgress}"/>
+                                    </StackPanel>
+                                </Border>
+                            </Border>
                         </Grid>
                     </Grid>
             </Border>

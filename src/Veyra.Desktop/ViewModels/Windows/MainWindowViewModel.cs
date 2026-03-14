@@ -32,6 +32,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private int _guidedTourIndex = -1;
     private bool _isGuidedTourStarting;
     private bool _isLoaded;
+    private bool _isShellRefreshInProgress;
+    private bool _pendingShellRefresh;
 
     public RepositoryDashboardViewModel Dashboard { get; }
     public RepositoryExplorerViewModel Explorer { get; }
@@ -79,6 +81,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         AppSettings.BackRequested += ShowDashboard;
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
+        AppSettings.ExperienceModeRefreshRequested += OnExperienceModeRefreshRequestedAsync;
         _theme.ThemeChanged += OnThemeChanged;
         _localization.LanguageChanged += OnLanguageChanged;
         _onboardingState.FirstRunTourRequested += OnFirstRunTourRequested;
@@ -193,6 +196,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = Dashboard;
     }
 
+    private async Task OnExperienceModeRefreshRequestedAsync(string modeCode)
+    {
+        _log.LogInformation("Refreshing app after experience mode change. Mode {Mode}", modeCode);
+        await RefreshShellStateAsync();
+    }
+
     [RelayCommand]
     private async Task GuidedTourNextAsync()
     {
@@ -229,6 +238,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLanguageState();
+        RefreshGuidedTourLocalization();
+        if (_isLoaded)
+            _ = RefreshShellStateAfterLanguageChangeAsync();
     }
 
     private void RefreshThemeState()
@@ -243,6 +255,86 @@ public sealed partial class MainWindowViewModel : ObservableObject
         LanguageToggleLabel = string.IsNullOrWhiteSpace(code)
             ? "EN"
             : code.ToUpperInvariant();
+    }
+
+    private void RefreshGuidedTourLocalization()
+    {
+        if (!IsGuidedTourVisible || _guidedTourIndex < 0 || _guidedTourIndex >= _guidedTourSteps.Count)
+            return;
+
+        var step = _guidedTourSteps[_guidedTourIndex];
+        GuidedTourTitle = Loc.T(step.TitleKey);
+        GuidedTourDescription = Loc.T(step.DescriptionKey);
+        GuidedTourStepText = Loc.F("tour.step_counter", _guidedTourIndex + 1, _guidedTourSteps.Count);
+        OnPropertyChanged(nameof(GuidedTourNextLabel));
+    }
+
+    private async Task RefreshShellStateAsync()
+    {
+        var currentPage = CurrentPage;
+        var explorerRepositoryId = Explorer.RepositoryId;
+        var settingsRepositoryId = Settings.RepositoryId;
+        var selectedSettingsTab = AppSettings.SelectedTabKey;
+
+        await Dashboard.LoadAsync();
+
+        if (explorerRepositoryId > 0)
+            await Explorer.LoadAsync(explorerRepositoryId);
+
+        if (settingsRepositoryId > 0)
+            await Settings.LoadAsync(settingsRepositoryId);
+
+        await AppSettings.LoadAsync();
+        AppSettings.SelectTabByKey(selectedSettingsTab);
+
+        if (ReferenceEquals(currentPage, Explorer) && explorerRepositoryId > 0)
+        {
+            CurrentPage = Explorer;
+            return;
+        }
+
+        if (ReferenceEquals(currentPage, Settings) && settingsRepositoryId > 0)
+        {
+            CurrentPage = Settings;
+            return;
+        }
+
+        if (ReferenceEquals(currentPage, AppSettings))
+        {
+            CurrentPage = AppSettings;
+            return;
+        }
+
+        CurrentPage = Dashboard;
+    }
+
+    private async Task RefreshShellStateAfterLanguageChangeAsync()
+    {
+        if (_isShellRefreshInProgress)
+        {
+            _pendingShellRefresh = true;
+            return;
+        }
+
+        try
+        {
+            _isShellRefreshInProgress = true;
+
+            do
+            {
+                _pendingShellRefresh = false;
+                await RefreshShellStateAsync();
+            }
+            while (_pendingShellRefresh);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Shell refresh after language change failed");
+        }
+        finally
+        {
+            _isShellRefreshInProgress = false;
+        }
     }
 
     private async Task TryStartPendingGuidedTourAsync()

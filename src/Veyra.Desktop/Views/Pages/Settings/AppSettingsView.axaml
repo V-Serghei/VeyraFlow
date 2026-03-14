@@ -9,8 +9,9 @@
              x:DataType="settings:AppSettingsViewModel"
              Background="{DynamicResource VeyraCanvasBrush}">
 
-    <DockPanel Margin="16">
-        <Border DockPanel.Dock="Top" Classes="hero" Padding="18" Margin="0,0,0,12">
+    <Grid>
+        <DockPanel Margin="16">
+            <Border DockPanel.Dock="Top" Classes="hero" Padding="18" Margin="0,0,0,12">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                     <Button Command="{Binding BackCommand}" Classes="subtle responsive-icon" ToolTip.Tip="{loc:Tr common.back}">
@@ -42,9 +43,9 @@
                     <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
                 </Border>
             </Grid>
-        </Border>
+            </Border>
 
-        <Grid x:Name="SettingsLayoutGrid" ColumnDefinitions="250,8,*" ColumnSpacing="0">
+            <Grid x:Name="SettingsLayoutGrid" ColumnDefinitions="250,8,*" ColumnSpacing="0">
             <Border x:Name="SettingsSidebarPanel" Grid.Column="0" Classes="card" Padding="8" MinWidth="208">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Tabs}">
@@ -274,8 +275,13 @@
                                     </Button>
                                 </WrapPanel>
 
-                                <TextBlock Text="{loc:Tr common.running}"
-                                           IsVisible="{Binding IsSyncBusy}"/>
+                                <Border Classes="metric-card" IsVisible="{Binding IsSyncBusy}">
+                                    <StackPanel Classes="loading-state">
+                                        <TextBlock Text="{loc:Tr app_settings.sync_running_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.sync_running_detail}" Classes="muted" TextWrapping="Wrap"/>
+                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                    </StackPanel>
+                                </Border>
 
                                 <TextBlock Text="{Binding SyncMessage}"
                                            IsVisible="{Binding SyncMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
@@ -380,8 +386,13 @@
                                             <TextBlock Grid.Column="1" Text="{Binding CloudStorageLastUpdatedText}" TextWrapping="Wrap"/>
                                         </Grid>
 
-                                        <TextBlock Text="{loc:Tr common.running}"
-                                                   IsVisible="{Binding IsCloudMaintenanceBusy}"/>
+                                        <Border Classes="metric-card" IsVisible="{Binding IsCloudMaintenanceBusy}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{loc:Tr app_settings.cloud_metrics_running_title}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr app_settings.cloud_metrics_running_detail}" Classes="muted" TextWrapping="Wrap"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
 
                                         <TextBlock Text="{Binding CloudStorageMessage}"
                                                    IsVisible="{Binding CloudStorageMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
@@ -598,6 +609,14 @@
 
                                 <TextBlock Text="{Binding ExperienceModeHint}" Opacity="0.72" TextWrapping="Wrap"/>
 
+                                <Border Classes="metric-card" IsVisible="{Binding IsExperienceModeChangeInProgress}">
+                                    <StackPanel Classes="loading-state">
+                                        <TextBlock Text="{loc:Tr app_settings.experience_switching_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.experience_switching_detail}" Classes="muted" TextWrapping="Wrap"/>
+                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Border x:Name="AppSettingsGuidedTourCard" Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="{loc:Tr app_settings.guided_tour_title}" FontWeight="SemiBold"/>
@@ -752,7 +771,23 @@
                     </StackPanel>
                 </ScrollViewer>
             </Border>
-        </Grid>
-    </DockPanel>
+            </Grid>
+        </DockPanel>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsLoading}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr app_settings.loading_title}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr app_settings.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
 </UserControl>
 

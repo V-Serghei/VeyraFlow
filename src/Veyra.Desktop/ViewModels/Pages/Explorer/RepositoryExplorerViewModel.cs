@@ -153,11 +153,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanRestoreSelectedVersion))]
     [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
     [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    [NotifyPropertyChangedFor(nameof(VersionActionProgressTitle))]
+    [NotifyPropertyChangedFor(nameof(VersionActionProgressDetail))]
     private bool _isVersionActionRunning;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasVersionActionMessage))]
+    [NotifyPropertyChangedFor(nameof(VersionActionProgressDetail))]
     private string? _versionActionMessage;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(VersionActionProgressTitle))]
+    private bool _isRestoreOverwriteMode;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDiffPreview))]
@@ -173,7 +180,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
     [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
+    [NotifyPropertyChangedFor(nameof(MaintenanceProgressTitle))]
+    [NotifyPropertyChangedFor(nameof(MaintenanceProgressDetail))]
     private bool _isMaintenanceRunning;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MaintenanceProgressTitle))]
+    private string _maintenanceActionName = string.Empty;
 
     [ObservableProperty] private int _scanPercent;
     [ObservableProperty] private string? _scanMessage;
@@ -258,6 +271,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasVersionPanelError => !string.IsNullOrWhiteSpace(VersionPanelError);
     public bool HasNoFileVersions => !IsVersionLoading && !HasVersionPanelError && FileVersions.Count == 0;
     public bool HasDiffPreview => !string.IsNullOrWhiteSpace(DiffPreview);
+    public string VersionActionProgressTitle => IsRestoreOverwriteMode
+        ? Loc.T("explorer.version_restore_running_overwrite_title")
+        : Loc.T("explorer.version_restore_running_copy_title");
+    public string VersionActionProgressDetail => !string.IsNullOrWhiteSpace(VersionActionMessage)
+        ? VersionActionMessage!
+        : Loc.T("explorer.version_restore_running_detail");
     public bool SelectedVersionHasNoContentBlocks => SelectedVersion is not null && !SelectedVersionHasContentBlocks;
     public bool HasNoPendingChanges => !HasPendingChanges;
     public bool HasNoSnapshotHistory => !HasSnapshotHistory;
@@ -272,6 +291,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && HasNoDiffPreviewRows;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
     public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
+    public string MaintenanceProgressTitle => string.IsNullOrWhiteSpace(MaintenanceActionName)
+        ? Loc.T("explorer.maintenance.running_title_generic")
+        : Loc.F("explorer.maintenance.running_title", GetMaintenanceActionDisplayName(MaintenanceActionName));
+    public string MaintenanceProgressDetail => !string.IsNullOrWhiteSpace(VersionActionMessage)
+        ? VersionActionMessage!
+        : Loc.T("explorer.maintenance.running_detail");
     public bool HasActiveExplorerFilters => GetActiveExplorerFilterCount() > 0;
     public string ExplorerFilterButtonLabel => HasActiveExplorerFilters
         ? Loc.F("explorer.filters_active_button", GetActiveExplorerFilterCount())
@@ -409,7 +434,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
-                ErrorMessage = "Repository not found.";
+                ErrorMessage = Loc.T("explorer.error_repository_not_found");
                 IsEmpty = true;
                 return;
             }
@@ -429,7 +454,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load explorer for repository {RepositoryId}", repositoryId);
-            ErrorMessage = "Failed to load repository explorer data.";
+            ErrorMessage = Loc.T("explorer.error_load_failed");
             VersionPanelError = null;
             IsVersionActionRunning = false;
             Items.Clear();
@@ -624,7 +649,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 IsDirectory = false,
                 Name = value.Name,
                 Type = GuessItemType(value.RelativePath),
-                SizeDisplay = value.ChangeKind == "deleted" ? "deleted" : FormatSize(value.CurrentSizeBytes),
+                SizeDisplay = value.ChangeKind == "deleted" ? Loc.T("common.deleted") : FormatSize(value.CurrentSizeBytes),
                 ModifiedDisplay = SelectedSnapshot?.DisplayTime ?? string.Empty,
                 HashSha256 = null
             };
@@ -657,9 +682,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_index_manual",
-            fallbackMessage: "Synchronizing index...",
+            fallbackMessage: Loc.T("explorer.scan.syncing_index"),
             showErrors: true,
-            successMessage: "Index synchronized.");
+            successMessage: Loc.T("explorer.scan.index_synchronized"));
     }
 
     [RelayCommand]
@@ -693,7 +718,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var name = (SavedExplorerFilterName ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            ErrorMessage = "Enter filter preset name before saving.";
+            ErrorMessage = Loc.T("explorer.error_filter_preset_name_required");
             return;
         }
 
@@ -787,21 +812,21 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!HasPendingChanges)
         {
-            ErrorMessage = "No changes detected. Snapshot creation is disabled.";
+            ErrorMessage = Loc.T("explorer.error_no_changes_for_snapshot");
             return;
         }
 
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            ErrorMessage = "Unable to open snapshot dialog window.";
+            ErrorMessage = Loc.T("explorer.error_snapshot_dialog_unavailable");
             return;
         }
 
         var dialog = _windows.Create<SnapshotNameDialogWindow>();
         if (dialog.DataContext is SnapshotNameDialogWindowViewModel vm)
         {
-            var defaultName = $"snimok_{DateTime.Now:yyyyMMdd_HHmmss}";
+            var defaultName = $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}";
             var changedFiles = PendingChanges.Select(change => new SnapshotPendingFileItemViewModel
             {
                 RelativePath = change.RelativePath,
@@ -824,9 +849,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await ExecuteScanAsync(
             saveFileVersions: true,
             triggerOverride: "manual_snapshot",
-            fallbackMessage: "Saving snapshot...",
+            fallbackMessage: Loc.T("explorer.scan.saving_snapshot"),
             showErrors: true,
-            successMessage: "Snapshot saved.",
+            successMessage: Loc.T("explorer.scan.snapshot_saved"),
             snapshotTitle: snapshotTitle);
     }
 
@@ -835,7 +860,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         CancellationToken ct)
     {
         if (RepositoryId <= 0)
-            return PendingFileDiffPreviewDto.Unavailable(file.RelativePath, "Repository is not selected.");
+            return PendingFileDiffPreviewDto.Unavailable(file.RelativePath, Loc.T("explorer.error_repository_not_selected"));
 
         var result = await _mediator.Send(new GetPendingFileDiffPreviewQuery(
             RepositoryId,
@@ -845,7 +870,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (!result.Success || result.Value is null)
             return PendingFileDiffPreviewDto.Unavailable(
                 file.RelativePath,
-                result.Error ?? "Unable to build preview for selected file.");
+                UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "explorer.preview_error.build_failed"));
 
         return result.Value;
     }
@@ -877,20 +902,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            ErrorMessage = "Unable to open file picker window.";
+            ErrorMessage = Loc.T("explorer.error_file_picker_unavailable");
             return;
         }
 
         var suggestedName = BuildSuggestedBundleFileName();
         var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Export repository bundle",
+            Title = Loc.T("explorer.bundle.export_title"),
             SuggestedFileName = suggestedName,
             DefaultExtension = "zip",
             ShowOverwritePrompt = true,
             FileTypeChoices =
             [
-                new FilePickerFileType("Veyra bundle")
+                new FilePickerFileType(Loc.T("explorer.bundle.file_type"))
                 {
                     Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
                 }
@@ -903,12 +928,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         await RunMaintenanceOperationAsync(
             actionName: "export",
-            startedMessage: "Exporting repository bundle...",
+            startedMessage: Loc.T("explorer.bundle.export_started"),
             operation: async () => await _mediator.Send(new ExportRepositoryBundleCommand(RepositoryId, bundlePath)),
             onSuccess: result =>
             {
-                VersionActionMessage =
-                    $"{result.Summary}\nBundle: {result.BundlePath}\nSize: {FormatSize(result.BundleSizeBytes)}";
+                VersionActionMessage = Loc.F(
+                    "explorer.bundle.export_finished",
+                    result.Summary,
+                    result.BundlePath,
+                    FormatSize(result.BundleSizeBytes));
             });
     }
 
@@ -921,17 +949,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            ErrorMessage = "Unable to open file picker window.";
+            ErrorMessage = Loc.T("explorer.error_file_picker_unavailable");
             return;
         }
 
         var bundleSelection = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Import repository bundle",
+            Title = Loc.T("explorer.bundle.import_title"),
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType("Veyra bundle")
+                new FilePickerFileType(Loc.T("explorer.bundle.file_type"))
                 {
                     Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
                 }
@@ -945,13 +973,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var validation = await _mediator.Send(new ValidateRepositoryBundleQuery(bundlePath));
         if (!validation.IsValid)
         {
-            ErrorMessage = validation.Message;
+            ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(validation.Message, "explorer.bundle.validation_failed");
             return;
         }
 
         var targetDirectorySelection = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
-            Title = "Select target directory for imported repository",
+            Title = Loc.T("explorer.bundle.pick_target_folder"),
             AllowMultiple = false
         });
 
@@ -961,7 +989,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         await RunMaintenanceOperationAsync(
             actionName: "import",
-            startedMessage: "Importing repository bundle...",
+            startedMessage: Loc.T("explorer.bundle.import_started"),
             operation: async () => await _mediator.Send(new ImportRepositoryBundleCommand(
                 bundlePath,
                 targetDirectory,
@@ -970,10 +998,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             {
                 var warningText = result.Warnings.Count == 0
                     ? string.Empty
-                    : "\nWarnings:\n" + string.Join('\n', result.Warnings);
+                    : "\n" + Loc.T("explorer.bundle.warnings_title") + "\n" + string.Join('\n', result.Warnings);
 
-                VersionActionMessage =
-                    $"{result.Summary}\nImported repository id: {result.RepositoryId}{warningText}";
+                VersionActionMessage = Loc.F("explorer.bundle.import_finished", result.Summary, result.RepositoryId) + warningText;
             });
     }
 
@@ -985,7 +1012,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         await RunMaintenanceOperationAsync(
             actionName: "repair",
-            startedMessage: "Running repository repair...",
+            startedMessage: Loc.T("explorer.maintenance.repair_started"),
             operation: async () => await _mediator.Send(new RepairRepositoryDataCommand(
                 RepositoryId,
                 RepairMissingBlocksFromCloud: true)),
@@ -1003,7 +1030,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         await RunMaintenanceOperationAsync(
             actionName: "reindex",
-            startedMessage: "Reindexing repository and rebuilding snapshot data...",
+            startedMessage: Loc.T("explorer.maintenance.reindex_started"),
             operation: async () => await _mediator.Send(new ReindexRepositoryDataCommand(RepositoryId)),
             onSuccess: result =>
             {
@@ -1019,7 +1046,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         await RunMaintenanceOperationAsync(
             actionName: "relink",
-            startedMessage: "Relinking snapshot-file graph...",
+            startedMessage: Loc.T("explorer.maintenance.relink_started"),
             operation: async () => await _mediator.Send(new RelinkRepositoryDataCommand(RepositoryId)),
             onSuccess: result =>
             {
@@ -1112,13 +1139,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var fullPath = GetSelectedFileFullPath();
         if (string.IsNullOrWhiteSpace(fullPath))
         {
-            VersionPanelError = "Select a file to show in Explorer.";
+            VersionPanelError = Loc.T("explorer.version_error.select_file_for_explorer");
             return;
         }
 
         if (!File.Exists(fullPath))
         {
-            VersionPanelError = "File was not found on disk.";
+            VersionPanelError = Loc.T("explorer.version_error.file_not_found_on_disk");
             return;
         }
 
@@ -1134,7 +1161,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to open Explorer for file {Path}", fullPath);
-            VersionPanelError = "Unable to open file in Windows Explorer.";
+            VersionPanelError = Loc.T("explorer.version_error.open_in_explorer_failed");
         }
     }
 
@@ -1159,12 +1186,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks)
         {
-            ErrorMessage = "No content blocks are stored for the selected version.";
+            ErrorMessage = Loc.T("explorer.version_error.no_content_blocks");
             return;
         }
 
+        IsRestoreOverwriteMode = overwriteCurrent;
         IsVersionActionRunning = true;
-        VersionActionMessage = null;
+        VersionActionMessage = overwriteCurrent
+            ? Loc.T("explorer.version_restore_overwrite_started")
+            : Loc.T("explorer.version_restore_copy_started");
         VersionPanelError = null;
         ErrorMessage = null;
 
@@ -1179,15 +1209,17 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             if (!result.Success)
             {
-                var message = result.Error ?? "Failed to restore selected file version.";
+                var message = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "explorer.version_error.restore_failed");
                 ErrorMessage = message;
                 VersionPanelError = message;
+                VersionActionMessage = null;
                 return;
             }
 
+            var restoredPath = result.Value ?? string.Empty;
             VersionActionMessage = overwriteCurrent
-                ? $"File restored over current file:\n{result.Value}"
-                : $"File restored as copy:\n{result.Value}";
+                ? Loc.F("explorer.version_restore_overwrite_success", restoredPath)
+                : Loc.F("explorer.version_restore_copy_success", restoredPath);
 
             _preferredSnapshotFileVersionId = selectedVersion.FileVersionId;
             await RefreshEntriesAndTreeAsync(clearSelection: false);
@@ -1204,13 +1236,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 selectedItem.RelativePath,
                 selectedVersion.FileVersionId,
                 overwriteCurrent);
-            var message = "Failed to run restore action for selected file version.";
+            var message = Loc.T("explorer.version_error.restore_action_failed");
             ErrorMessage = message;
             VersionPanelError = message;
+            VersionActionMessage = null;
         }
         finally
         {
             IsVersionActionRunning = false;
+            IsRestoreOverwriteMode = false;
         }
     }
 
@@ -1224,7 +1258,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (!selectedVersion.HasContentBlocks || selectedVersion.IsDeletionMarker)
         {
-            VersionPanelError = "Diff preview is unavailable for this version.";
+            VersionPanelError = Loc.T("explorer.version_error.diff_unavailable");
             return;
         }
 
@@ -1232,14 +1266,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var index = ordered.FindIndex(v => v.FileVersionId == selectedVersion.FileVersionId);
         if (index < 0)
         {
-            VersionPanelError = "Unable to locate the selected file version.";
+            VersionPanelError = Loc.T("explorer.version_error.version_not_found");
             return;
         }
 
         var previous = ordered.Skip(index + 1).FirstOrDefault();
         if (previous is null)
         {
-            VersionPanelError = "No older version is available for comparison.";
+            VersionPanelError = Loc.T("explorer.version_error.no_previous_version");
             return;
         }
 
@@ -1256,7 +1290,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         if (!CanCompareSelectedVersionPair || CompareLeftVersion is null || CompareRightVersion is null)
         {
-            VersionPanelError = "Select two different versions with stored content to compare.";
+            VersionPanelError = Loc.T("explorer.version_error.select_two_versions");
             return;
         }
 
@@ -1295,7 +1329,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var owner = _windows.GetActiveWindow();
         if (owner is null)
         {
-            VersionPanelError = "Unable to open compare window.";
+            VersionPanelError = Loc.T("explorer.version_error.compare_window_unavailable");
             return;
         }
 
@@ -1334,7 +1368,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(CanToggleFullFilePreview));
         OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
         DiffPreviewTitle = $"{(SelectedItem?.Name ?? beforeVersion.FileName)}  {beforeVersion.VersionName} -> {afterVersion.VersionName}";
-        DiffPreviewSummary = $"Preparing diff: before {FormatVersionInline(beforeVersion)} -> after {FormatVersionInline(afterVersion)}";
+        DiffPreviewSummary = Loc.F("explorer.diff_preparing_summary", FormatVersionInline(beforeVersion), FormatVersionInline(afterVersion));
         DiffPreviewRows.Clear();
 
         OperationResult<TextDiffResultDto> diffResult;
@@ -1377,14 +1411,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _diffPreviewRelativePath = value.RelativePath;
         OnPropertyChanged(nameof(CanOpenSelectedFileOnDisk));
         DiffPreviewTitle = $"{(SelectedItem?.Name ?? value.RelativePath)}  {beforeVersion.VersionName} -> {afterVersion.VersionName}";
-        DiffPreviewSummary = $"Before {FormatVersionInline(beforeVersion)} -> after {FormatVersionInline(afterVersion)} | +{value.AddedLines} / -{value.RemovedLines}"
-                             + (value.IsTruncated ? "  (truncated)" : string.Empty);
+        DiffPreviewSummary = Loc.F(
+            value.IsTruncated ? "explorer.diff_ready_summary_truncated" : "explorer.diff_ready_summary",
+            FormatVersionInline(beforeVersion),
+            FormatVersionInline(afterVersion),
+            value.AddedLines,
+            value.RemovedLines);
 
         DiffPreviewRows.Clear();
         foreach (var row in BuildDiffPreviewRows(value.Lines, value.Hunks))
             DiffPreviewRows.Add(row);
 
-        VersionActionMessage = $"Diff ready: {beforeVersion.VersionName} -> {afterVersion.VersionName} (+{value.AddedLines} / -{value.RemovedLines}).";
+        VersionActionMessage = Loc.F("explorer.diff_ready_message", beforeVersion.VersionName, afterVersion.VersionName, value.AddedLines, value.RemovedLines);
     }
 
     private async Task<bool> ExecuteScanAsync(
@@ -1401,7 +1439,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (!await _scanGate.WaitAsync(0))
         {
             if (showErrors)
-                ErrorMessage = "Scan is already running.";
+                ErrorMessage = Loc.T("explorer.error_scan_already_running");
             return false;
         }
 
@@ -1439,7 +1477,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (!result.Success)
             {
                 if (showErrors)
-                    ErrorMessage = result.Error ?? "Scan finished with an error.";
+                    ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "explorer.error_scan_finished_with_error");
                 return false;
             }
 
@@ -1460,7 +1498,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 triggerOverride);
 
             if (showErrors)
-                ErrorMessage = "Failed to scan repository.";
+                ErrorMessage = Loc.T("explorer.error_scan_failed");
             return false;
         }
         finally
@@ -1558,7 +1596,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 "Failed to load file versions. RepositoryId {RepositoryId}. Path {Path}",
                 RepositoryId,
                 item.RelativePath);
-            const string message = "Unable to load file versions for the selected file.";
+            var message = Loc.T("explorer.version_error.load_versions_failed");
             ErrorMessage = message;
             VersionPanelError = message;
         }
@@ -1709,20 +1747,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         ExplorerFileVersionViewModel afterVersion)
     {
         if (string.IsNullOrWhiteSpace(rawMessage))
-            return "Unable to build diff preview for selected versions.";
+            return Loc.T("explorer.preview_error.compare_failed");
 
-        var message = rawMessage.Trim();
+        var message = UserFacingMessageLocalizer.TryLocalize(rawMessage)?.Trim() ?? rawMessage.Trim();
 
         if (message.Contains("native block format", StringComparison.OrdinalIgnoreCase)
             || message.Contains("native block hash", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Cannot compare {beforeVersion.VersionName} and {afterVersion.VersionName}: current runtime cannot restore native block data. Rebuild/update veyra_core, then run Reindex data and retry.";
+            return Loc.F("explorer.preview_error.native_runtime_missing", beforeVersion.VersionName, afterVersion.VersionName);
         }
 
         if (message.Contains("missing", StringComparison.OrdinalIgnoreCase)
             || message.Contains("block", StringComparison.OrdinalIgnoreCase))
         {
-            return $"Cannot compare {beforeVersion.VersionName} and {afterVersion.VersionName}: required blocks are missing. Run Repair data or Reindex data and retry.";
+            return Loc.F("explorer.preview_error.blocks_missing", beforeVersion.VersionName, afterVersion.VersionName);
         }
 
         return message;
@@ -1773,6 +1811,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         OnPropertyChanged(nameof(FullPreviewToggleLabel));
         OnPropertyChanged(nameof(FileVersionsToggleLabel));
+        OnPropertyChanged(nameof(VersionActionProgressTitle));
+        OnPropertyChanged(nameof(VersionActionProgressDetail));
+        OnPropertyChanged(nameof(MaintenanceProgressTitle));
+        OnPropertyChanged(nameof(MaintenanceProgressDetail));
         NotifyExplorerChromeStateChanged();
     }
 
@@ -1831,10 +1873,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (PendingChanges.Count == 0)
             return;
 
-        var items = PendingChanges.ToList();
-        PendingChanges.Clear();
-        foreach (var item in items)
-            PendingChanges.Add(item);
+        foreach (var item in PendingChanges)
+            item.RefreshLocalization();
     }
 
     private void RefreshFileVersionBindings()
@@ -1850,9 +1890,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var compareRightId = CompareRightVersion?.FileVersionId;
 
         var versions = FileVersions.ToList();
-        FileVersions.Clear();
         foreach (var version in versions)
-            FileVersions.Add(version);
+            version.RefreshLocalization();
 
         SelectedVersion = selectedVersionId is > 0
             ? FileVersions.FirstOrDefault(x => x.FileVersionId == selectedVersionId.Value)
@@ -2020,6 +2059,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         try
         {
+            MaintenanceActionName = actionName;
             IsMaintenanceRunning = true;
             ErrorMessage = null;
             VersionActionMessage = startedMessage;
@@ -2028,7 +2068,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             if (!result.Success || result.Value is null)
             {
-                ErrorMessage = result.Error ?? $"Repository {actionName} failed.";
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(
+                    result.Error,
+                    "explorer.maintenance.operation_failed",
+                    GetMaintenanceActionDisplayName(actionName));
                 VersionActionMessage = null;
                 return;
             }
@@ -2042,12 +2085,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 "Repository {Action} operation failed. RepositoryId {RepositoryId}",
                 actionName,
                 RepositoryId);
-            ErrorMessage = $"Repository {actionName} failed: {ex.Message}";
+            ErrorMessage = Loc.F(
+                "explorer.maintenance.operation_failed_with_details",
+                GetMaintenanceActionDisplayName(actionName),
+                UserFacingMessageLocalizer.TryLocalize(ex.Message) ?? ex.Message);
             VersionActionMessage = null;
         }
         finally
         {
             IsMaintenanceRunning = false;
+            MaintenanceActionName = string.Empty;
         }
     }
     private async Task RefreshEntriesAndTreeAsync(bool clearSelection)
@@ -2130,7 +2177,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (success)
         {
             ScanPercent = 100;
-            ScanMessage = "Done";
+            ScanMessage = Loc.T("common.done");
         }
 
         ScanIsIndeterminate = false;
@@ -2372,7 +2419,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var success = await ExecuteScanAsync(
             saveFileVersions: false,
             triggerOverride: "sync_live_watcher",
-            fallbackMessage: "Synchronizing file changes...",
+            fallbackMessage: Loc.T("explorer.scan.syncing_file_changes"),
             showErrors: false,
             successMessage: null);
 
@@ -2936,16 +2983,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         var ext = Path.GetExtension(relativePath);
         if (string.IsNullOrWhiteSpace(ext))
-            return "File";
+            return Loc.T("explorer.type.file");
 
         return ext.TrimStart('.').ToUpperInvariant();
     }
     private static ExplorerItemViewModel MapToItem(RepositoryScanEntryDto entry)
     {
         var type = entry.IsDirectory
-            ? "Folder"
+            ? Loc.T("explorer.type.folder")
             : string.IsNullOrWhiteSpace(entry.Extension)
-                ? "File"
+                ? Loc.T("explorer.type.file")
                 : entry.Extension.TrimStart('.').ToUpperInvariant();
 
         return new ExplorerItemViewModel
@@ -3009,7 +3056,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         IsFullFilePreviewLoading = true;
         FullPreviewBeforeText = string.Empty;
         FullPreviewAfterText = string.Empty;
-        FullPreviewSummary = "Loading full file content...";
+        FullPreviewSummary = Loc.T("compare.full_preview.loading");
 
         try
         {
@@ -3025,23 +3072,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (before.Success && before.Value is not null)
             {
                 FullPreviewBeforeText = before.Value.Content;
-                summaryParts.Add($"Before: {FormatSize(before.Value.SizeBytes)}{(before.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.before_summary",
+                    FormatSize(before.Value.SizeBytes),
+                    before.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
             }
             else
             {
-                FullPreviewBeforeText = $"Unable to load before version.\n\n{before.Error}";
-                summaryParts.Add("Before unavailable");
+                FullPreviewBeforeText = Loc.F("compare.full_preview.before_load_failed", before.Error ?? Loc.T("common.not_available_short"));
+                summaryParts.Add(Loc.T("compare.full_preview.before_unavailable"));
             }
 
             if (after.Success && after.Value is not null)
             {
                 FullPreviewAfterText = after.Value.Content;
-                summaryParts.Add($"After: {FormatSize(after.Value.SizeBytes)}{(after.Value.IsTruncated ? " (truncated)" : string.Empty)}");
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.after_summary",
+                    FormatSize(after.Value.SizeBytes),
+                    after.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
             }
             else
             {
-                FullPreviewAfterText = $"Unable to load after version.\n\n{after.Error}";
-                summaryParts.Add("After unavailable");
+                FullPreviewAfterText = Loc.F("compare.full_preview.after_load_failed", after.Error ?? Loc.T("common.not_available_short"));
+                summaryParts.Add(Loc.T("compare.full_preview.after_unavailable"));
             }
 
             FullPreviewSummary = string.Join(" | ", summaryParts);
@@ -3056,8 +3109,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             FullPreviewBeforeText = string.Empty;
             FullPreviewAfterText = string.Empty;
-            FullPreviewSummary = "Failed to load full file preview.";
-            VersionPanelError = "Failed to load full file preview.";
+            FullPreviewSummary = Loc.T("compare.full_preview.failed");
+            VersionPanelError = Loc.T("compare.full_preview.load_failed");
         }
         finally
         {
@@ -3126,13 +3179,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(fullPath))
         {
-            VersionPanelError = "Select a file to open.";
+            VersionPanelError = Loc.T("explorer.version_error.select_file_to_open");
             return;
         }
 
         if (!File.Exists(fullPath))
         {
-            VersionPanelError = "File was not found on disk.";
+            VersionPanelError = Loc.T("explorer.version_error.file_not_found_on_disk");
             return;
         }
 
@@ -3147,7 +3200,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to open file {Path}", fullPath);
-            VersionPanelError = "Unable to open file in default application.";
+            VersionPanelError = Loc.T("explorer.version_error.open_default_app_failed");
         }
     }
 
@@ -3679,10 +3732,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static string FormatLastActivity(DateTime utc)
     {
         var delta = DateTime.UtcNow - utc;
-        if (delta.TotalSeconds < 60) return "just now";
-        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} min ago";
-        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} h ago";
-        return $"{(int)delta.TotalDays} d ago";
+        if (delta.TotalSeconds < 60) return Loc.T("dashboard.just_now");
+        if (delta.TotalMinutes < 60) return Loc.F("dashboard.minutes_ago", (int)delta.TotalMinutes);
+        if (delta.TotalHours < 24) return Loc.F("dashboard.hours_ago", (int)delta.TotalHours);
+        return Loc.F("dashboard.days_ago", (int)delta.TotalDays);
     }
     private static string FormatSize(long bytes)
     {
@@ -3690,6 +3743,19 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string GetMaintenanceActionDisplayName(string actionName)
+    {
+        return actionName switch
+        {
+            "export" => Loc.T("explorer.maintenance.action.export"),
+            "import" => Loc.T("explorer.maintenance.action.import"),
+            "repair" => Loc.T("explorer.maintenance.action.repair"),
+            "reindex" => Loc.T("explorer.maintenance.action.reindex"),
+            "relink" => Loc.T("explorer.maintenance.action.relink"),
+            _ => actionName
+        };
     }
 
     private readonly record struct SearchDirectives(

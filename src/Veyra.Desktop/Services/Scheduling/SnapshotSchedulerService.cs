@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
@@ -120,6 +121,7 @@ public sealed class SnapshotSchedulerService(
         var retention = scope.ServiceProvider.GetRequiredService<IRepositoryRetentionService>();
         var integrity = scope.ServiceProvider.GetRequiredService<IRepositoryIntegrityService>();
         var cloudSync = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
+        var journal = scope.ServiceProvider.GetService<IOperationJournalService>();
 
         var all = await repositories.GetAllRepositoriesAsync(ct);
         if (all.Count == 0)
@@ -166,12 +168,28 @@ public sealed class SnapshotSchedulerService(
                         "Scheduled integrity verification found unresolved issues in {Problematic}/{Total} repositories",
                         problematic,
                         integrityRuns.Count);
+                    await AppendJournalAsync(
+                        journal,
+                        "warning",
+                        "recovery",
+                        "scheduled_integrity_verification",
+                        $"Integrity verification requires attention in {problematic} of {integrityRuns.Count} repositories.",
+                        $"{problematic}/{integrityRuns.Count} repositories require follow-up.",
+                        ct);
                 }
                 else
                 {
                     log.LogInformation(
                         "Scheduled integrity verification completed for {Count} repositories with no unresolved issues",
                         integrityRuns.Count);
+                    await AppendJournalAsync(
+                        journal,
+                        "info",
+                        "recovery",
+                        "scheduled_integrity_verification",
+                        $"Integrity verification completed with no unresolved issues in {integrityRuns.Count} repositories.",
+                        null,
+                        ct);
                 }
             }
         }
@@ -243,5 +261,38 @@ public sealed class SnapshotSchedulerService(
             return hour >= start && hour < end;
 
         return hour >= start || hour < end;
+    }
+
+    private async Task AppendJournalAsync(
+        IOperationJournalService? journal,
+        string level,
+        string category,
+        string action,
+        string message,
+        string? details,
+        CancellationToken ct)
+    {
+        if (journal is null)
+            return;
+
+        try
+        {
+            await journal.AppendAsync(
+                new OperationJournalEntryDto(
+                    Id: 0,
+                    OccurredAtUtc: DateTime.UtcNow,
+                    Level: level,
+                    Category: category,
+                    Action: action,
+                    RepositoryId: null,
+                    Username: null,
+                    Message: message,
+                    Details: details),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            log.LogDebug(ex, "Failed to append scheduler journal entry for {Action}", action);
+        }
     }
 }

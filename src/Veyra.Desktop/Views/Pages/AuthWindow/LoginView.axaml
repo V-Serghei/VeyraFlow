@@ -103,6 +103,23 @@
                 </Border>
             </Grid>
         </Border>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="360">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding BusyTitle}" FontSize="18" FontWeight="SemiBold" TextAlignment="Center"/>
+                    <TextBlock Text="{Binding BusyDetail}"
+                               Classes="muted"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </UserControl>
 

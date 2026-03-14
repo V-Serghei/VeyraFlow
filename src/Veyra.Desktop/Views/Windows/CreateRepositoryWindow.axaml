@@ -18,26 +18,27 @@
         Foreground="{DynamicResource VeyraTextPrimaryBrush}"
         Title="{loc:Tr create_repo.window_title}">
 
-    <DockPanel Margin="16">
-        <Border DockPanel.Dock="Top" Classes="dialog-hero" Padding="18" Margin="0,0,0,12">
-            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}" FontSize="20" FontWeight="SemiBold"/>
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding StepInfo}" Classes="muted"/>
-                <TextBlock Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
-                           Text="{Binding ErrorMessage}"
-                           Foreground="{DynamicResource VeyraDangerBrush}"
-                           MaxWidth="360"
-                           TextWrapping="Wrap"
-                           IsVisible="{Binding HasErrorMessage}"/>
-            </Grid>
-        </Border>
+    <Grid>
+        <DockPanel Margin="16">
+            <Border DockPanel.Dock="Top" Classes="dialog-hero" Padding="18" Margin="0,0,0,12">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}" FontSize="20" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding StepInfo}" Classes="muted"/>
+                    <TextBlock Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                               Text="{Binding ErrorMessage}"
+                               Foreground="{DynamicResource VeyraDangerBrush}"
+                               MaxWidth="360"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasErrorMessage}"/>
+                </Grid>
+            </Border>
 
-        <Grid RowDefinitions="*,Auto" RowSpacing="14">
-            <Border Grid.Row="0" Classes="panel" Padding="14">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled">
-                    <Grid>
-                        <StackPanel IsVisible="{Binding IsStepRepository}" Spacing="12">
+            <Grid RowDefinitions="*,Auto" RowSpacing="14">
+                <Border Grid.Row="0" Classes="panel" Padding="14">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid>
+                            <StackPanel IsVisible="{Binding IsStepRepository}" Spacing="12">
                             <TextBlock Text="{loc:Tr create_repo.step_repository_intro}" Classes="section-title"/>
 
                             <TextBlock Text="{loc:Tr create_repo.repository_name}" Opacity="0.8"/>
@@ -53,7 +54,7 @@
                             </Grid>
                         </StackPanel>
 
-                        <StackPanel IsVisible="{Binding IsStepFormats}" Spacing="12">
+                            <StackPanel IsVisible="{Binding IsStepFormats}" Spacing="12">
                             <TextBlock Text="{loc:Tr create_repo.select_formats}" FontSize="15" FontWeight="SemiBold"/>
 
                             <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
@@ -80,7 +81,7 @@
                             </Grid>
                         </StackPanel>
 
-                        <StackPanel IsVisible="{Binding IsStepScan}" Spacing="14">
+                            <StackPanel IsVisible="{Binding IsStepScan}" Spacing="14">
                             <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr create_repo.scan_title}" Classes="section-title" FontSize="16"/>
                                 <Border Grid.Row="0" Grid.Column="1" Classes="badge">
@@ -160,16 +161,44 @@
                             <TextBlock Text="{loc:Tr create_repo.close_after_finish_hint}"
                                        Classes="muted"
                                        FontSize="12"/>
-                        </StackPanel>
-                    </Grid>
-                </ScrollViewer>
-            </Border>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Border>
 
-            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                <Button Content="{loc:Tr common.back}" Width="110" Command="{Binding BackCommand}" Classes="subtle"/>
-                <Button Content="{loc:Tr common.cancel}" Width="110" Command="{Binding CancelCommand}" Classes="subtle"/>
-                <Button Content="{Binding NextButtonText}" Width="140" Command="{Binding NextCommand}" Classes="primary"/>
-            </StackPanel>
-        </Grid>
-    </DockPanel>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="{loc:Tr common.back}" Width="110" Command="{Binding BackCommand}" Classes="subtle"/>
+                    <Button Content="{loc:Tr common.cancel}" Width="110" Command="{Binding CancelCommand}" Classes="subtle"/>
+                    <Button Content="{Binding NextButtonText}" Width="140" Command="{Binding NextCommand}" Classes="primary"/>
+                </StackPanel>
+            </Grid>
+        </DockPanel>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr create_repo.scan_title}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"/>
+                    <TextBlock Text="{Binding ProgressMessage}"
+                               Classes="muted"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <ProgressBar Classes="loading-progress"
+                                 Minimum="0"
+                                 Maximum="100"
+                                 Value="{Binding ProgressPercent}"
+                                 IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                    <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
 </Window>

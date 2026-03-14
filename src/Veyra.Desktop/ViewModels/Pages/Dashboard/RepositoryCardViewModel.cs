@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Dashboard;
 
@@ -13,16 +14,16 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
     [ObservableProperty] private string? _description;
     [ObservableProperty] private string _directoryPath = string.Empty;
     [ObservableProperty] private DateTime? _lastActivityUtc;
-    [ObservableProperty] private string _statusText = "Local";
+    [ObservableProperty] private string _statusText = string.Empty;
     [ObservableProperty] private string _statusColor = "#9E9E9E";
-    [ObservableProperty] private string _lastActivity = "Just now";
+    [ObservableProperty] private string _lastActivity = string.Empty;
 
     [ObservableProperty] private int _fileCount;
     [ObservableProperty] private int _versionCount;
     [ObservableProperty] private long _totalSizeBytes;
-    [ObservableProperty] private string _sizeDisplay = "0 MB";
-    [ObservableProperty] private string _cloudSyncStatus = "idle";
-    [ObservableProperty] private string _cloudQueueSummary = "pending 0 / running 0 / retry 0 / conflict 0 / dead-letter 0";
+    [ObservableProperty] private string _sizeDisplay = "0 B";
+    [ObservableProperty] private string _cloudSyncStatus = string.Empty;
+    [ObservableProperty] private string _cloudQueueSummary = string.Empty;
 
     [ObservableProperty] private string _cloudSyncStateKey = "idle";
     [ObservableProperty] private bool _isDirectoryAvailable = true;
@@ -37,12 +38,12 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
     public ObservableCollection<string> LinkedFormats { get; } = new();
 
     public string FormatsDisplay => LinkedFormats.Count == 0
-        ? "No formats"
+        ? Loc.T("dashboard.no_formats")
         : string.Join("  ", LinkedFormats);
 
     public string FormatsBadge => LinkedFormats.Count == 0
-        ? "0 formats"
-        : $"{LinkedFormats.Count} format(s)";
+        ? Loc.T("dashboard.formats_badge.none")
+        : Loc.P("dashboard.formats_badge", LinkedFormats.Count, LinkedFormats.Count);
 
     public string ShortPath
     {
@@ -63,5 +64,10 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
         OnPropertyChanged(nameof(FormatsDisplay));
         OnPropertyChanged(nameof(FormatsBadge));
         OnPropertyChanged(nameof(ShortPath));
+    }
+
+    public void RefreshLocalization()
+    {
+        RefreshFormatsDisplay();
     }
 }

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace Veyra.Application.Common.Behaviors;
 
 public sealed class LoggingBehavior<TReq, TRes> : IPipelineBehavior<TReq, TRes>
+    where TReq : notnull
 {
     private readonly ILogger<LoggingBehavior<TReq, TRes>> _log;
 

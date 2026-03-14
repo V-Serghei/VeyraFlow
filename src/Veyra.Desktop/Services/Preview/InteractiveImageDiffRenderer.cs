@@ -12,6 +12,7 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Veyra.Infrastructure.Data.Preview;
 
 namespace Veyra.Desktop.Services.Preview;
 
@@ -26,6 +27,14 @@ public enum ImageDiffVisualizationMode
 internal sealed record InteractiveImageDiffRenderResult(
     Bitmap Bitmap,
     byte[] PngBytes,
+    int ChangedPixelCount,
+    double ChangedPixelRatio,
+    int ChangedRegionCount);
+
+internal sealed record InteractiveImageDiffRenderFrame(
+    byte[] PngBytes,
+    int PixelWidth,
+    int PixelHeight,
     int ChangedPixelCount,
     double ChangedPixelRatio,
     int ChangedRegionCount);
@@ -46,6 +55,40 @@ internal static class InteractiveImageDiffRenderer
         string? rightLabel,
         CancellationToken ct)
     {
+        var frame = await TryRenderFrameAsync(
+            baselinePath,
+            currentPath,
+            sensitivityPercent,
+            mode,
+            splitPercent,
+            showRegionBoxes,
+            leftLabel,
+            rightLabel,
+            ct);
+        if (frame is null)
+            return null;
+
+        await using var bitmapStream = new MemoryStream(frame.PngBytes, writable: false);
+        var bitmap = new Bitmap(bitmapStream);
+        return new InteractiveImageDiffRenderResult(
+            bitmap,
+            frame.PngBytes,
+            frame.ChangedPixelCount,
+            frame.ChangedPixelRatio,
+            frame.ChangedRegionCount);
+    }
+
+    internal static async Task<InteractiveImageDiffRenderFrame?> TryRenderFrameAsync(
+        string baselinePath,
+        string currentPath,
+        double sensitivityPercent,
+        ImageDiffVisualizationMode mode,
+        double splitPercent,
+        bool showRegionBoxes,
+        string? leftLabel,
+        string? rightLabel,
+        CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(baselinePath)
             || string.IsNullOrWhiteSpace(currentPath)
             || !File.Exists(baselinePath)
@@ -54,8 +97,8 @@ internal static class InteractiveImageDiffRenderer
             return null;
         }
 
-        using var baselineImage = await Image.LoadAsync<Rgba32>(baselinePath, ct);
-        using var currentImage = await Image.LoadAsync<Rgba32>(currentPath, ct);
+        using var baselineImage = await DiffImageLoader.LoadForDiffAsync(baselinePath, ct);
+        using var currentImage = await DiffImageLoader.LoadForDiffAsync(currentPath, ct);
 
         var compareWidth = Math.Max(baselineImage.Width, currentImage.Width);
         var compareHeight = Math.Max(baselineImage.Height, currentImage.Height);
@@ -159,11 +202,10 @@ internal static class InteractiveImageDiffRenderer
         await using var stream = new MemoryStream();
         await output.SaveAsPngAsync(stream, new PngEncoder(), ct);
         var pngBytes = stream.ToArray();
-        await using var bitmapStream = new MemoryStream(pngBytes, writable: false);
-        var bitmap = new Bitmap(bitmapStream);
-        return new InteractiveImageDiffRenderResult(
-            bitmap,
+        return new InteractiveImageDiffRenderFrame(
             pngBytes,
+            output.Width,
+            output.Height,
             changedPixels,
             Math.Clamp((double)changedPixels / (compareWidth * (double)compareHeight), 0d, 1d),
             regions.Count);

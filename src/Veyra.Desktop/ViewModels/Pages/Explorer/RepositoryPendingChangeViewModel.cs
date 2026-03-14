@@ -1,9 +1,10 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
-public sealed class RepositoryPendingChangeViewModel
+public sealed class RepositoryPendingChangeViewModel : ObservableObject
 {
     public string RelativePath { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
@@ -35,12 +36,18 @@ public sealed class RepositoryPendingChangeViewModel
                 return FormatSize(CurrentSizeBytes);
 
             if (ChangeKind == "deleted")
-                return "—";
+                return "-";
 
             var delta = CurrentSizeBytes - BaselineSizeBytes;
             var sign = delta >= 0 ? "+" : "-";
             return $"{sign}{FormatSize(Math.Abs(delta))}";
         }
+    }
+
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(ChangeKindLabel));
+        OnPropertyChanged(nameof(SizeDeltaLabel));
     }
 
     private static string FormatSize(long bytes)

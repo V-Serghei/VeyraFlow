@@ -176,7 +176,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load repositories");
-            ErrorMessage = "Failed to load repositories.";
+            ErrorMessage = Loc.T("dashboard.error_load_failed");
             Repositories.Clear();
             IsEmpty = true;
             NotifyDashboardChromeStateChanged();
@@ -222,9 +222,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     {
         try
         {
-            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredAsync(
-                Loc.T("security.action_add_repository"),
-                Loc.T("security.action_add_repository_body"));
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_add_repository",
+                "security.action_add_repository_body");
 
             if (!guardResult.IsAllowed)
             {
@@ -247,7 +247,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to open repository creation wizard");
-            ErrorMessage = "Failed to open repository creation wizard.";
+            ErrorMessage = Loc.T("dashboard.error_open_create_repository");
         }
     }
 
@@ -282,7 +282,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         var name = (SavedFilterName ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
-            ErrorMessage = "Enter preset name before saving.";
+            ErrorMessage = Loc.T("dashboard.error_preset_name_required");
             return;
         }
 
@@ -720,7 +720,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             "queued" => Loc.T("dashboard.sync.queued"),
             "syncing" => Loc.T("dashboard.sync.syncing"),
-            _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => status,
+            _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => FormatSyncingUploadStatus(status),
             "offline_retry" => Loc.T("dashboard.sync.offline_retry"),
             "retrying" => Loc.T("dashboard.sync.retrying"),
             "auth_required" => Loc.T("dashboard.sync.auth_required"),
@@ -728,9 +728,29 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             "dead_letter" => Loc.T("dashboard.sync.dead_letter"),
             "failed" => Loc.T("dashboard.sync.failed"),
             "skipped" => Loc.T("dashboard.sync.skipped"),
-            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => status,
+            _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.synced"),
             _ => status.Replace('_', ' ')
         };
+    }
+
+    private static string FormatSyncingUploadStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+            return Loc.T("dashboard.sync.syncing");
+
+        var parts = status.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+        {
+            var progress = parts[^1].Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (progress.Length == 2 &&
+                int.TryParse(progress[0], out var current) &&
+                int.TryParse(progress[1], out var total))
+            {
+                return Loc.F("dashboard.sync.syncing_upload", current, total);
+            }
+        }
+
+        return Loc.T("dashboard.sync.syncing");
     }
 
     private static string BuildQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
@@ -807,7 +827,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                 card.QueueRetryCount,
                 card.QueueConflictCount,
                 card.QueueDeadLetterCount);
-            card.RefreshFormatsDisplay();
+            card.RefreshLocalization();
         }
 
         RefreshRepositoryBindings();

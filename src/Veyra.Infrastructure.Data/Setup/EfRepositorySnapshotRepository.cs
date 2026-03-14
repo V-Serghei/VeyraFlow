@@ -12,6 +12,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Services.Diff;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
+using Veyra.Infrastructure.Data.Preview;
 
 namespace Veyra.Infrastructure.Data.Setup;
 
@@ -39,7 +40,12 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"
+    };
+
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".wav", ".mp3", ".aac", ".m4a", ".wma", ".aif", ".aiff"
     };
 
     private sealed record PendingSnapshotFileLink(long FileIdentityId, FileVersion FileVersion);
@@ -1009,7 +1015,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (baselineVersion.SizeBytes > 0 && baselineBlocks.Count == 0)
             return PendingFileDiffPreviewDto.Unavailable(normalizedPath, "Baseline version blocks are missing.");
 
-        string? imageTempToCleanup = null;
+        var tempFilesToCleanup = new List<string>();
 
         try
         {
@@ -1071,7 +1077,7 @@ public sealed class EfRepositorySnapshotRepository(
 
                 var baselineExt = string.IsNullOrWhiteSpace(extension) ? ".bin" : extension;
                 var baselineTempImage = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline{baselineExt}");
-                imageTempToCleanup = baselineTempImage;
+                tempFilesToCleanup.Add(baselineTempImage);
 
                 if (baselineVersion.SizeBytes > 0)
                 {
@@ -1090,6 +1096,9 @@ public sealed class EfRepositorySnapshotRepository(
                 var currentSize = TryReadImageDimensions(absolutePath);
 
                 var overlay = await ImageDiffOverlayBuilder.TryBuildAsync(baselineTempImage, absolutePath, ct);
+                var svgStructuralDiff = string.Equals(extension, ".svg", StringComparison.OrdinalIgnoreCase)
+                    ? SvgStructuralDiffAnalyzer.TryAnalyze(baselineTempImage, absolutePath)
+                    : null;
                 var imagePreview = new PendingImageDiffPreviewDto
                 {
                     BaselineImagePath = baselineTempImage,
@@ -1109,16 +1118,82 @@ public sealed class EfRepositorySnapshotRepository(
                     SimilarityRatio = byteSimilarity,
                     ChangedPixelCount = overlay?.ChangedPixelCount ?? 0,
                     ChangedPixelRatio = overlay?.ChangedPixelRatio,
-                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0
+                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0,
+                    IsVectorImage = svgStructuralDiff is not null,
+                    AddedElementCount = svgStructuralDiff?.AddedElementCount ?? 0,
+                    RemovedElementCount = svgStructuralDiff?.RemovedElementCount ?? 0,
+                    ModifiedElementCount = svgStructuralDiff?.ModifiedElementCount ?? 0,
+                    ChangedAttributeCount = svgStructuralDiff?.ChangedAttributeCount ?? 0
                 };
 
                 var imageMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "image", extension);
-                imageTempToCleanup = null;
+                tempFilesToCleanup.Clear();
                 return PendingFileDiffPreviewDto.FromImage(
                     relativePath: normalizedPath,
                     message: imageMessage,
                     binarySummary: binarySummary,
                     imagePreview: imagePreview);
+            }
+
+            if (IsAudioExtension(extension))
+            {
+                var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-audio-preview");
+                Directory.CreateDirectory(tempDir);
+
+                var baselineExt = GetSafeTempExtension(extension);
+                var baselineTempAudio = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline{baselineExt}");
+                tempFilesToCleanup.Add(baselineTempAudio);
+
+                if (baselineVersion.SizeBytes > 0)
+                {
+                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempAudio, true, ct);
+                }
+                else
+                {
+                    await File.WriteAllBytesAsync(baselineTempAudio, [], ct);
+                }
+
+                var byteSimilarity = await ComputeByteSimilarityAsync(baselineTempAudio, absolutePath, ct);
+                binarySummary = binarySummary with { ByteSimilarityRatio = byteSimilarity };
+
+                var audioPreview = await AudioDiffPreviewBuilder.TryBuildAsync(baselineTempAudio, absolutePath, ct);
+                if (audioPreview is not null)
+                {
+                    tempFilesToCleanup.Add(audioPreview.WaveformImagePath);
+
+                    var audioMessage = BuildAudioPreviewMessage(normalizedPath, binarySummary, audioPreview);
+                    tempFilesToCleanup.Clear();
+                    return PendingFileDiffPreviewDto.FromAudio(
+                        relativePath: normalizedPath,
+                        message: audioMessage,
+                        binarySummary: binarySummary,
+                        audioPreview: new PendingAudioDiffPreviewDto
+                        {
+                            BaselineAudioPath = baselineTempAudio,
+                            IsBaselineTempFile = true,
+                            CurrentAudioPath = absolutePath,
+                            IsCurrentTempFile = false,
+                            WaveformImagePath = audioPreview.WaveformImagePath,
+                            IsWaveformTempFile = audioPreview.IsWaveformTempFile,
+                            BaselineDurationSeconds = audioPreview.BaselineDurationSeconds,
+                            CurrentDurationSeconds = audioPreview.CurrentDurationSeconds,
+                            BaselineSampleRate = audioPreview.BaselineSampleRate,
+                            CurrentSampleRate = audioPreview.CurrentSampleRate,
+                            BaselineChannels = audioPreview.BaselineChannels,
+                            CurrentChannels = audioPreview.CurrentChannels,
+                            BaselinePeakAmplitude = audioPreview.BaselinePeakAmplitude,
+                            CurrentPeakAmplitude = audioPreview.CurrentPeakAmplitude,
+                            BaselineRmsAmplitude = audioPreview.BaselineRmsAmplitude,
+                            CurrentRmsAmplitude = audioPreview.CurrentRmsAmplitude,
+                            SignalSimilarityRatio = audioPreview.SignalSimilarityRatio,
+                            ChangedTimeRatio = audioPreview.ChangedTimeRatio,
+                            ChangedSegmentCount = audioPreview.ChangedSegmentCount,
+                            HasDurationMismatch = audioPreview.HasDurationMismatch
+                        });
+                }
+
+                TryDelete(baselineTempAudio);
+                tempFilesToCleanup.Remove(baselineTempAudio);
             }
 
             var binaryMessage = BuildBinaryPreviewMessage(normalizedPath, binarySummary, "binary", extension);
@@ -1129,8 +1204,8 @@ public sealed class EfRepositorySnapshotRepository(
         }
         catch (Exception ex)
         {
-            if (!string.IsNullOrWhiteSpace(imageTempToCleanup))
-                TryDelete(imageTempToCleanup);
+            foreach (var tempFile in tempFilesToCleanup)
+                TryDelete(tempFile);
 
             log.LogWarning(
                 ex,
@@ -1178,6 +1253,7 @@ public sealed class EfRepositorySnapshotRepository(
 
         var keepLeftTemp = false;
         var keepRightTemp = false;
+        string? audioWaveformTemp = null;
 
         try
         {
@@ -1244,6 +1320,9 @@ public sealed class EfRepositorySnapshotRepository(
                 var currentSize = TryReadImageDimensions(rightTemp);
 
                 var overlay = await ImageDiffOverlayBuilder.TryBuildAsync(leftTemp, rightTemp, ct);
+                var svgStructuralDiff = string.Equals(extension, ".svg", StringComparison.OrdinalIgnoreCase)
+                    ? SvgStructuralDiffAnalyzer.TryAnalyze(leftTemp, rightTemp)
+                    : null;
                 var imagePreview = new PendingImageDiffPreviewDto
                 {
                     BaselineImagePath = leftTemp,
@@ -1263,7 +1342,12 @@ public sealed class EfRepositorySnapshotRepository(
                     SimilarityRatio = byteSimilarity,
                     ChangedPixelCount = overlay?.ChangedPixelCount ?? 0,
                     ChangedPixelRatio = overlay?.ChangedPixelRatio,
-                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0
+                    ChangedRegionCount = overlay?.ChangedRegionCount ?? 0,
+                    IsVectorImage = svgStructuralDiff is not null,
+                    AddedElementCount = svgStructuralDiff?.AddedElementCount ?? 0,
+                    RemovedElementCount = svgStructuralDiff?.RemovedElementCount ?? 0,
+                    ModifiedElementCount = svgStructuralDiff?.ModifiedElementCount ?? 0,
+                    ChangedAttributeCount = svgStructuralDiff?.ChangedAttributeCount ?? 0
                 };
 
                 var imageMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "image", extension);
@@ -1275,6 +1359,45 @@ public sealed class EfRepositorySnapshotRepository(
                     message: imageMessage,
                     binarySummary: binarySummary,
                     imagePreview: imagePreview);
+            }
+
+            if (IsAudioExtension(extension))
+            {
+                var audioPreview = await AudioDiffPreviewBuilder.TryBuildAsync(leftTemp, rightTemp, ct);
+                if (audioPreview is not null)
+                {
+                    audioWaveformTemp = audioPreview.WaveformImagePath;
+                    keepLeftTemp = true;
+                    keepRightTemp = true;
+
+                    return PendingFileDiffPreviewDto.FromAudio(
+                        relativePath: left.RelativePath,
+                        message: BuildAudioPreviewMessage(left.RelativePath, binarySummary, audioPreview),
+                        binarySummary: binarySummary,
+                        audioPreview: new PendingAudioDiffPreviewDto
+                        {
+                            BaselineAudioPath = leftTemp,
+                            IsBaselineTempFile = true,
+                            CurrentAudioPath = rightTemp,
+                            IsCurrentTempFile = true,
+                            WaveformImagePath = audioPreview.WaveformImagePath,
+                            IsWaveformTempFile = audioPreview.IsWaveformTempFile,
+                            BaselineDurationSeconds = audioPreview.BaselineDurationSeconds,
+                            CurrentDurationSeconds = audioPreview.CurrentDurationSeconds,
+                            BaselineSampleRate = audioPreview.BaselineSampleRate,
+                            CurrentSampleRate = audioPreview.CurrentSampleRate,
+                            BaselineChannels = audioPreview.BaselineChannels,
+                            CurrentChannels = audioPreview.CurrentChannels,
+                            BaselinePeakAmplitude = audioPreview.BaselinePeakAmplitude,
+                            CurrentPeakAmplitude = audioPreview.CurrentPeakAmplitude,
+                            BaselineRmsAmplitude = audioPreview.BaselineRmsAmplitude,
+                            CurrentRmsAmplitude = audioPreview.CurrentRmsAmplitude,
+                            SignalSimilarityRatio = audioPreview.SignalSimilarityRatio,
+                            ChangedTimeRatio = audioPreview.ChangedTimeRatio,
+                            ChangedSegmentCount = audioPreview.ChangedSegmentCount,
+                            HasDurationMismatch = audioPreview.HasDurationMismatch
+                        });
+                }
             }
 
             var binaryMessage = BuildBinaryPreviewMessage(left.RelativePath, binarySummary, "binary", extension);
@@ -1301,6 +1424,9 @@ public sealed class EfRepositorySnapshotRepository(
 
             if (!keepRightTemp)
                 TryDelete(rightTemp);
+
+            if (!keepLeftTemp && !keepRightTemp && !string.IsNullOrWhiteSpace(audioWaveformTemp))
+                TryDelete(audioWaveformTemp);
         }
     }
     public async Task<TextDiffResultDto?> GetStoredTextDiffAsync(
@@ -1718,6 +1844,12 @@ public sealed class EfRepositorySnapshotRepository(
     {
         var normalized = NormalizeExtension(extension);
         return normalized is not null && ImageExtensions.Contains(normalized);
+    }
+
+    private static bool IsAudioExtension(string? extension)
+    {
+        var normalized = NormalizeExtension(extension);
+        return normalized is not null && AudioExtensions.Contains(normalized);
     }
 
     private static bool IsOfficeDocumentExtension(string? extension)
@@ -2238,33 +2370,7 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static (int Width, int Height)? TryReadImageDimensions(string path)
     {
-        if (!File.Exists(path))
-            return null;
-
-        try
-        {
-            var extension = Path.GetExtension(path);
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-            if (string.Equals(extension, ".png", StringComparison.OrdinalIgnoreCase))
-                return TryReadPngDimensions(stream);
-
-            if (string.Equals(extension, ".jpg", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(extension, ".jpeg", StringComparison.OrdinalIgnoreCase))
-                return TryReadJpegDimensions(stream);
-
-            if (string.Equals(extension, ".bmp", StringComparison.OrdinalIgnoreCase))
-                return TryReadBmpDimensions(stream);
-
-            if (string.Equals(extension, ".gif", StringComparison.OrdinalIgnoreCase))
-                return TryReadGifDimensions(stream);
-
-            return null;
-        }
-        catch
-        {
-            return null;
-        }
+        return DiffImageLoader.TryReadDimensions(path);
     }
 
     private static (int Width, int Height)? TryReadPngDimensions(Stream stream)
@@ -2394,7 +2500,9 @@ public sealed class EfRepositorySnapshotRepository(
     {
         var kind = string.Equals(previewType, "image", StringComparison.OrdinalIgnoreCase)
             ? "image"
-            : "binary";
+            : string.Equals(previewType, "audio", StringComparison.OrdinalIgnoreCase)
+                ? "audio"
+                : "binary";
 
         var sizeLabel = $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})";
 
@@ -2419,6 +2527,18 @@ public sealed class EfRepositorySnapshotRepository(
         return $"{relativePath}   {kind}   {sizeLabel}   {dedupLabel}, {changedLabel}{similarityLabel}{officeHint}";
     }
 
+    private static string BuildAudioPreviewMessage(
+        string relativePath,
+        PendingBinaryDiffSummaryDto summary,
+        AudioDiffPreviewBuildResult preview)
+    {
+        var sizeLabel = $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})";
+        var durationLabel = $"{FormatDuration(preview.BaselineDurationSeconds)} -> {FormatDuration(preview.CurrentDurationSeconds)}";
+        var similarityLabel = $"signal similarity {preview.SignalSimilarityRatio * 100:F1}%";
+        var changedLabel = $"changed timeline {preview.ChangedTimeRatio * 100:F1}% in {preview.ChangedSegmentCount} segment(s)";
+        return $"{relativePath}   audio   {sizeLabel}   {durationLabel}   {similarityLabel}, {changedLabel}";
+    }
+
     private static string FormatSignedBytes(long value)
     {
         if (value == 0)
@@ -2435,6 +2555,17 @@ public sealed class EfRepositorySnapshotRepository(
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        if (seconds <= 0d)
+            return "0:00";
+
+        var time = TimeSpan.FromSeconds(seconds);
+        return time.TotalHours >= 1d
+            ? time.ToString(@"h\:mm\:ss")
+            : time.ToString(@"m\:ss");
     }
 
     private enum BlockHashFamily

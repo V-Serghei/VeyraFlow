@@ -14,7 +14,7 @@
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource VeyraCanvasBrush}"
         Foreground="{DynamicResource VeyraTextPrimaryBrush}"
-        Title="{loc:Tr common.confirm}">
+        Title="{Binding WindowTitleText}">
     <Border Padding="16" Background="{DynamicResource VeyraCanvasBrush}">
         <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
             <Border Grid.Row="0" Classes="dialog-hero">
@@ -34,7 +34,7 @@
 
             <Border Grid.Row="2" Classes="toolbar" Padding="10">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                    <Button Content="{loc:Tr common.cancel}" Command="{Binding CancelCommand}" Classes="subtle" Width="110"/>
+                    <Button Content="{Binding CancelButtonText}" Command="{Binding CancelCommand}" Classes="subtle" Width="110"/>
                     <Button Content="{Binding ConfirmButtonText}" Command="{Binding ConfirmCommand}" Classes="danger" Width="150"/>
                 </StackPanel>
             </Border>

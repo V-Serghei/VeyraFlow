@@ -23,6 +23,8 @@ public sealed partial class AuthDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanSubmit))]
     [NotifyPropertyChangedFor(nameof(TitleText))]
     [NotifyPropertyChangedFor(nameof(SubtitleText))]
+    [NotifyPropertyChangedFor(nameof(BusyTitle))]
+    [NotifyPropertyChangedFor(nameof(BusyDetail))]
     [NotifyPropertyChangedFor(nameof(SubmitLabel))]
     [NotifyPropertyChangedFor(nameof(ToggleModeLabel))]
     [NotifyPropertyChangedFor(nameof(IsConfirmPasswordVisible))]
@@ -67,6 +69,21 @@ public sealed partial class AuthDialogWindowViewModel : ObservableObject
         _userProfiles = userProfiles;
         _sync = sync;
         _log = log;
+
+        LocalizationManager.Instance.LanguageChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(TitleText));
+            OnPropertyChanged(nameof(SubtitleText));
+            OnPropertyChanged(nameof(BusyTitle));
+            OnPropertyChanged(nameof(BusyDetail));
+            OnPropertyChanged(nameof(SubmitLabel));
+            OnPropertyChanged(nameof(ToggleModeLabel));
+            OnPropertyChanged(nameof(UsernamePlaceholderText));
+            OnPropertyChanged(nameof(EmailPlaceholderText));
+            OnPropertyChanged(nameof(PasswordPlaceholderText));
+            OnPropertyChanged(nameof(ConfirmPasswordPlaceholderText));
+            OnPropertyChanged(nameof(CancelButtonText));
+        };
     }
 
     public string TitleText => IsRegisterMode
@@ -81,9 +98,22 @@ public sealed partial class AuthDialogWindowViewModel : ObservableObject
         ? Loc.T("app_settings.auth_create_account")
         : Loc.T("auth.sign_in");
 
+    public string BusyTitle => IsRegisterMode
+        ? Loc.T("auth_dialog.loading_title_register")
+        : Loc.T("auth_dialog.loading_title_sign_in");
+
+    public string BusyDetail => IsRegisterMode
+        ? Loc.T("auth_dialog.loading_detail_register")
+        : Loc.T("auth_dialog.loading_detail_sign_in");
+
     public string ToggleModeLabel => IsRegisterMode
         ? Loc.T("app_settings.auth_switch_to_sign_in")
         : Loc.T("app_settings.auth_switch_to_registration");
+    public string UsernamePlaceholderText => Loc.T("auth.username_placeholder");
+    public string EmailPlaceholderText => Loc.T("auth.email_placeholder");
+    public string PasswordPlaceholderText => Loc.T("auth.password_placeholder");
+    public string ConfirmPasswordPlaceholderText => Loc.T("auth.confirm_password");
+    public string CancelButtonText => Loc.T("common.cancel");
 
     public bool IsConfirmPasswordVisible => IsRegisterMode;
 

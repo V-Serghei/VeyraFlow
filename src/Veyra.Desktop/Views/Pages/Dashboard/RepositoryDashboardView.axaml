@@ -9,8 +9,9 @@
              x:DataType="vm:RepositoryDashboardViewModel"
              Background="{DynamicResource VeyraCanvasBrush}">
 
-    <Grid ColumnDefinitions="278,6,*" ColumnSpacing="0" Margin="18">
-        <Border Grid.Column="0" Classes="sidebar" Padding="16,18">
+    <Grid>
+        <Grid ColumnDefinitions="278,6,*" ColumnSpacing="0" Margin="18">
+            <Border Grid.Column="0" Classes="sidebar" Padding="16,18">
             <Grid RowDefinitions="Auto,Auto,*" RowSpacing="14">
                 <StackPanel Grid.Row="0" Spacing="4">
                     <TextBlock Text="{loc:Tr dashboard.repositories_label}" Classes="section-title"/>
@@ -70,17 +71,17 @@
                     </ItemsControl>
                 </ScrollViewer>
             </Grid>
-        </Border>
+            </Border>
 
-        <GridSplitter Grid.Column="1"
-                      Width="6"
-                      HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch"
-                      ResizeDirection="Columns"
-                      ResizeBehavior="PreviousAndNext"/>
+            <GridSplitter Grid.Column="1"
+                          Width="6"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"/>
 
-        <Grid Grid.Column="2" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10" Margin="14,0,0,0">
-            <Border Grid.Row="0" Classes="toolbar" Padding="18">
+            <Grid Grid.Column="2" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10" Margin="14,0,0,0">
+                <Border Grid.Row="0" Classes="toolbar" Padding="18">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
                     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <TextBox x:Name="DashboardSearchBox"
@@ -107,11 +108,11 @@
                                Classes="muted"
                                FontSize="12"/>
                 </Grid>
-            </Border>
+                </Border>
 
-            <Border Grid.Row="1"
-                    Classes="filter-sheet"
-                    IsVisible="{Binding IsAdvancedFiltersVisible}">
+                <Border Grid.Row="1"
+                        Classes="filter-sheet"
+                        IsVisible="{Binding IsAdvancedFiltersVisible}">
                 <StackPanel Spacing="14">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <StackPanel Spacing="4">
@@ -214,16 +215,16 @@
                         </StackPanel>
                     </Border>
                 </StackPanel>
-            </Border>
+                </Border>
 
-            <TextBlock Grid.Row="2"
-                       Margin="8,0,8,0"
-                       Text="{Binding ErrorMessage}"
-                       Foreground="{DynamicResource VeyraDangerBrush}"
-                       IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                <TextBlock Grid.Row="2"
+                           Margin="8,0,8,0"
+                           Text="{Binding ErrorMessage}"
+                           Foreground="{DynamicResource VeyraDangerBrush}"
+                           IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
 
-            <ScrollViewer Grid.Row="3" Padding="6,6,6,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Spacing="14">
+                <ScrollViewer Grid.Row="3" Padding="6,6,6,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Spacing="14">
                     <ItemsControl ItemsSource="{Binding Repositories}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -354,8 +355,24 @@
                                    Classes="muted"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
-                </StackPanel>
-            </ScrollViewer>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
         </Grid>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsLoading}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr dashboard.loading_title}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr dashboard.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </UserControl>

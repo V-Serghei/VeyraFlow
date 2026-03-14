@@ -22,4 +22,10 @@ public sealed record PendingImageDiffPreviewDto
     public int ChangedPixelCount { get; init; }
     public double? ChangedPixelRatio { get; init; }
     public int ChangedRegionCount { get; init; }
+
+    public bool IsVectorImage { get; init; }
+    public int AddedElementCount { get; init; }
+    public int RemovedElementCount { get; init; }
+    public int ModifiedElementCount { get; init; }
+    public int ChangedAttributeCount { get; init; }
 }

@@ -33,6 +33,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private IReadOnlyList<TextDiffHunkDto> _currentTextHunks = Array.Empty<TextDiffHunkDto>();
     private PendingBinaryDiffSummaryDto? _lastBinarySummary;
     private PendingImageDiffPreviewDto? _lastImagePreview;
+    private PendingAudioDiffPreviewDto? _lastAudioPreview;
     private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
     private int _lastRenderedChangedPixelCount;
     private double? _lastRenderedChangedPixelRatio;
@@ -59,12 +60,28 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private bool _isPreviewLoading;
 
     [ObservableProperty]
+    private string _loadingTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _loadingDetail = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    [NotifyPropertyChangedFor(nameof(LoadingProgressLabel))]
+    private double _loadingProgressValue;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    private bool _isLoadingProgressIndeterminate;
+
+    [ObservableProperty]
     private string _previewSummary = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTextPreview))]
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPreview))]
     [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
     private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
 
@@ -87,6 +104,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
     [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
     private Bitmap? _overlayImagePreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioWaveformPreview))]
+    private Bitmap? _audioWaveformPreview;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
@@ -141,14 +162,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
 
     public SnapshotNameDialogWindowViewModel()
-        : this($"snimok_{DateTime.Now:yyyyMMdd_HHmmss}")
+        : this($"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}")
     {
     }
 
     public SnapshotNameDialogWindowViewModel(string defaultName)
     {
         _snapshotName = string.IsNullOrWhiteSpace(defaultName)
-            ? $"snimok_{DateTime.Now:yyyyMMdd_HHmmss}"
+            ? $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}"
             : defaultName;
 
         ChangedFiles.CollectionChanged += OnChangedFilesCollectionChanged;
@@ -171,16 +192,20 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasOverlayImagePreview => OverlayImagePreview is not null;
     public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
     public bool HasNoImagePreviews => !HasAnyImagePreview;
+    public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
     public bool HasPinnedHunkHeader => !string.IsNullOrWhiteSpace(PinnedHunkHeader);
+    public bool HasDeterminateLoadingProgress => !IsLoadingProgressIndeterminate;
+    public string LoadingProgressLabel => $"{Math.Clamp(Math.Round(LoadingProgressValue), 0, 100):0}%";
 
     public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && HasPreviewRows;
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
+    public bool IsAudioPreview => PreviewKind == PendingDiffPreviewKind.Audio;
     public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
     public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
     public bool ShowSourceImagePanelsSection => HasImagePreviews && ShowSourceImagePanels;
 
-    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview;
+    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview;
 
     public string WrapToggleLabel => IsWrapEnabled ? Loc.T("compare.wrap.on") : Loc.T("compare.wrap.off");
     public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
@@ -220,7 +245,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         Func<SnapshotPendingFileItemViewModel, CancellationToken, Task<PendingFileDiffPreviewDto>>? previewLoader = null)
     {
         SnapshotName = string.IsNullOrWhiteSpace(defaultName)
-            ? $"snimok_{DateTime.Now:yyyyMMdd_HHmmss}"
+            ? $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}"
             : defaultName;
 
         _previewLoader = previewLoader;
@@ -271,9 +296,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         var changedFiles = ChangedFiles.ToList();
         var selectedPath = SelectedChangedFile?.RelativePath;
-        ChangedFiles.Clear();
         foreach (var changedFile in changedFiles)
-            ChangedFiles.Add(changedFile);
+            changedFile.RefreshLocalization();
 
         SelectedChangedFile = string.IsNullOrWhiteSpace(selectedPath)
             ? ChangedFiles.FirstOrDefault()
@@ -291,7 +315,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             PreviewSummary = Loc.T("snapshot.preview.select_changed_file");
 
         if (_lastBinarySummary is not null)
-            ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
+            ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview, _lastAudioPreview);
 
         LeftImageCaption = BuildImageSideCaption(Loc.T("common.before"), _lastImagePreview?.BaselineWidth, _lastImagePreview?.BaselineHeight);
         RightImageCaption = BuildImageSideCaption(Loc.T("common.after"), _lastImagePreview?.CurrentWidth, _lastImagePreview?.CurrentHeight);
@@ -433,7 +457,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             return;
 
         await RenderInteractiveImagePreviewAsync(_lastImagePreview, ct);
-        ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
+        ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview, _lastAudioPreview);
     }
 
     [RelayCommand]
@@ -571,6 +595,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         IsPreviewLoading = true;
         PreviewSummary = Loc.T("snapshot.preview.building");
         PreviewKind = PendingDiffPreviewKind.None;
+        SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.fetch"), 14);
 
         try
         {
@@ -588,6 +613,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             {
                 case PendingDiffPreviewKind.Text:
                 {
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.text"), 72);
                     _lastBinarySummary = null;
                     _lastImagePreview = null;
                     _currentTextLines = preview.Lines;
@@ -603,9 +629,11 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 }
                 case PendingDiffPreviewKind.Binary:
                 {
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.binary"), 80);
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = null;
-                    ApplyBinaryMetrics(preview.BinarySummary, null);
+                    _lastAudioPreview = null;
+                    ApplyBinaryMetrics(preview.BinarySummary, null, null);
                     PreviewKind = PendingDiffPreviewKind.Binary;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("snapshot.preview.binary_ready")
@@ -614,14 +642,33 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 }
                 case PendingDiffPreviewKind.Image:
                 {
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.images"), 48);
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = preview.ImagePreview;
+                    _lastAudioPreview = null;
                     await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.render"), 82);
                     await RenderInteractiveImagePreviewAsync(preview.ImagePreview, cts.Token);
-                    ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview);
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.finalize"), 96);
+                    ApplyBinaryMetrics(preview.BinarySummary, preview.ImagePreview, null);
                     PreviewKind = PendingDiffPreviewKind.Image;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("snapshot.preview.image_ready")
+                        : preview.Message;
+                    break;
+                }
+                case PendingDiffPreviewKind.Audio:
+                {
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.audio"), 58);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = preview.AudioPreview;
+                    await LoadAudioPreviewAsync(preview.AudioPreview, cts.Token);
+                    SetLoadingState(Loc.T("snapshot.loading.title"), Loc.T("snapshot.loading.finalize"), 96);
+                    ApplyBinaryMetrics(preview.BinarySummary, null, preview.AudioPreview);
+                    PreviewKind = PendingDiffPreviewKind.Audio;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("snapshot.preview.audio_ready")
                         : preview.Message;
                     break;
                 }
@@ -640,7 +687,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         finally
         {
             if (!cts.IsCancellationRequested)
+            {
                 IsPreviewLoading = false;
+                ClearLoadingState();
+            }
         }
     }
 
@@ -697,6 +747,25 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         RightImageCaption = BuildImageSideCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
     }
 
+    private async Task LoadAudioPreviewAsync(PendingAudioDiffPreviewDto? audioPreview, CancellationToken ct)
+    {
+        if (audioPreview is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.WaveformImagePath) && File.Exists(audioPreview.WaveformImagePath))
+        {
+            AudioWaveformPreview = await Task.Run(() => new Bitmap(audioPreview.WaveformImagePath), ct);
+            if (audioPreview.IsWaveformTempFile)
+                _tempPreviewFiles.Add(audioPreview.WaveformImagePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath) && audioPreview.IsBaselineTempFile)
+            _tempPreviewFiles.Add(audioPreview.BaselineAudioPath);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.CurrentAudioPath) && File.Exists(audioPreview.CurrentAudioPath) && audioPreview.IsCurrentTempFile)
+            _tempPreviewFiles.Add(audioPreview.CurrentAudioPath);
+    }
+
     private async Task ReRenderImageDiffPreviewAsync()
     {
         if (PreviewKind != PendingDiffPreviewKind.Image || _lastImagePreview is null)
@@ -709,7 +778,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 : 80;
             await Task.Delay(delayMs);
             await RenderInteractiveImagePreviewAsync(_lastImagePreview, CancellationToken.None);
-            ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
+            ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview, _lastAudioPreview);
         }
         catch (Exception) when (!(_imageDiffRenderCts?.IsCancellationRequested ?? false))
         {
@@ -793,7 +862,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
     private void ApplyBinaryMetrics(
         PendingBinaryDiffSummaryDto? summary,
-        PendingImageDiffPreviewDto? imagePreview)
+        PendingImageDiffPreviewDto? imagePreview,
+        PendingAudioDiffPreviewDto? audioPreview)
     {
         PreviewMetrics.Clear();
         if (summary is null)
@@ -820,6 +890,49 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 Loc.T("metric.byte_similarity"),
                 $"{summary.ByteSimilarityRatio.Value * 100:F1}%"));
+        }
+
+        if (audioPreview is not null)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.duration"),
+                $"{FormatAudioDuration(audioPreview.BaselineDurationSeconds)} -> {FormatAudioDuration(audioPreview.CurrentDurationSeconds)}"
+                + (audioPreview.HasDurationMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.sample_rate"),
+                $"{FormatSampleRate(audioPreview.BaselineSampleRate)} -> {FormatSampleRate(audioPreview.CurrentSampleRate)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.channels"),
+                $"{FormatChannels(audioPreview.BaselineChannels)} -> {FormatChannels(audioPreview.CurrentChannels)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.peak"),
+                $"{FormatAmplitude(audioPreview.BaselinePeakAmplitude)} -> {FormatAmplitude(audioPreview.CurrentPeakAmplitude)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.rms"),
+                $"{FormatAmplitude(audioPreview.BaselineRmsAmplitude)} -> {FormatAmplitude(audioPreview.CurrentRmsAmplitude)}"));
+
+            if (audioPreview.SignalSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.audio_similarity"),
+                    $"{audioPreview.SignalSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (audioPreview.ChangedTimeRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.changed_timeline"),
+                    $"{audioPreview.ChangedTimeRatio.Value * 100:F1}%"));
+            }
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_segments"),
+                $"{audioPreview.ChangedSegmentCount:N0}"));
+            return;
         }
 
         if (imagePreview is not null)
@@ -863,6 +976,17 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                     Loc.T("metric.changed_regions"),
                     $"{changedRegionCount:N0}"));
             }
+
+            if (imagePreview.IsVectorImage)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.svg_structure"),
+                    $"+{imagePreview.AddedElementCount:N0} / -{imagePreview.RemovedElementCount:N0} / ~{imagePreview.ModifiedElementCount:N0}"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.svg_attributes"),
+                    $"{imagePreview.ChangedAttributeCount:N0}"));
+            }
         }
     }
 
@@ -895,10 +1019,53 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
     }
 
+    private static string FormatAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return Loc.T("common.not_available_short");
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss")
+            : duration.ToString(@"m\:ss");
+    }
+
+    private static string FormatSampleRate(int? sampleRate)
+    {
+        if (!sampleRate.HasValue || sampleRate.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return sampleRate.Value >= 1000
+            ? $"{sampleRate.Value / 1000d:F1} kHz"
+            : $"{sampleRate.Value} Hz";
+    }
+
+    private static string FormatChannels(int? channels)
+    {
+        if (!channels.HasValue || channels.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return channels.Value switch
+        {
+            1 => "mono",
+            2 => "stereo",
+            _ => $"{channels.Value}"
+        };
+    }
+
+    private static string FormatAmplitude(double? amplitude)
+    {
+        if (!amplitude.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(amplitude.Value, 0d, 1d):F3}";
+    }
+
     private void ResetPreview(string message)
     {
         PreviewKind = PendingDiffPreviewKind.None;
         IsPreviewLoading = false;
+        ClearLoadingState();
         PreviewSummary = message;
         PreviewRows.Clear();
         PreviewMetrics.Clear();
@@ -907,6 +1074,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         _currentTextHunks = Array.Empty<TextDiffHunkDto>();
         _lastBinarySummary = null;
         _lastImagePreview = null;
+        _lastAudioPreview = null;
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
         _lastRenderedChangedRegionCount = 0;
@@ -915,12 +1083,16 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void ReleasePreviewResources()
     {
         _imageDiffRenderCts?.Cancel();
+        ClearLoadingState();
         PreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
         PinnedHunkHeader = string.Empty;
         _currentTextLines = Array.Empty<TextDiffLineDto>();
         _currentTextHunks = Array.Empty<TextDiffHunkDto>();
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
+        _lastAudioPreview = null;
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
         _lastRenderedChangedRegionCount = 0;
@@ -928,14 +1100,17 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         var leftImage = LeftImagePreview;
         var rightImage = RightImagePreview;
         var overlayImage = OverlayImagePreview;
+        var audioWaveform = AudioWaveformPreview;
 
         LeftImagePreview = null;
         RightImagePreview = null;
         OverlayImagePreview = null;
+        AudioWaveformPreview = null;
 
         leftImage?.Dispose();
         rightImage?.Dispose();
         overlayImage?.Dispose();
+        audioWaveform?.Dispose();
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
@@ -954,6 +1129,22 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         }
 
         _tempPreviewFiles.Clear();
+    }
+
+    private void SetLoadingState(string title, string detail, double progress, bool indeterminate = false)
+    {
+        LoadingTitle = title;
+        LoadingDetail = detail;
+        LoadingProgressValue = Math.Clamp(progress, 0, 100);
+        IsLoadingProgressIndeterminate = indeterminate;
+    }
+
+    private void ClearLoadingState()
+    {
+        LoadingTitle = string.Empty;
+        LoadingDetail = string.Empty;
+        LoadingProgressValue = 0;
+        IsLoadingProgressIndeterminate = false;
     }
 
     private static IReadOnlyList<SnapshotDiffRowItemViewModel> BuildPreviewRows(

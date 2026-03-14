@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Runtime.Versioning;
 
 namespace Veyra.Infrastructure.Native.Security;
 
+[SupportedOSPlatform("windows")]
 internal sealed class DpapiSecretProtector : ISecretProtector
 {
     private static readonly byte[] Entropy =

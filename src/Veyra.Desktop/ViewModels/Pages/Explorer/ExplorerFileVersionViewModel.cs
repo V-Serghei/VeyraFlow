@@ -52,6 +52,13 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
             ? ContentHashSha256
             : ContentHashSha256[..16] + "...";
 
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(Title));
+        OnPropertyChanged(nameof(FileName));
+        OnPropertyChanged(nameof(SizeDisplay));
+    }
+
     private static string FormatSize(long bytes)
     {
         if (bytes < 1024) return $"{bytes} B";

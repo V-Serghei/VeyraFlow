@@ -1,9 +1,10 @@
 using System;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 
-public sealed class RepositorySnapshotFileChangeViewModel
+public sealed class RepositorySnapshotFileChangeViewModel : ObservableObject
 {
     public long SnapshotId { get; init; }
     public long FileIdentityId { get; init; }
@@ -30,6 +31,12 @@ public sealed class RepositorySnapshotFileChangeViewModel
         "deleted" => $"{FormatBytes(PreviousSizeBytes)}",
         _ => FormatBytes(CurrentSizeBytes)
     };
+
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(ChangeKindLabel));
+        OnPropertyChanged(nameof(SizeDeltaLabel));
+    }
 
     private static string FormatBytes(long bytes)
     {

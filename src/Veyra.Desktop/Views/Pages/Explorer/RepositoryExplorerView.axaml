@@ -466,8 +466,11 @@
                                     </StackPanel>
                                 </Border>
 
-                                <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
-                                <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72" IsVisible="{Binding IsVersionLoading}"/>
+                            <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
+                                <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
+                                    <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72"/>
+                                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                </StackPanel>
                                 <TextBlock Text="{Binding VersionPanelError}"
                                            Foreground="{DynamicResource VeyraDangerBrush}"
                                            TextWrapping="Wrap"
@@ -538,6 +541,16 @@
                                     </Button>
                                 </StackPanel>
 
+                                <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
+                                    <StackPanel Classes="loading-state">
+                                        <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding VersionActionProgressDetail}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"/>
+                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <TextBlock Text="{Binding VersionActionMessage}"
                                            TextWrapping="Wrap"
                                            Opacity="0.9"
@@ -582,6 +595,17 @@
                                             IsEnabled="{Binding CanRunMaintenanceActions}"
                                             Classes="subtle compact"
                                             HorizontalAlignment="Stretch"/>
+
+                                    <Border Classes="metric-card" IsVisible="{Binding IsMaintenanceRunning}">
+                                        <StackPanel Classes="loading-state">
+                                            <TextBlock Text="{Binding MaintenanceProgressTitle}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding MaintenanceProgressDetail}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+                                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -658,10 +682,13 @@
                                         </StackPanel>
                                     </Border>
 
-                                    <TextBlock Grid.Row="2"
-                                               Text="{loc:Tr explorer.loading_commits}"
-                                               Classes="muted"
-                                               IsVisible="{Binding IsSnapshotHistoryLoading}"/>
+                                    <StackPanel Grid.Row="2"
+                                                Spacing="6"
+                                                IsVisible="{Binding IsSnapshotHistoryLoading}">
+                                        <TextBlock Text="{loc:Tr explorer.loading_commits}"
+                                                   Classes="muted"/>
+                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                    </StackPanel>
 
                                     <Grid Grid.Row="3">
                                         <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -762,6 +789,9 @@
                                         <TextBlock Text="{loc:Tr explorer.loading_changed_files}"
                                                    Classes="muted"
                                                    IsVisible="{Binding IsSnapshotFilesLoading}"/>
+                                        <ProgressBar Classes="loading-progress"
+                                                     IsIndeterminate="True"
+                                                     IsVisible="{Binding IsSnapshotFilesLoading}"/>
                                     </StackPanel>
 
                                     <Grid Grid.Row="3">
@@ -849,7 +879,10 @@
                                                                 IsVisible="{Binding CanToggleFileVersionsView}"/>
                                                     </Grid>
 
-                                                    <TextBlock Text="{loc:Tr explorer.loading_versions}" Classes="muted" IsVisible="{Binding IsVersionLoading}"/>
+                                                    <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
+                                                        <TextBlock Text="{loc:Tr explorer.loading_versions}" Classes="muted"/>
+                                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                                    </StackPanel>
                                                     <TextBlock Text="{Binding VersionPanelError}"
                                                                Foreground="{DynamicResource VeyraDangerBrush}"
                                                                TextWrapping="Wrap"
@@ -981,6 +1014,16 @@
                                                 </Button>
                                             </StackPanel>
 
+                                            <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
+                                                <StackPanel Classes="loading-state">
+                                                    <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding VersionActionProgressDetail}"
+                                                               Classes="muted"
+                                                               TextWrapping="Wrap"/>
+                                                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                                </StackPanel>
+                                            </Border>
+
                                             <TextBlock Text="{Binding VersionActionMessage}"
                                                        TextWrapping="Wrap"
                                                        Opacity="0.9"
@@ -1042,10 +1085,13 @@
                         </Grid>
 
                         <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="10">
-                            <TextBlock Grid.Row="0"
-                                       Text="{loc:Tr compare.building_preview}"
-                                       Classes="muted"
-                                       IsVisible="{Binding IsDiffPreviewLoading}"/>
+                            <StackPanel Grid.Row="0"
+                                        Spacing="6"
+                                        IsVisible="{Binding IsDiffPreviewLoading}">
+                                <TextBlock Text="{loc:Tr compare.building_preview}"
+                                           Classes="muted"/>
+                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                            </StackPanel>
 
                             <Border Grid.Row="1"
                                     Classes="diff-surface"
@@ -1145,6 +1191,22 @@
                             </Border>
                         </Grid>
                     </Grid>
+                </Border>
+            </Border>
+
+            <Border Classes="loading-overlay"
+                    Grid.RowSpan="3"
+                    IsVisible="{Binding IsLoading}">
+                <Border Classes="loading-card"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MinWidth="320"
+                        MaxWidth="420">
+                    <StackPanel Classes="loading-state">
+                        <TextBlock Text="{loc:Tr explorer.loading_title}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr explorer.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                    </StackPanel>
                 </Border>
             </Border>
         </Grid>

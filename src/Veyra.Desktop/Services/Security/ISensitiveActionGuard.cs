@@ -11,4 +11,10 @@ public interface ISensitiveActionGuard
         string actionTitle,
         string actionDescription,
         CancellationToken ct = default);
+
+    Task<SensitiveActionGuardResult> AuthorizeIfRequiredLocalizedAsync(
+        string actionTitleKey,
+        string actionDescriptionKey,
+        object[]? actionDescriptionArgs = null,
+        CancellationToken ct = default);
 }
