@@ -1,4 +1,6 @@
+using System;
 using System.ComponentModel;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -7,6 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Controls.Primitives;
+using Veyra.Desktop.Localization;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.ViewModels.Windows;
 
@@ -16,7 +19,7 @@ public partial class FileVersionCompareWindow : Window
 {
     private const double CompactWidth = 1160;
     private const double NarrowWidth = 980;
-    private const double MinOverlayZoomPercent = 10;
+    private const double MinOverlayZoomPercent = 1;
     private const double MaxOverlayZoomPercent = 500;
     private bool _isSyncingDiffScroll;
     private bool _suppressOverlayZoomEvents;
@@ -28,15 +31,31 @@ public partial class FileVersionCompareWindow : Window
     private ScrollViewer? _leftWordDiffScrollViewer;
     private ScrollViewer? _rightWordDiffScrollViewer;
     private ScrollViewer? _overlayImageScrollViewer;
+    private Grid? _overlayImageViewportHost;
+    private Grid? _overlayImageHost;
     private Image? _overlayImageControl;
+    private Image? _overlaySplitBaseImageControl;
+    private Border? _overlaySplitRevealHost;
+    private Image? _overlaySplitRevealImageControl;
+    private Border? _overlaySplitDivider;
+    private Image? _overlayPeekBeforeImageControl;
     private Slider? _overlayZoomSlider;
     private TextBlock? _overlayZoomValueText;
     private FileVersionCompareWindowViewModel? _viewModel;
+    private bool _isDraggingOverlaySplit;
+    private bool _isShowingOverlayPeek;
+    private bool _isCleaningUp;
+    private double _overlayDisplayedSplitPercent = 50;
 
     public FileVersionCompareWindow()
     {
         InitializeComponent();
         SizeChanged += OnSizeChanged;
+        AddHandler(
+            InputElement.PointerWheelChangedEvent,
+            OnOverlayImagePointerWheelChanged,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
 
         Opened += (_, _) =>
         {
@@ -67,9 +86,25 @@ public partial class FileVersionCompareWindow : Window
             _leftWordDiffScrollViewer = this.FindControl<ScrollViewer>("LeftWordDiffScrollViewer");
             _rightWordDiffScrollViewer = this.FindControl<ScrollViewer>("RightWordDiffScrollViewer");
             _overlayImageScrollViewer = this.FindControl<ScrollViewer>("OverlayImageScrollViewer");
+            _overlayImageViewportHost = this.FindControl<Grid>("OverlayImageViewportHost");
+            _overlayImageHost = this.FindControl<Grid>("OverlayImageHost");
             _overlayImageControl = this.FindControl<Image>("OverlayImageControl");
+            _overlaySplitBaseImageControl = this.FindControl<Image>("OverlaySplitBaseImageControl");
+            _overlaySplitRevealHost = this.FindControl<Border>("OverlaySplitRevealHost");
+            _overlaySplitRevealImageControl = this.FindControl<Image>("OverlaySplitRevealImageControl");
+            _overlaySplitDivider = this.FindControl<Border>("OverlaySplitDivider");
+            _overlayPeekBeforeImageControl = this.FindControl<Image>("OverlayPeekBeforeImageControl");
             _overlayZoomSlider = this.FindControl<Slider>("OverlayZoomSlider");
             _overlayZoomValueText = this.FindControl<TextBlock>("OverlayZoomValueText");
+            RegisterOverlayWheelHandler(_overlayImageScrollViewer);
+            RegisterOverlayWheelHandler(_overlayImageViewportHost);
+            RegisterOverlayWheelHandler(_overlayImageHost);
+            RegisterOverlayWheelHandler(_overlayImageControl);
+            RegisterOverlayWheelHandler(_overlaySplitBaseImageControl);
+            RegisterOverlayWheelHandler(_overlaySplitRevealHost);
+            RegisterOverlayWheelHandler(_overlaySplitRevealImageControl);
+            RegisterOverlayWheelHandler(_overlaySplitDivider);
+            RegisterOverlayWheelHandler(_overlayPeekBeforeImageControl);
 
             if (DataContext is FileVersionCompareWindowViewModel vm)
             {
@@ -79,20 +114,48 @@ public partial class FileVersionCompareWindow : Window
             }
 
             UpdateOverlayZoomUi();
+            UpdateOverlayPresentation();
             QueueFitOverlayImageToView();
         };
 
         Closed += (_, _) =>
         {
-            if (DataContext is FileVersionCompareWindowViewModel vm)
+            _isCleaningUp = true;
+            _overlayZoomInitialized = false;
+            _overlayZoomUserAdjusted = false;
+            _isDraggingOverlaySplit = false;
+            _isShowingOverlayPeek = false;
+
+            var vm = GetViewModel();
+            if (vm is not null)
+                vm.PropertyChanged -= OnViewModelPropertyChanged;
+
+            if (vm is not null)
             {
                 vm.RequestClose -= OnRequestClose;
                 vm.RequestSaveImageDiffPreview -= OnRequestSaveImageDiffPreview;
-                vm.CleanupPreviewResources();
             }
 
-            if (_viewModel is not null)
-                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel = null;
+            DataContext = null;
+
+            vm?.CleanupPreviewResources();
+
+            _leftDiffScrollViewer = null;
+            _rightDiffScrollViewer = null;
+            _leftWordDiffScrollViewer = null;
+            _rightWordDiffScrollViewer = null;
+            _overlayImageScrollViewer = null;
+            _overlayImageViewportHost = null;
+            _overlayImageHost = null;
+            _overlayImageControl = null;
+            _overlaySplitBaseImageControl = null;
+            _overlaySplitRevealHost = null;
+            _overlaySplitRevealImageControl = null;
+            _overlaySplitDivider = null;
+            _overlayPeekBeforeImageControl = null;
+            _overlayZoomSlider = null;
+            _overlayZoomValueText = null;
         };
     }
 
@@ -128,7 +191,7 @@ public partial class FileVersionCompareWindow : Window
 
     private async void OnRequestSaveImageDiffPreview()
     {
-        if (DataContext is not FileVersionCompareWindowViewModel vm)
+        if (GetViewModel() is not FileVersionCompareWindowViewModel vm)
             return;
 
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -151,6 +214,30 @@ public partial class FileVersionCompareWindow : Window
             return;
 
         await vm.SaveCurrentImageDiffPreviewAsync(outputPath);
+    }
+
+    private void OnOpenDetachedImagePreviewClicked(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not FileVersionCompareWindowViewModel vm)
+            return;
+
+        var pngBytes = vm.GetCurrentImageDiffPreviewPngBytes();
+        if (pngBytes.Length == 0)
+            return;
+
+        var previewTitle = string.IsNullOrWhiteSpace(vm.OverlayImageCaption)
+            ? Loc.T("compare.window_title")
+            : vm.OverlayImageCaption;
+
+        var detachedWindow = new DetachedImagePreviewWindow(
+            pngBytes,
+            previewTitle,
+            Owner as Window ?? this)
+        {
+            Topmost = true
+        };
+
+        detachedWindow.Show();
     }
 
     private void OnVersionItemPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -243,9 +330,144 @@ public partial class FileVersionCompareWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(FileVersionCompareWindowViewModel.OverlayImagePreview))
+        if (_isCleaningUp || _viewModel is null || !ReferenceEquals(sender, _viewModel))
             return;
 
+        switch (e.PropertyName)
+        {
+            case nameof(FileVersionCompareWindowViewModel.OverlayImagePreview):
+            case nameof(FileVersionCompareWindowViewModel.LeftImagePreview):
+            case nameof(FileVersionCompareWindowViewModel.RightImagePreview):
+            case nameof(FileVersionCompareWindowViewModel.SelectedImageDiffMode):
+                UpdateOverlayPresentation();
+                if (!HasValidOverlayBitmap())
+                    return;
+
+                if (!_overlayZoomInitialized || !_overlayZoomUserAdjusted)
+                {
+                    _overlayZoomUserAdjusted = false;
+                    QueueFitOverlayImageToView();
+                    return;
+                }
+
+                ApplyOverlayZoom(_overlayZoomPercent, preserveViewport: false);
+                return;
+
+            case nameof(FileVersionCompareWindowViewModel.ShowImageDiffDetails):
+            case nameof(FileVersionCompareWindowViewModel.ShowImageDiffSettings):
+            case nameof(FileVersionCompareWindowViewModel.ShowSourceImagePanels):
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_isCleaningUp || !HasValidOverlayBitmap())
+                        return;
+
+                    if (!_overlayZoomUserAdjusted)
+                    {
+                        QueueFitOverlayImageToView();
+                        return;
+                    }
+
+                    ApplyOverlayZoom(_overlayZoomPercent, preserveViewport: false);
+                }, DispatcherPriority.Background);
+                return;
+
+            case nameof(FileVersionCompareWindowViewModel.ComparisonSplitPercent):
+                _overlayDisplayedSplitPercent = _viewModel.ComparisonSplitPercent;
+                UpdateOverlaySplitVisual(_overlayDisplayedSplitPercent);
+                return;
+        }
+    }
+
+    private void RegisterOverlayWheelHandler(InputElement? element)
+    {
+        if (element is null)
+            return;
+
+        element.AddHandler(
+            InputElement.PointerWheelChangedEvent,
+            OnOverlayImagePointerWheelChanged,
+            RoutingStrategies.Tunnel | RoutingStrategies.Bubble,
+            handledEventsToo: true);
+    }
+
+    private Bitmap? GetOverlayReferenceBitmap()
+    {
+        if (_isCleaningUp)
+            return null;
+
+        if (GetViewModel() is not FileVersionCompareWindowViewModel vm)
+            return null;
+
+        if (vm.IsSplitImageDiffMode)
+            return vm.LeftImagePreview ?? vm.RightImagePreview ?? vm.OverlayImagePreview;
+
+        return vm.OverlayImagePreview ?? vm.RightImagePreview ?? vm.LeftImagePreview;
+    }
+
+    private void UpdateOverlayPresentation()
+    {
+        if (_isCleaningUp || GetViewModel() is not FileVersionCompareWindowViewModel vm)
+            return;
+
+        var showSplitViewer = vm.IsSplitImageDiffMode
+                              && vm.LeftImagePreview is not null
+                              && vm.RightImagePreview is not null;
+
+        if (_overlayImageControl is not null)
+            _overlayImageControl.IsVisible = !showSplitViewer && !_isShowingOverlayPeek && vm.OverlayImagePreview is not null;
+
+        if (_overlaySplitBaseImageControl is not null)
+            _overlaySplitBaseImageControl.IsVisible = showSplitViewer && !_isShowingOverlayPeek;
+
+        if (_overlaySplitRevealHost is not null)
+            _overlaySplitRevealHost.IsVisible = showSplitViewer && !_isShowingOverlayPeek;
+
+        if (_overlaySplitDivider is not null)
+            _overlaySplitDivider.IsVisible = showSplitViewer && !_isShowingOverlayPeek;
+
+        if (_isShowingOverlayPeek)
+            SetOverlayPeekVisible(true);
+        else
+        {
+            _overlayDisplayedSplitPercent = vm.ComparisonSplitPercent;
+            UpdateOverlaySplitVisual(_overlayDisplayedSplitPercent);
+        }
+    }
+
+    private void UpdateOverlaySplitVisual(double? splitPercent = null)
+    {
+        if (_isCleaningUp
+            || GetViewModel() is not FileVersionCompareWindowViewModel vm
+            || _overlayImageHost is null
+            || _overlaySplitRevealHost is null
+            || _overlaySplitDivider is null
+            || _overlaySplitBaseImageControl is null
+            || !vm.IsSplitImageDiffMode)
+        {
+            return;
+        }
+
+        var imageWidth = _overlayImageHost.Width > 0 ? _overlayImageHost.Width : _overlayImageHost.Bounds.Width;
+        var imageHeight = _overlayImageHost.Height > 0 ? _overlayImageHost.Height : _overlayImageHost.Bounds.Height;
+        if (imageWidth <= 1 || imageHeight <= 1)
+            return;
+
+        var effectiveSplitPercent = splitPercent ?? vm.ComparisonSplitPercent;
+        var splitWidth = System.Math.Clamp(imageWidth * (effectiveSplitPercent / 100d), 0d, imageWidth);
+        _overlaySplitRevealHost.Width = splitWidth;
+        _overlaySplitRevealHost.Height = imageHeight;
+        _overlaySplitDivider.Height = imageHeight;
+        _overlaySplitDivider.Margin = new Thickness(System.Math.Max(0d, splitWidth - (_overlaySplitDivider.Width / 2d)), 0, 0, 0);
+    }
+
+    private void RegisterOverlayImageStateAfterZoom()
+    {
+        UpdateOverlayZoomUi();
+        UpdateOverlaySplitVisual();
+    }
+
+    private void OnViewModelPropertyChanged_Legacy()
+    {
         if (!_overlayZoomInitialized || !_overlayZoomUserAdjusted)
         {
             _overlayZoomUserAdjusted = false;
@@ -267,7 +489,13 @@ public partial class FileVersionCompareWindow : Window
 
     private void OnOverlayImagePointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
-        if ((e.KeyModifiers & KeyModifiers.Control) == 0)
+        if (e.Handled)
+            return;
+
+        if (_overlayImageScrollViewer is null
+            || (!e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+            || !HasValidOverlayBitmap()
+            || !IsOverlayWheelTarget(e.Source))
             return;
 
         e.Handled = true;
@@ -275,6 +503,27 @@ public partial class FileVersionCompareWindow : Window
         var newPercent = _overlayZoomPercent * factor;
         _overlayZoomUserAdjusted = true;
         ApplyOverlayZoom(newPercent, preserveViewport: true, focusPoint: e.GetPosition(_overlayImageScrollViewer));
+    }
+
+    private bool IsOverlayWheelTarget(object? source)
+    {
+        for (var current = source as StyledElement; current is not null; current = current.Parent as StyledElement)
+        {
+            if (ReferenceEquals(current, _overlayImageScrollViewer)
+                || ReferenceEquals(current, _overlayImageViewportHost)
+                || ReferenceEquals(current, _overlayImageHost)
+                || ReferenceEquals(current, _overlayImageControl)
+                || ReferenceEquals(current, _overlaySplitBaseImageControl)
+                || ReferenceEquals(current, _overlaySplitRevealHost)
+                || ReferenceEquals(current, _overlaySplitRevealImageControl)
+                || ReferenceEquals(current, _overlaySplitDivider)
+                || ReferenceEquals(current, _overlayPeekBeforeImageControl))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnOverlayImageViewportSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -289,14 +538,113 @@ public partial class FileVersionCompareWindow : Window
         QueueFitOverlayImageToView();
     }
 
+    private void OnResetOverlayImageToHundredClicked(object? sender, RoutedEventArgs e)
+    {
+        _overlayZoomUserAdjusted = true;
+        ApplyOverlayZoom(100d, preserveViewport: false);
+    }
+
+    private void OnZoomOutOverlayImageClicked(object? sender, RoutedEventArgs e)
+    {
+        _overlayZoomUserAdjusted = true;
+        ApplyOverlayZoom(_overlayZoomPercent / 1.1d, preserveViewport: true);
+    }
+
+    private void OnZoomInOverlayImageClicked(object? sender, RoutedEventArgs e)
+    {
+        _overlayZoomUserAdjusted = true;
+        ApplyOverlayZoom(_overlayZoomPercent * 1.1d, preserveViewport: true);
+    }
+
+    private void OnOverlayImagePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_overlayImageScrollViewer is null || GetViewModel() is not FileVersionCompareWindowViewModel vm)
+            return;
+
+        var point = e.GetCurrentPoint(_overlayImageScrollViewer);
+
+        if (point.Properties.IsRightButtonPressed && vm.LeftImagePreview is not null)
+        {
+            _isShowingOverlayPeek = true;
+            SetOverlayPeekVisible(true);
+            e.Pointer.Capture(_overlayImageScrollViewer);
+            e.Handled = true;
+            return;
+        }
+
+        if (!point.Properties.IsLeftButtonPressed || !vm.IsSplitImageDiffMode || !vm.HasAnyImagePreview)
+            return;
+
+        _isDraggingOverlaySplit = true;
+        _overlayZoomUserAdjusted = true;
+        UpdateOverlaySplitFromPointer(point.Position, commitToViewModel: false);
+        e.Pointer.Capture(_overlayImageScrollViewer);
+        e.Handled = true;
+    }
+
+    private void OnOverlayImagePointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_isDraggingOverlaySplit || _overlayImageScrollViewer is null)
+            return;
+
+        UpdateOverlaySplitFromPointer(e.GetPosition(_overlayImageScrollViewer), commitToViewModel: false);
+        e.Handled = true;
+    }
+
+    private void OnOverlayImagePointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_overlayImageScrollViewer is null)
+            return;
+
+        var released = false;
+
+        if (_isDraggingOverlaySplit)
+        {
+            _isDraggingOverlaySplit = false;
+            UpdateOverlaySplitFromPointer(e.GetPosition(_overlayImageScrollViewer), commitToViewModel: true);
+            released = true;
+        }
+
+        if (_isShowingOverlayPeek)
+        {
+            _isShowingOverlayPeek = false;
+            SetOverlayPeekVisible(false);
+            released = true;
+        }
+
+        if (released)
+        {
+            e.Pointer.Capture(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnOverlayImagePointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        _isDraggingOverlaySplit = false;
+
+        if (!_isShowingOverlayPeek)
+            return;
+
+        _isShowingOverlayPeek = false;
+        SetOverlayPeekVisible(false);
+    }
+
     private void QueueFitOverlayImageToView()
     {
+        if (_isCleaningUp)
+            return;
+
         Dispatcher.UIThread.Post(FitOverlayImageToView, DispatcherPriority.Background);
     }
 
     private void FitOverlayImageToView()
     {
-        if (_overlayImageScrollViewer is null || _overlayImageControl?.Source is not Bitmap bitmap)
+        if (_isCleaningUp)
+            return;
+
+        var bitmap = GetOverlayReferenceBitmap();
+        if (_overlayImageScrollViewer is null || !TryGetBitmapPixelSize(bitmap, out var bitmapSize))
             return;
 
         var viewport = _overlayImageScrollViewer.Viewport;
@@ -305,54 +653,110 @@ public partial class FileVersionCompareWindow : Window
         if (availableWidth <= 1 || availableHeight <= 1)
             return;
 
-        var bitmapWidth = bitmap.PixelSize.Width;
-        var bitmapHeight = bitmap.PixelSize.Height;
+        var bitmapWidth = bitmapSize.Width;
+        var bitmapHeight = bitmapSize.Height;
         if (bitmapWidth <= 0 || bitmapHeight <= 0)
             return;
 
         var scale = System.Math.Min(availableWidth / bitmapWidth, availableHeight / bitmapHeight);
         var targetPercent = System.Math.Clamp(scale * 100d, MinOverlayZoomPercent, MaxOverlayZoomPercent);
         ApplyOverlayZoom(targetPercent, preserveViewport: false);
-
-        _overlayImageScrollViewer.Offset = new Vector(0, 0);
         _overlayZoomInitialized = true;
     }
 
     private void ApplyOverlayZoom(double percent, bool preserveViewport, Point? focusPoint = null)
     {
-        if (_overlayImageScrollViewer is null || _overlayImageControl?.Source is not Bitmap bitmap)
+        if (_isCleaningUp)
+            return;
+
+        var bitmap = GetOverlayReferenceBitmap();
+        if (_overlayImageScrollViewer is null
+            || _overlayImageHost is null
+            || _overlayImageViewportHost is null
+            || !TryGetBitmapPixelSize(bitmap, out var bitmapSize))
             return;
 
         var clampedPercent = System.Math.Clamp(percent, MinOverlayZoomPercent, MaxOverlayZoomPercent);
-        var oldWidth = _overlayImageControl.Width > 0 ? _overlayImageControl.Width : bitmap.PixelSize.Width;
-        var oldHeight = _overlayImageControl.Height > 0 ? _overlayImageControl.Height : bitmap.PixelSize.Height;
+        var zoomingOut = clampedPercent < (_overlayZoomPercent - 0.01d);
+        var shouldPreserveViewport = preserveViewport && !zoomingOut;
+        var oldWidth = _overlayImageHost?.Width > 0 ? _overlayImageHost.Width : bitmapSize.Width;
+        var oldHeight = _overlayImageHost?.Height > 0 ? _overlayImageHost.Height : bitmapSize.Height;
         var oldOffset = _overlayImageScrollViewer.Offset;
         var viewport = _overlayImageScrollViewer.Viewport;
         var focus = focusPoint ?? new Point(viewport.Width / 2d, viewport.Height / 2d);
 
-        var relativeX = oldWidth > 0 ? (oldOffset.X + focus.X) / oldWidth : 0d;
-        var relativeY = oldHeight > 0 ? (oldOffset.Y + focus.Y) / oldHeight : 0d;
+        var relativeX = oldWidth > 0 ? System.Math.Clamp((oldOffset.X + focus.X) / oldWidth, 0d, 1d) : 0d;
+        var relativeY = oldHeight > 0 ? System.Math.Clamp((oldOffset.Y + focus.Y) / oldHeight, 0d, 1d) : 0d;
 
-        var newWidth = System.Math.Max(1d, bitmap.PixelSize.Width * clampedPercent / 100d);
-        var newHeight = System.Math.Max(1d, bitmap.PixelSize.Height * clampedPercent / 100d);
+        var newWidth = System.Math.Max(1d, bitmapSize.Width * clampedPercent / 100d);
+        var newHeight = System.Math.Max(1d, bitmapSize.Height * clampedPercent / 100d);
 
-        _overlayImageControl.Width = newWidth;
-        _overlayImageControl.Height = newHeight;
+        if (_overlayImageControl is not null)
+        {
+            _overlayImageControl.Width = newWidth;
+            _overlayImageControl.Height = newHeight;
+        }
+
+        if (_overlaySplitBaseImageControl is not null)
+        {
+            _overlaySplitBaseImageControl.Width = newWidth;
+            _overlaySplitBaseImageControl.Height = newHeight;
+        }
+
+        if (_overlaySplitRevealImageControl is not null)
+        {
+            _overlaySplitRevealImageControl.Width = newWidth;
+            _overlaySplitRevealImageControl.Height = newHeight;
+        }
+
+        if (_overlayPeekBeforeImageControl is not null)
+        {
+            _overlayPeekBeforeImageControl.Width = newWidth;
+            _overlayPeekBeforeImageControl.Height = newHeight;
+        }
+        if (_overlayImageHost is not null)
+        {
+            _overlayImageHost.Width = newWidth;
+            _overlayImageHost.Height = newHeight;
+            _overlayImageHost.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            _overlayImageHost.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        }
+
+        if (_overlayImageViewportHost is not null)
+        {
+            _overlayImageViewportHost.Width = newWidth;
+            _overlayImageViewportHost.Height = newHeight;
+            _overlayImageViewportHost.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left;
+            _overlayImageViewportHost.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        }
+
         _overlayZoomPercent = clampedPercent;
         _overlayZoomInitialized = true;
-        UpdateOverlayZoomUi();
-
-        if (!preserveViewport)
-            return;
+        RegisterOverlayImageStateAfterZoom();
 
         Dispatcher.UIThread.Post(() =>
         {
-            if (_overlayImageScrollViewer is null)
+            if (_isCleaningUp || _overlayImageScrollViewer is null)
                 return;
 
             var currentViewport = _overlayImageScrollViewer.Viewport;
-            var targetX = System.Math.Max(0d, System.Math.Min(newWidth - currentViewport.Width, (newWidth * relativeX) - focus.X));
-            var targetY = System.Math.Max(0d, System.Math.Min(newHeight - currentViewport.Height, (newHeight * relativeY) - focus.Y));
+            var currentViewportWidth = currentViewport.Width > 1 ? currentViewport.Width : _overlayImageScrollViewer.Bounds.Width;
+            var currentViewportHeight = currentViewport.Height > 1 ? currentViewport.Height : _overlayImageScrollViewer.Bounds.Height;
+            var maxOffsetX = System.Math.Max(0d, newWidth - currentViewportWidth);
+            var maxOffsetY = System.Math.Max(0d, newHeight - currentViewportHeight);
+
+            if (!shouldPreserveViewport)
+            {
+                _overlayImageScrollViewer.Offset = new Vector(0d, 0d);
+                return;
+            }
+
+            var targetX = maxOffsetX <= 0d || newWidth <= currentViewportWidth + 0.5d
+                ? 0d
+                : System.Math.Clamp((newWidth * relativeX) - focus.X, 0d, maxOffsetX);
+            var targetY = maxOffsetY <= 0d || newHeight <= currentViewportHeight + 0.5d
+                ? 0d
+                : System.Math.Clamp((newHeight * relativeY) - focus.Y, 0d, maxOffsetY);
             _overlayImageScrollViewer.Offset = new Vector(targetX, targetY);
         }, DispatcherPriority.Background);
     }
@@ -374,5 +778,83 @@ public partial class FileVersionCompareWindow : Window
 
         if (_overlayZoomValueText is not null)
             _overlayZoomValueText.Text = $"{System.Math.Round(_overlayZoomPercent):0}%";
+    }
+
+    private void UpdateOverlaySplitFromPointer(Point pointerPosition, bool commitToViewModel)
+    {
+        if (_overlayImageScrollViewer is null
+            || _overlayImageViewportHost is null
+            || _overlayImageHost is null
+            || GetViewModel() is not FileVersionCompareWindowViewModel vm
+            || !vm.IsSplitImageDiffMode)
+        {
+            return;
+        }
+
+        var imageWidth = _overlayImageHost.Bounds.Width > 1
+            ? _overlayImageHost.Bounds.Width
+            : (_overlayImageHost.Width > 1 ? _overlayImageHost.Width : 0d);
+        if (imageWidth <= 1)
+            return;
+
+        var canvasWidth = _overlayImageViewportHost.Bounds.Width > 1
+            ? _overlayImageViewportHost.Bounds.Width
+            : (_overlayImageViewportHost.Width > 1 ? _overlayImageViewportHost.Width : imageWidth);
+        var contentX = _overlayImageScrollViewer.Offset.X + pointerPosition.X;
+        var nextPercent = System.Math.Clamp((contentX / imageWidth) * 100d, 0d, 100d);
+
+        _overlayDisplayedSplitPercent = nextPercent;
+        UpdateOverlaySplitVisual(_overlayDisplayedSplitPercent);
+
+        if (!commitToViewModel || System.Math.Abs(vm.ComparisonSplitPercent - nextPercent) < 0.25d)
+            return;
+
+        vm.ComparisonSplitPercent = nextPercent;
+    }
+
+    private bool HasValidOverlayBitmap()
+        => TryGetBitmapPixelSize(GetOverlayReferenceBitmap(), out _);
+
+    private FileVersionCompareWindowViewModel? GetViewModel()
+        => _viewModel ?? DataContext as FileVersionCompareWindowViewModel;
+
+    private void SetOverlayPeekVisible(bool visible)
+    {
+        if (_overlayPeekBeforeImageControl is null)
+            return;
+
+        _overlayPeekBeforeImageControl.IsVisible = visible;
+
+        if (visible)
+        {
+            if (_overlayImageControl is not null)
+                _overlayImageControl.IsVisible = false;
+            if (_overlaySplitBaseImageControl is not null)
+                _overlaySplitBaseImageControl.IsVisible = false;
+            if (_overlaySplitRevealHost is not null)
+                _overlaySplitRevealHost.IsVisible = false;
+            if (_overlaySplitDivider is not null)
+                _overlaySplitDivider.IsVisible = false;
+            return;
+        }
+
+        UpdateOverlayPresentation();
+    }
+
+    private static bool TryGetBitmapPixelSize(Bitmap? bitmap, out PixelSize pixelSize)
+    {
+        pixelSize = default;
+        if (bitmap is null)
+            return false;
+
+        try
+        {
+            pixelSize = bitmap.PixelSize;
+            return pixelSize.Width > 0 && pixelSize.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

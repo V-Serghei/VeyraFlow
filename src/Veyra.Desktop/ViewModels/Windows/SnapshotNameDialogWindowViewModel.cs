@@ -33,6 +33,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private IReadOnlyList<TextDiffHunkDto> _currentTextHunks = Array.Empty<TextDiffHunkDto>();
     private PendingBinaryDiffSummaryDto? _lastBinarySummary;
     private PendingImageDiffPreviewDto? _lastImagePreview;
+    private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
     private int _lastRenderedChangedPixelCount;
     private double? _lastRenderedChangedPixelRatio;
     private int _lastRenderedChangedRegionCount;
@@ -112,11 +113,15 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
-    private bool _showSourceImagePanels = true;
+    private bool _showSourceImagePanels;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageDiffSettingsToggleLabel))]
     private bool _showImageDiffSettings;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffDetailsToggleLabel))]
+    private bool _showImageDiffDetails;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
@@ -182,10 +187,13 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public string ImageDiffCompactSummary => (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
         ? Loc.F("compare.image_quick_summary_split", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel, SplitPositionLabel)
         : Loc.F("compare.image_quick_summary", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel);
-    public string ImageDiffCompactStateText => $"{ImageRegionBoxesLabel} · {SourceImagePanelsLabel}";
+    public string ImageDiffCompactStateText => $"{ImageRegionBoxesLabel} | {SourceImagePanelsLabel}";
     public string ImageDiffSettingsToggleLabel => ShowImageDiffSettings
         ? Loc.T("compare.hide_diff_settings")
         : Loc.T("compare.show_diff_settings");
+    public string ImageDiffDetailsToggleLabel => ShowImageDiffDetails
+        ? Loc.T("compare.hide_details")
+        : Loc.T("compare.show_details");
     public string SplitPositionLabel => $"{Math.Round(ComparisonSplitPercent):0}%";
     public string ImageRegionBoxesLabel => ShowImageDiffRegionBoxes
         ? Loc.T("compare.image_regions.on")
@@ -258,6 +266,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ImageDiffCompactSummary));
         OnPropertyChanged(nameof(ImageDiffCompactStateText));
         OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
+        OnPropertyChanged(nameof(ImageDiffDetailsToggleLabel));
         RefreshImageDiffModes();
 
         var changedFiles = ChangedFiles.ToList();
@@ -313,9 +322,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     {
         if (_suspendImageDiffRerender)
             return;
-
-        if (IsSplitImageDiffMode)
-            _ = ReRenderImageDiffPreviewAsync();
     }
 
     partial void OnSelectedImageDiffModeChanged(ImageDiffModeOptionViewModel? value)
@@ -368,7 +374,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void Cancel()
     {
         _previewCts?.Cancel();
-        ReleasePreviewResources();
         RequestClose?.Invoke(false);
     }
 
@@ -396,7 +401,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         SnapshotName = trimmed;
         ErrorMessage = null;
-        ReleasePreviewResources();
         RequestClose?.Invoke(true);
     }
 
@@ -418,10 +422,30 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         ShowSourceImagePanels = !ShowSourceImagePanels;
     }
 
+    public byte[] GetCurrentImageDiffPreviewPngBytes()
+        => _lastRenderedOverlayPngBytes.Length == 0
+            ? Array.Empty<byte>()
+            : _lastRenderedOverlayPngBytes.ToArray();
+
+    public async Task RefreshInteractiveImageDiffPreviewAsync(CancellationToken ct = default)
+    {
+        if (!IsImagePreview || _lastImagePreview is null)
+            return;
+
+        await RenderInteractiveImagePreviewAsync(_lastImagePreview, ct);
+        ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
+    }
+
     [RelayCommand]
     private void ToggleShowImageDiffSettings()
     {
         ShowImageDiffSettings = !ShowImageDiffSettings;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffDetails()
+    {
+        ShowImageDiffDetails = !ShowImageDiffDetails;
     }
 
     [RelayCommand]
@@ -434,7 +458,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             ImageDiffSensitivity = 72;
             ComparisonSplitPercent = 50;
             ShowImageDiffRegionBoxes = true;
-            ShowSourceImagePanels = true;
+            ShowSourceImagePanels = false;
+            ShowImageDiffDetails = false;
         }
         finally
         {
@@ -662,11 +687,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         }
 
         if (!string.IsNullOrWhiteSpace(imagePreview.OverlayImagePath)
-            && File.Exists(imagePreview.OverlayImagePath))
+            && File.Exists(imagePreview.OverlayImagePath)
+            && imagePreview.IsOverlayTempFile)
         {
-            OverlayImagePreview = await Task.Run(() => new Bitmap(imagePreview.OverlayImagePath), ct);
-            if (imagePreview.IsOverlayTempFile)
-                _tempPreviewFiles.Add(imagePreview.OverlayImagePath);
+            _tempPreviewFiles.Add(imagePreview.OverlayImagePath);
         }
 
         LeftImageCaption = BuildImageSideCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
@@ -680,7 +704,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         try
         {
-            await Task.Delay(120);
+            var delayMs = (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
+                ? 18
+                : 80;
+            await Task.Delay(delayMs);
             await RenderInteractiveImagePreviewAsync(_lastImagePreview, CancellationToken.None);
             ApplyBinaryMetrics(_lastBinarySummary, _lastImagePreview);
         }
@@ -898,12 +925,17 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         _lastRenderedChangedPixelRatio = null;
         _lastRenderedChangedRegionCount = 0;
 
-        LeftImagePreview?.Dispose();
-        RightImagePreview?.Dispose();
-        OverlayImagePreview?.Dispose();
+        var leftImage = LeftImagePreview;
+        var rightImage = RightImagePreview;
+        var overlayImage = OverlayImagePreview;
+
         LeftImagePreview = null;
         RightImagePreview = null;
         OverlayImagePreview = null;
+
+        leftImage?.Dispose();
+        rightImage?.Dispose();
+        overlayImage?.Dispose();
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");

@@ -33,7 +33,7 @@ internal sealed record InteractiveImageDiffRenderResult(
 internal static class InteractiveImageDiffRenderer
 {
     private const int MaxPixels = 24_000_000;
-    private const int MinRegionPixels = 12;
+    private const int MinRegionPixels = 1;
 
     public static async Task<InteractiveImageDiffRenderResult?> TryRenderAsync(
         string baselinePath,
@@ -66,11 +66,17 @@ internal static class InteractiveImageDiffRenderer
             ? Math.Max(baselineImage.Height, currentImage.Height)
             : compareHeight;
 
-        if (width <= 0 || height <= 0 || (long)width * height > MaxPixels)
+        var comparePixelCount = (long)compareWidth * compareHeight;
+        if (width <= 0
+            || height <= 0
+            || compareWidth <= 0
+            || compareHeight <= 0
+            || comparePixelCount > int.MaxValue
+            || (long)width * height > MaxPixels)
             return null;
 
         var normalizedSensitivity = Math.Clamp(sensitivityPercent / 100d, 0d, 1d);
-        var diffThreshold = Lerp(64d, 6d, normalizedSensitivity);
+        var diffThreshold = Lerp(2.5d, 0d, normalizedSensitivity);
         var splitRatio = Math.Clamp(splitPercent / 100d, 0d, 1d);
         var splitX = (int)Math.Round(width * splitRatio);
 
@@ -83,7 +89,8 @@ internal static class InteractiveImageDiffRenderer
                     output[x, y] = new Rgba32(18, 22, 30, 255);
             }
         }
-        var mask = new bool[compareWidth * compareHeight];
+        var maskLength = (int)comparePixelCount;
+        var mask = new bool[maskLength];
         var changedPixels = 0;
 
         for (var y = 0; y < compareHeight; y++)
@@ -98,18 +105,23 @@ internal static class InteractiveImageDiffRenderer
                     : default;
 
                 var difference = ComputeDifference(baselinePixel, currentPixel);
-                var changed = difference >= diffThreshold;
+                var changed = HasAnyChannelDifference(baselinePixel, currentPixel);
                 if (changed)
                 {
-                    mask[(y * width) + x] = true;
+                    var offset = (y * compareWidth) + x;
+                    if ((uint)offset < (uint)mask.Length)
+                        mask[offset] = true;
+
                     changedPixels++;
                 }
+
+                if (mode == ImageDiffVisualizationMode.Composite)
+                    continue;
 
                 output[x, y] = mode switch
                 {
                     ImageDiffVisualizationMode.Heatmap => BuildHeatmapPixel(currentPixel, baselinePixel, difference, diffThreshold),
                     ImageDiffVisualizationMode.Split => BuildSplitPixel(x, splitX, baselinePixel, currentPixel),
-                    ImageDiffVisualizationMode.Composite => BuildBaseDisplayPixel(new Rgba32(18, 22, 30, 255)),
                     _ => BuildOverlayPixel(currentPixel, baselinePixel, difference, diffThreshold)
                 };
             }
@@ -126,12 +138,12 @@ internal static class InteractiveImageDiffRenderer
             {
                 if (mode == ImageDiffVisualizationMode.Composite)
                 {
-                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), 0);
-                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), baselineImage.Width + 24);
+                    DrawRegionOutline(output, ClampRegion(region, baselineImage.Width, baselineImage.Height), new Rgba32(255, 225, 94, 255), 0);
+                    DrawRegionOutline(output, ClampRegion(region, currentImage.Width, currentImage.Height), new Rgba32(255, 225, 94, 255), baselineImage.Width + 24);
                 }
                 else
                 {
-                    DrawRegionOutline(output, region, new Rgba32(255, 225, 94, 255), 0);
+                    DrawRegionOutline(output, ClampRegion(region, output.Width, output.Height), new Rgba32(255, 225, 94, 255), 0);
                 }
             }
         }
@@ -159,14 +171,21 @@ internal static class InteractiveImageDiffRenderer
 
     private static double ComputeDifference(Rgba32 left, Rgba32 right)
     {
-        var alphaWeight = 0.35d;
-        var rgbWeight = 0.65d / 3d;
+        var dr = Math.Abs(left.R - right.R);
+        var dg = Math.Abs(left.G - right.G);
+        var db = Math.Abs(left.B - right.B);
+        var da = Math.Abs(left.A - right.A);
+        var rgbEuclidean = Math.Sqrt(((dr * dr) + (dg * dg) + (db * db)) / 3d);
+        var maxChannel = Math.Max(dr, Math.Max(dg, db));
 
-        return (Math.Abs(left.R - right.R) * rgbWeight)
-               + (Math.Abs(left.G - right.G) * rgbWeight)
-               + (Math.Abs(left.B - right.B) * rgbWeight)
-               + (Math.Abs(left.A - right.A) * alphaWeight);
+        return Math.Max(maxChannel, (rgbEuclidean * 0.78d) + (da * 0.22d));
     }
+
+    private static bool HasAnyChannelDifference(Rgba32 left, Rgba32 right)
+        => left.R != right.R
+           || left.G != right.G
+           || left.B != right.B
+           || left.A != right.A;
 
     private static Rgba32 BuildOverlayPixel(Rgba32 currentPixel, Rgba32 baselinePixel, double difference, double threshold)
     {
@@ -181,14 +200,20 @@ internal static class InteractiveImageDiffRenderer
 
     private static Rgba32 BuildHeatmapPixel(Rgba32 currentPixel, Rgba32 baselinePixel, double difference, double threshold)
     {
-        var basePixel = BuildBaseDisplayPixel(currentPixel.A > 0 ? currentPixel : baselinePixel);
-        var normalized = difference <= 0d ? 0d : Math.Clamp(difference / 255d, 0d, 1d);
-        var highlight = HeatColor(normalized);
+        var basePixel = BuildHeatmapBasePixel(currentPixel.A > 0 ? currentPixel : baselinePixel);
+        if (difference <= 0d)
+            return basePixel;
 
-        if (difference < threshold)
-            return Blend(basePixel, new Rgba32(20, 30, 44, 255), 0.18f);
+        var normalized = Math.Clamp(Math.Pow(difference / 255d, 0.42d), 0d, 1d);
+        var emphasized = difference < threshold
+            ? Math.Clamp((normalized * 0.70d) + 0.30d, 0d, 1d)
+            : Math.Clamp((normalized * 0.88d) + 0.12d, 0d, 1d);
+        var highlight = HeatColor(emphasized);
+        var overlayOpacity = difference < threshold
+            ? (float)(0.82d + (emphasized * 0.08d))
+            : (float)(0.93d + (emphasized * 0.05d));
 
-        return Blend(basePixel, highlight, (float)(0.30d + (normalized * 0.60d)));
+        return Blend(basePixel, highlight, overlayOpacity);
     }
 
     private static Rgba32 BuildSplitPixel(int x, int splitX, Rgba32 baselinePixel, Rgba32 currentPixel)
@@ -233,14 +258,21 @@ internal static class InteractiveImageDiffRenderer
         for (var y = 0; y < baselineImage.Height; y++)
         {
             for (var x = 0; x < baselineImage.Width; x++)
-                output[x, y] = BuildBaseDisplayPixel(baselineImage[x, y]);
+            {
+                if ((uint)x < (uint)output.Width && (uint)y < (uint)output.Height)
+                    output[x, y] = BuildBaseDisplayPixel(baselineImage[x, y]);
+            }
         }
 
         var offsetX = baselineImage.Width + 24;
         for (var y = 0; y < currentImage.Height; y++)
         {
             for (var x = 0; x < currentImage.Width; x++)
-                output[offsetX + x, y] = BuildBaseDisplayPixel(currentImage[x, y]);
+            {
+                var targetX = offsetX + x;
+                if ((uint)targetX < (uint)output.Width && (uint)y < (uint)output.Height)
+                    output[targetX, y] = BuildBaseDisplayPixel(currentImage[x, y]);
+            }
         }
     }
 
@@ -395,6 +427,28 @@ internal static class InteractiveImageDiffRenderer
             (byte)Math.Clamp((int)Math.Round(pixel.G * 0.7d), 0, 255),
             (byte)Math.Clamp((int)Math.Round(pixel.B * 0.7d), 0, 255),
             255);
+    }
+
+    private static Rgba32 BuildHeatmapBasePixel(Rgba32 pixel)
+    {
+        if (pixel.A == 0)
+            return new Rgba32(8, 10, 14, 255);
+
+        var luminance = (int)Math.Round((pixel.R * 0.2126d) + (pixel.G * 0.7152d) + (pixel.B * 0.0722d));
+        var toned = (byte)Math.Clamp((int)Math.Round((luminance * 0.18d) + 8d), 0, 255);
+        return new Rgba32(toned, toned, toned, 255);
+    }
+
+    private static PixelRegion ClampRegion(PixelRegion region, int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            return new PixelRegion(0, 0, 0, 0);
+
+        var left = Math.Clamp(region.Left, 0, width - 1);
+        var top = Math.Clamp(region.Top, 0, height - 1);
+        var right = Math.Clamp(region.Right, left, width - 1);
+        var bottom = Math.Clamp(region.Bottom, top, height - 1);
+        return new PixelRegion(left, top, right, bottom);
     }
 
     private static Rgba32 Blend(Rgba32 basePixel, Rgba32 overlayPixel, float overlayOpacity)
