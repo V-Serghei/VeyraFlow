@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Veyra.Application.DTOs;
 
@@ -27,6 +28,12 @@ public interface ICloudSyncService
         Stream content,
         long? contentLength = null,
         CancellationToken ct = default);
+
+    Task<CloudBatchUploadResultDto?> UploadBlockBatchAsync(
+        string accessToken,
+        IReadOnlyList<CloudUploadBlockItemDto> blocks,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Batch block upload is not supported by this cloud sync provider.");
 
     Task<bool> DownloadBlockToFileAsync(
         string accessToken,

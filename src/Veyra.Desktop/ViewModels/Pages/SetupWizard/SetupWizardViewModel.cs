@@ -2,13 +2,17 @@ using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Linq;
 using System.Threading.Tasks;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;
+using Veyra.Desktop.Services.Maintenance;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
@@ -18,6 +22,7 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
 {
     private readonly IMediator _mediator;
     private readonly ILogger<SetupWizardViewModel> _log;
+    private readonly IRepositoryRetentionDefaultsApplier _retentionDefaultsApplier;
     private readonly SelectDirectoriesViewModel _dirsVm;
     private readonly SelectFormatsViewModel _formatsVm;
     private readonly RepositoryNameViewModel _repoNameVm;
@@ -45,11 +50,13 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
     public SetupWizardViewModel(
         IMediator mediator,
         ILogger<SetupWizardViewModel> log,
+        IRepositoryRetentionDefaultsApplier retentionDefaultsApplier,
         SelectDirectoriesViewModel dirsVm,
         SelectFormatsViewModel formatsVm)
     {
         _mediator = mediator;
         _log = log;
+        _retentionDefaultsApplier = retentionDefaultsApplier;
         _dirsVm = dirsVm;
         _formatsVm = formatsVm;
         _repoNameVm = new RepositoryNameViewModel();
@@ -370,6 +377,18 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
                 AppendProgressLog(ErrorMessage, FilesFoundCount);
                 return;
             }
+
+            var selectedDirectories = dirs
+                .Where(static path => !string.IsNullOrWhiteSpace(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var targetRepositoryIds = repositories
+                .Where(repo => selectedDirectories.Contains(repo.DirectoryPath))
+                .Select(repo => repo.Id)
+                .ToArray();
+
+            if (targetRepositoryIds.Length > 0)
+                await _retentionDefaultsApplier.ApplyToRepositoriesAsync(targetRepositoryIds);
 
             ProgressPercent = 100;
             ProgressMessage = Loc.T("create_repo.success_progress_label");

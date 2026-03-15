@@ -76,6 +76,7 @@ func main() {
 	mux.HandleFunc("GET /api/sync/repositories/{repositoryId}/latest", h.WithAuth(h.GetLatestRepositorySnapshot))
 	mux.HandleFunc("POST /api/sync/repositories/{repositoryId}/snapshots", h.WithAuth(h.PushRepositorySnapshot))
 	mux.HandleFunc("HEAD /api/sync/blocks/{blockHash}", h.WithAuth(h.HeadBlock))
+	mux.HandleFunc("POST /api/sync/blocks/batch", h.WithAuth(h.PutBlocksBatch))
 	mux.HandleFunc("POST /api/sync/blocks/{blockHash}", h.WithAuth(h.PutBlock))
 	mux.HandleFunc("GET /api/sync/blocks/{blockHash}", h.WithAuth(h.GetBlock))
 	mux.HandleFunc("GET /api/admin/storage/metrics", h.WithAuth(h.GetStorageMetrics))

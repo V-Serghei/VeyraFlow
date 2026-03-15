@@ -300,7 +300,9 @@ public sealed class EfRepositoryBundleService(
                 FileCount = repository.FileCount,
                 VersionCount = repository.VersionCount,
                 TotalSizeBytes = repository.TotalSizeBytes,
-                LastScannedAtUtc = repository.LastScannedAt
+                LastScannedAtUtc = repository.LastScannedAt,
+                AutoCaptureFileVersions = repository.AutoCaptureFileVersions,
+                ProtectCloudMetadata = repository.ProtectCloudMetadata
             },
             Snapshots = snapshots,
             SnapshotEntries = snapshotEntries,
@@ -513,6 +515,8 @@ public sealed class EfRepositoryBundleService(
             VersionCount = 0,
             TotalSizeBytes = 0,
             LastScannedAt = null,
+            AutoCaptureFileVersions = manifest.Repository.AutoCaptureFileVersions,
+            ProtectCloudMetadata = manifest.Repository.ProtectCloudMetadata,
             RetentionEnabled = false,
             RetentionMaxAgeDays = null,
             RetentionMaxSnapshots = null,
@@ -818,6 +822,8 @@ public sealed class EfRepositoryBundleService(
 
         repository.VersionCount = versionRows.Count;
         repository.LastScannedAt = manifest.Repository.LastScannedAtUtc ?? latestSnapshot?.CreatedAt;
+        repository.AutoCaptureFileVersions = manifest.Repository.AutoCaptureFileVersions;
+        repository.ProtectCloudMetadata = manifest.Repository.ProtectCloudMetadata;
         repository.UpdatedAt = now;
 
         await db.SaveChangesAsync(ct);

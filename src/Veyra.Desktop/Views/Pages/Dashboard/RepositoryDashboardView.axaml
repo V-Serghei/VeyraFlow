@@ -361,15 +361,15 @@
         </Grid>
 
         <Border Classes="loading-overlay"
-                IsVisible="{Binding IsLoading}">
+                IsVisible="{Binding ShowLoadingOverlay}">
             <Border Classes="loading-card"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     MinWidth="320"
                     MaxWidth="420">
                 <StackPanel Classes="loading-state">
-                    <TextBlock Text="{loc:Tr dashboard.loading_title}" FontSize="18" FontWeight="SemiBold"/>
-                    <TextBlock Text="{loc:Tr dashboard.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding LoadingOverlayTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding LoadingOverlayDetail}" Classes="muted" TextWrapping="Wrap"/>
                     <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
                 </StackPanel>
             </Border>

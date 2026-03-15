@@ -273,6 +273,8 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.FileCount).HasDefaultValue(0);
             entity.Property(e => e.VersionCount).HasDefaultValue(0);
             entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
+            entity.Property(e => e.AutoCaptureFileVersions).HasDefaultValue(true);
+            entity.Property(e => e.ProtectCloudMetadata).HasDefaultValue(true);
             entity.Property(e => e.RetentionEnabled).HasDefaultValue(false);
             entity.Property(e => e.RetentionMaxAgeDays).IsRequired(false);
             entity.Property(e => e.RetentionMaxSnapshots).IsRequired(false);
@@ -293,6 +295,12 @@ public class VeyraDbContext : DbContext
             entity.HasIndex(e => new { e.CloudLastSyncedAt, e.CloudLastRemoteSnapshotId });
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<RepositorySnapshot>(entity =>
+        {
+            entity.Property(e => e.Title).HasMaxLength(256);
+            entity.Property(e => e.TagsCsv).HasMaxLength(1024);
         });
 
         modelBuilder.Entity<RepositorySyncQueueItem>(entity =>

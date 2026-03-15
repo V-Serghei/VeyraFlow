@@ -45,6 +45,12 @@ type pushSnapshotResponse struct {
 	MissingBlockHashes []string `json:"missingBlockHashes"`
 }
 
+type putBlocksBatchResponse struct {
+	Ok           bool `json:"ok"`
+	StoredBlocks int  `json:"storedBlocks"`
+	SkippedBlocks int `json:"skippedBlocks"`
+}
+
 type syncRepositoryMeta struct {
 	ID          int    `json:"id"`
 	Name        string `json:"name"`
@@ -982,6 +988,158 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 		"block_hash="+quoteLogValue(hash),
 		"size_bytes="+fmt.Sprintf("%d", sizeBytes))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "size_bytes": sizeBytes})
+}
+
+func (h *Handler) PutBlocksBatch(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
+	_, ok := getAuthUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
+		return
+	}
+
+	reader := http.MaxBytesReader(w, r.Body, h.maxPushPayloadBytes)
+	r.Body = reader
+
+	multipartReader, err := r.MultipartReader()
+	if err != nil {
+		logHTTPRequestEvent(r, "warning", "put_blocks_batch", "invalid multipart payload",
+			"error="+quoteLogValue(err.Error()))
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid multipart payload"})
+		return
+	}
+
+	if err = os.MkdirAll(h.blockStoreDir, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to prepare block store"})
+		return
+	}
+
+	storedBlocks := 0
+	skippedBlocks := 0
+
+	for {
+		part, nextErr := multipartReader.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			logHTTPRequestEvent(r, "warning", "put_blocks_batch", "failed to read multipart block batch",
+				"stored_blocks="+fmt.Sprintf("%d", storedBlocks),
+				"skipped_blocks="+fmt.Sprintf("%d", skippedBlocks),
+				"error="+quoteLogValue(nextErr.Error()))
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read multipart block batch"})
+			return
+		}
+
+		if part.FormName() != "blocks" {
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+			continue
+		}
+
+		hash := strings.TrimSpace(part.Header.Get("X-Block-Hash"))
+		if hash == "" {
+			hash = strings.TrimSpace(part.FileName())
+		}
+
+		if hash == "" || !isValidBlockHash(hash) {
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+			logHTTPRequestEvent(r, "warning", "put_blocks_batch", "invalid block hash in batch",
+				"block_hash="+quoteLogValue(hash))
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid block hash in batch"})
+			return
+		}
+
+		if existing, exists, loadErr := h.loadBlockRecord(r.Context(), hash); loadErr != nil {
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to query block metadata"})
+			return
+		} else if exists && existing.StorageKind != "missing" {
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+			skippedBlocks++
+			continue
+		}
+
+		staged, createErr := os.CreateTemp(h.blockStoreDir, "upload-batch-*.block")
+		if createErr != nil {
+			_, _ = io.Copy(io.Discard, part)
+			_ = part.Close()
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to allocate temporary block storage"})
+			return
+		}
+
+		stagedPath := staged.Name()
+		var digestWriter stdhash.Hash
+		var writer io.Writer = staged
+		if strings.HasPrefix(strings.ToLower(hash), "sha256-") {
+			digestWriter = sha256.New()
+			writer = io.MultiWriter(staged, digestWriter)
+		}
+
+		sizeBytes, copyErr := io.Copy(writer, part)
+		_ = part.Close()
+		if copyErr != nil {
+			_ = staged.Close()
+			_ = os.Remove(stagedPath)
+			logHTTPRequestEvent(r, "warning", "put_blocks_batch", "failed to read staged block payload",
+				"block_hash="+quoteLogValue(hash),
+				"error="+quoteLogValue(copyErr.Error()))
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "failed to read block payload"})
+			return
+		}
+
+		if syncErr := staged.Sync(); syncErr != nil {
+			_ = staged.Close()
+			_ = os.Remove(stagedPath)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to stage block payload"})
+			return
+		}
+
+		if digestWriter != nil {
+			expected := strings.TrimPrefix(strings.ToLower(hash), "sha256-")
+			actual := strings.ToLower(hex.EncodeToString(digestWriter.Sum(nil)))
+			if expected != actual {
+				_ = staged.Close()
+				_ = os.Remove(stagedPath)
+				logHTTPRequestEvent(r, "warning", "put_blocks_batch", "sha256 mismatch in batch",
+					"block_hash="+quoteLogValue(hash),
+					"expected="+quoteLogValue(expected),
+					"actual="+quoteLogValue(actual))
+				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "sha256 mismatch"})
+				return
+			}
+		}
+
+		if closeErr := staged.Close(); closeErr != nil {
+			_ = os.Remove(stagedPath)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to finalize staged block payload"})
+			return
+		}
+
+		storeErr := h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes)
+		_ = os.Remove(stagedPath)
+		if storeErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
+			return
+		}
+
+		storedBlocks++
+	}
+
+	logHTTPRequestEvent(r, "information", "put_blocks_batch", "batch block upload stored",
+		"stored_blocks="+fmt.Sprintf("%d", storedBlocks),
+		"skipped_blocks="+fmt.Sprintf("%d", skippedBlocks))
+	writeJSON(w, http.StatusOK, putBlocksBatchResponse{
+		Ok:            true,
+		StoredBlocks:  storedBlocks,
+		SkippedBlocks: skippedBlocks,
+	})
 }
 
 func (h *Handler) GetBlock(w http.ResponseWriter, r *http.Request) {

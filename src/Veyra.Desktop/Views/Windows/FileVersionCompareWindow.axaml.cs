@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.Controls.Primitives;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Preview;
+using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.ViewModels.Windows;
 
@@ -195,7 +196,7 @@ public partial class FileVersionCompareWindow : Window
             ]
         });
 
-        var outputPath = file?.Path.LocalPath;
+        var outputPath = StoragePathResolver.TryGetLocalPath(file);
         if (string.IsNullOrWhiteSpace(outputPath))
             return;
 

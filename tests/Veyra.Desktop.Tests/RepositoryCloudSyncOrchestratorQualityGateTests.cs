@@ -114,6 +114,47 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
         }
     }
 
+    [Fact]
+    public async Task ProcessPendingQueue_UsesBatchUploadWhenProviderSupportsIt()
+    {
+        await using var scope = await SqliteDbScope.CreateAsync();
+        var blockStoreRoot = CreateTempDirectory();
+
+        try
+        {
+            var blockHashA = "sha256-" + new string('d', 64);
+            var blockHashB = "sha256-" + new string('e', 64);
+            CreateManagedBlockFile(blockStoreRoot, blockHashA, "block-d");
+            CreateManagedBlockFile(blockStoreRoot, blockHashB, "block-e");
+
+            var repositoryId = await SeedRepositoryGraphAsync(
+                scope.Db,
+                rootPath: Path.Combine(blockStoreRoot, "repo"),
+                blockHashes: [blockHashA, blockHashB],
+                syncRetryMaxAttempts: 3,
+                syncRetryBaseDelaySeconds: 5);
+
+            var cloudSync = new BatchUploadCloudSyncService(blockHashA, blockHashB);
+            var orchestrator = CreateOrchestrator(scope.Db, blockStoreRoot, cloudSync);
+
+            await orchestrator.TryPushLatestSnapshotAsync(repositoryId);
+
+            var completed = await scope.Db.Set<RepositorySyncQueueItem>()
+                .AsNoTracking()
+                .FirstAsync(x => x.RepositoryId == repositoryId);
+
+            Assert.Equal(RepositorySyncQueueItem.StatusCompleted, completed.Status);
+            Assert.Equal(2, cloudSync.BatchUploadedHashes.Count);
+            Assert.Equal(0, cloudSync.SingleUploadCalls);
+            Assert.Equal(1, cloudSync.BatchUploadCalls);
+            Assert.Equal(2, cloudSync.PushCalls);
+        }
+        finally
+        {
+            DeleteDirectoryQuietly(blockStoreRoot);
+        }
+    }
+
     private static RepositoryCloudSyncOrchestrator CreateOrchestrator(
         VeyraDbContext db,
         string blockStoreRoot,
@@ -441,7 +482,7 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
         public Task UpdateRepositoryAsync(int id, string name, string? description, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task UpdateRepositoryAsync(int id, string name, string? description, RepositoryRetentionPolicyDto retentionPolicy, string syncConflictStrategy, int syncRetryMaxAttempts, int syncRetryBaseDelaySeconds, CancellationToken ct = default)
+        public Task UpdateRepositoryAsync(int id, string name, string? description, bool autoCaptureFileVersions, bool protectCloudMetadata, IReadOnlyCollection<string> excludedPatterns, RepositoryRetentionPolicyDto retentionPolicy, string syncConflictStrategy, int syncRetryMaxAttempts, int syncRetryBaseDelaySeconds, CancellationToken ct = default)
             => throw new NotSupportedException();
 
         public Task DeleteRepositoryAsync(int id, CancellationToken ct = default)
@@ -573,6 +614,63 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
 
         public Task UploadBlockAsync(string accessToken, string blockHash, Stream content, long? contentLength = null, CancellationToken ct = default)
             => Task.CompletedTask;
+
+        public Task<bool> DownloadBlockToFileAsync(string accessToken, string blockHash, string targetPath, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        public Task<CloudStorageMetricsDto?> GetStorageMetricsAsync(string accessToken, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageMetricsDto?>(null);
+
+        public Task<CloudStorageRepairResultDto?> RepairStorageAsync(string accessToken, int scanLimit = 512, int compactLimit = 128, CancellationToken ct = default)
+            => Task.FromResult<CloudStorageRepairResultDto?>(null);
+    }
+
+    private sealed class BatchUploadCloudSyncService(string blockHashA, string blockHashB) : ICloudSyncService
+    {
+        public int PushCalls { get; private set; }
+        public int BatchUploadCalls { get; private set; }
+        public int SingleUploadCalls { get; private set; }
+        public List<string> BatchUploadedHashes { get; } = [];
+
+        public Task<IReadOnlyList<CloudRepositoryHeaderDto>> GetRepositoriesAsync(string accessToken, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<CloudRepositoryHeaderDto>>([]);
+
+        public Task<CloudSnapshotPackageDto?> GetLatestSnapshotAsync(string accessToken, int repositoryId, CancellationToken ct = default)
+            => Task.FromResult<CloudSnapshotPackageDto?>(null);
+
+        public Task<CloudPushResultDto?> PushSnapshotAsync(
+            string accessToken,
+            int repositoryId,
+            CloudSnapshotPackageDto package,
+            string? idempotencyKey = null,
+            CancellationToken ct = default)
+        {
+            PushCalls++;
+            return Task.FromResult<CloudPushResultDto?>(PushCalls switch
+            {
+                1 => new CloudPushResultDto(true, [blockHashA, blockHashB]),
+                _ => new CloudPushResultDto(true, [])
+            });
+        }
+
+        public Task<bool> BlockExistsAsync(string accessToken, string blockHash, CancellationToken ct = default)
+            => Task.FromResult(false);
+
+        public Task UploadBlockAsync(string accessToken, string blockHash, Stream content, long? contentLength = null, CancellationToken ct = default)
+        {
+            SingleUploadCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task<CloudBatchUploadResultDto?> UploadBlockBatchAsync(
+            string accessToken,
+            IReadOnlyList<CloudUploadBlockItemDto> blocks,
+            CancellationToken ct = default)
+        {
+            BatchUploadCalls++;
+            BatchUploadedHashes.AddRange(blocks.Select(b => b.BlockHash));
+            return Task.FromResult<CloudBatchUploadResultDto?>(new CloudBatchUploadResultDto(true, blocks.Count, 0));
+        }
 
         public Task<bool> DownloadBlockToFileAsync(string accessToken, string blockHash, string targetPath, CancellationToken ct = default)
             => Task.FromResult(false);

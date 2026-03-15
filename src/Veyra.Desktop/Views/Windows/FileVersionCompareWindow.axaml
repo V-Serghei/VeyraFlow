@@ -473,58 +473,187 @@
                                 </Border>
 
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsAudioPreview}">
-                                    <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="10">
-                                        <TextBlock Grid.Row="0"
-                                                   Text="{loc:Tr compare.audio_waveform}"
-                                                   FontWeight="SemiBold"
-                                                   FontSize="14"/>
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <StackPanel Spacing="12">
+                                            <TextBlock Text="{loc:Tr compare.audio_waveform}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="14"/>
 
-                                        <Border Grid.Row="1"
-                                                Background="{DynamicResource VeyraSurfaceSoftBrush}"
-                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="10"
-                                                Padding="10"
-                                                IsVisible="{Binding HasAudioWaveformPreview}">
-                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                                          VerticalScrollBarVisibility="Auto"
-                                                          MaxHeight="360">
-                                                <Image Source="{Binding AudioWaveformPreview}"
-                                                       Stretch="None"
-                                                       HorizontalAlignment="Left"
-                                                       VerticalAlignment="Top"/>
-                                            </ScrollViewer>
-                                        </Border>
+                                            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto"
+                                                  ColumnSpacing="8">
+                                                <Button Grid.Column="0"
+                                                        Classes="subtle"
+                                                        Command="{Binding PlayBeforeAudioCommand}">
+                                                    <TextBlock Text="{loc:Tr compare.audio_play_before}"/>
+                                                </Button>
+                                                <Button Grid.Column="1"
+                                                        Classes="subtle"
+                                                        Command="{Binding PlayAfterAudioCommand}">
+                                                    <TextBlock Text="{loc:Tr compare.audio_play_after}"/>
+                                                </Button>
+                                                <Button Grid.Column="2"
+                                                        Classes="subtle"
+                                                        Command="{Binding PlayDifferenceAudioCommand}">
+                                                    <TextBlock Text="{loc:Tr compare.audio_play_difference}"/>
+                                                </Button>
+                                                <Button Grid.Column="3"
+                                                        Classes="subtle"
+                                                        Command="{Binding StopAudioPlaybackCommand}">
+                                                    <TextBlock Text="{loc:Tr compare.audio_play_stop}"/>
+                                                </Button>
+                                                <TextBlock Grid.Column="5"
+                                                           Text="{Binding AudioPlaybackStatus}"
+                                                           Classes="muted"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding HasAudioPlaybackStatus}"/>
+                                            </Grid>
 
-                                        <TextBlock Grid.Row="1"
-                                                   Text="{loc:Tr compare.audio_preview_unavailable}"
-                                                   Classes="muted"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding HasAudioWaveformPreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10"
+                                                    IsVisible="{Binding HasAudioWaveformPreview}">
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              MaxHeight="360">
+                                                    <Image Source="{Binding AudioWaveformPreview}"
+                                                           Stretch="None"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Top"/>
+                                                </ScrollViewer>
+                                            </Border>
 
-                                        <Border Grid.Row="2"
-                                                Background="{DynamicResource VeyraSurfaceSoftBrush}"
-                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
-                                                BorderThickness="1"
-                                                CornerRadius="10"
-                                                Padding="10">
-                                            <ItemsControl ItemsSource="{Binding PreviewMetrics}">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
-                                                        <Grid ColumnDefinitions="180,*" ColumnSpacing="10" Margin="0,0,0,6">
-                                                            <TextBlock Grid.Column="0"
-                                                                       Text="{Binding Label}"
-                                                                       FontWeight="SemiBold"
-                                                                       Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
-                                                            <TextBlock Grid.Column="1"
-                                                                       Text="{Binding Value}"
-                                                                       TextWrapping="Wrap"/>
-                                                        </Grid>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </Border>
-                                    </Grid>
+                                            <TextBlock Text="{loc:Tr compare.audio_preview_unavailable}"
+                                                       Classes="muted"
+                                                       TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasAudioWaveformPreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                            <TextBlock Text="{loc:Tr compare.audio_spectrogram}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       IsVisible="{Binding HasAudioSpectrogramPreview}"/>
+
+                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10"
+                                                    IsVisible="{Binding HasAudioSpectrogramPreview}">
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              MaxHeight="320">
+                                                    <Image Source="{Binding AudioSpectrogramPreview}"
+                                                           Stretch="None"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Top"/>
+                                                </ScrollViewer>
+                                            </Border>
+
+                                            <TextBlock Text="{loc:Tr compare.audio_spectral_delta}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       IsVisible="{Binding HasAudioSpectralDeltaPreview}"/>
+
+                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10"
+                                                    IsVisible="{Binding HasAudioSpectralDeltaPreview}">
+                                                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                              VerticalScrollBarVisibility="Auto"
+                                                              MaxHeight="240">
+                                                    <Image Source="{Binding AudioSpectralDeltaPreview}"
+                                                           Stretch="None"
+                                                           HorizontalAlignment="Left"
+                                                           VerticalAlignment="Top"/>
+                                                </ScrollViewer>
+                                            </Border>
+
+                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10">
+                                                <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                            <Grid ColumnDefinitions="180,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                                <TextBlock Grid.Column="0"
+                                                                           Text="{Binding Label}"
+                                                                           FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding Value}"
+                                                                           TextWrapping="Wrap"/>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Border>
+
+                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="{loc:Tr compare.audio_changed_segments}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="13"/>
+
+                                                    <ItemsControl ItemsSource="{Binding AudioChangedSegments}"
+                                                                  IsVisible="{Binding HasAudioChangedSegments}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="windows:AudioChangedSegmentItemViewModel">
+                                                                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
+                                                                      ColumnSpacing="10"
+                                                                      Margin="0,0,0,6">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding SegmentLabel}"
+                                                                               FontWeight="SemiBold"
+                                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding RangeLabel}"
+                                                                               TextWrapping="Wrap"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding DurationLabel}"
+                                                                               Classes="muted"/>
+                                                                    <TextBlock Grid.Column="3"
+                                                                               Text="{Binding IntensityLabel}"
+                                                                               Classes="muted"/>
+                                                                    <Button Grid.Column="4"
+                                                                            Classes="subtle"
+                                                                            Command="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).PlayBeforeAudioSegmentCommand}"
+                                                                            CommandParameter="{Binding}">
+                                                                        <TextBlock Text="{loc:Tr common.before}"/>
+                                                                    </Button>
+                                                                    <Button Grid.Column="5"
+                                                                            Classes="subtle"
+                                                                            Command="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).PlayAfterAudioSegmentCommand}"
+                                                                            CommandParameter="{Binding}">
+                                                                        <TextBlock Text="{loc:Tr common.after}"/>
+                                                                    </Button>
+                                                                    <Button Grid.Column="6"
+                                                                            Classes="subtle"
+                                                                            Command="{Binding #Root.((windows:FileVersionCompareWindowViewModel)DataContext).LoopAudioSegmentCommand}"
+                                                                            CommandParameter="{Binding}">
+                                                                        <TextBlock Text="{loc:Tr compare.audio_loop_segment}"/>
+                                                                    </Button>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+
+                                                    <TextBlock Text="{loc:Tr compare.audio_changed_segments_none}"
+                                                               Classes="muted"
+                                                               IsVisible="{Binding HasAudioChangedSegments, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </ScrollViewer>
                                 </Border>
 
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">

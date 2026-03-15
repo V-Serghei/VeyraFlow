@@ -34,12 +34,12 @@ public sealed class RustRepositoryScanner(
 
         var repo = await repositories.GetRepositoryByIdAsync(repositoryId, ct);
         if (repo is null || repo.IsDeleted)
-            return new RepositoryScanResultDto(0, 0, 0, "skipped_missing");
+            return new RepositoryScanResultDto(0, 0, 0, "skipped_missing", false, false);
 
         if (!Directory.Exists(repo.DirectoryPath))
         {
             log.LogWarning("Skipping scan for repository {RepositoryId}. Directory not found {Path}", repositoryId, repo.DirectoryPath);
-            return new RepositoryScanResultDto(0, 0, 0, "skipped_directory_not_found");
+            return new RepositoryScanResultDto(0, 0, 0, "skipped_directory_not_found", false, false);
         }
 
         log.LogInformation(
@@ -91,6 +91,7 @@ public sealed class RustRepositoryScanner(
             entries = nativeEntries
                 .Select(ToEntry)
                 .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
+                .Where(e => !RepositoryScanExclusionMatcher.IsExcluded(e.RelativePath, repo.ExcludedPatterns))
                 .ToList();
             projectionTimer.Stop();
             scanStageMs = nativeScanTimer.ElapsedMilliseconds;
@@ -126,6 +127,7 @@ public sealed class RustRepositoryScanner(
             entries = await BuildManagedEntriesAsync(
                 repo.DirectoryPath,
                 repo.LinkedFormats,
+                repo.ExcludedPatterns,
                 scanOptions.MaxReadBytesPerSecond,
                 scanOptions.MaxIoOperationsPerSecond,
                 progress,
@@ -161,6 +163,7 @@ public sealed class RustRepositoryScanner(
             entries,
             scanOptions.SaveFileVersions,
             scanOptions.SnapshotTitle,
+            scanOptions.SnapshotTags,
             ct);
         saveTimer.Stop();
 
@@ -194,7 +197,13 @@ public sealed class RustRepositoryScanner(
             saveResult.SnapshotCreated,
             saveResult.NoChangesDetected);
 
-        return new RepositoryScanResultDto(entries.Count, fileCount, entries.Count - fileCount, trigger);
+        return new RepositoryScanResultDto(
+            entries.Count,
+            fileCount,
+            entries.Count - fileCount,
+            trigger,
+            saveResult.SnapshotCreated,
+            saveResult.NoChangesDetected);
     }
 
     public async Task ScanAllRepositoriesAsync(CancellationToken ct = default)
@@ -241,6 +250,7 @@ public sealed class RustRepositoryScanner(
     private static async Task<List<RepositoryScanEntryDto>> BuildManagedEntriesAsync(
         string rootPath,
         IReadOnlyCollection<string> linkedFormats,
+        IReadOnlyCollection<string> excludedPatterns,
         int maxReadBytesPerSecond,
         int maxIoOperationsPerSecond,
         IProgress<RepositoryScanProgressDto>? progress,
@@ -257,7 +267,7 @@ public sealed class RustRepositoryScanner(
         var processedFiles = 0;
         var iopsState = new IopsThrottleState();
 
-        await TraverseDirectoryAsync(root, rootPath, normalizedExt, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, () =>
+        await TraverseDirectoryAsync(root, rootPath, normalizedExt, excludedPatterns, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, () =>
         {
             processedFiles++;
             if (processedFiles % 25 == 0)
@@ -281,6 +291,7 @@ public sealed class RustRepositoryScanner(
         DirectoryInfo current,
         string rootPath,
         HashSet<string> extFilter,
+        IReadOnlyCollection<string> excludedPatterns,
         int maxReadBytesPerSecond,
         int maxIoOperationsPerSecond,
         IopsThrottleState iopsState,
@@ -305,6 +316,9 @@ public sealed class RustRepositoryScanner(
             ct.ThrowIfCancellationRequested();
 
             var relative = ToRelativePath(rootPath, dir.FullName);
+            if (RepositoryScanExclusionMatcher.IsExcluded(relative, excludedPatterns))
+                continue;
+
             var parentRelative = GetParentRelativePath(relative);
 
             entries.Add(new RepositoryScanEntryDto(
@@ -317,7 +331,7 @@ public sealed class RustRepositoryScanner(
                 dir.LastWriteTimeUtc,
                 null));
 
-            await TraverseDirectoryAsync(dir, rootPath, extFilter, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, onFileProcessed, ct);
+            await TraverseDirectoryAsync(dir, rootPath, extFilter, excludedPatterns, maxReadBytesPerSecond, maxIoOperationsPerSecond, iopsState, entries, onFileProcessed, ct);
         }
 
         IEnumerable<FileInfo> files;
@@ -350,6 +364,9 @@ public sealed class RustRepositoryScanner(
             }
 
             var relative = ToRelativePath(rootPath, file.FullName);
+            if (RepositoryScanExclusionMatcher.IsExcluded(relative, excludedPatterns))
+                continue;
+
             var parentRelative = GetParentRelativePath(relative);
 
             entries.Add(new RepositoryScanEntryDto(

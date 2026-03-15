@@ -21,6 +21,9 @@ public sealed class LocalizedOptionTextConverter : IValueConverter
         if (string.IsNullOrWhiteSpace(normalized))
             return text;
 
+        if (scope == "search.snapshot_tag" && normalized != "all")
+            return "#" + normalized;
+
         var key = scope switch
         {
             "dashboard.availability" => normalized switch
@@ -74,6 +77,11 @@ public sealed class LocalizedOptionTextConverter : IValueConverter
                 "added" => "filter.option.added",
                 "modified" => "filter.option.modified",
                 "removed" => "filter.option.removed",
+                _ => string.Empty
+            },
+            "search.snapshot_tag" => normalized switch
+            {
+                "all" => "filter.option.all",
                 _ => string.Empty
             },
             "repo.sync_conflict_strategy" => normalized switch

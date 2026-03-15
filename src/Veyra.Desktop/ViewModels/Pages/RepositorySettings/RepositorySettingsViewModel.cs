@@ -20,8 +20,10 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Models.Formatted;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -54,6 +56,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string? _description;
     [ObservableProperty] private string _directoryPath = string.Empty;
     [ObservableProperty] private string _customFormat = string.Empty;
+    [ObservableProperty] private string _customExclusionPattern = string.Empty;
+    [ObservableProperty] private bool _autoCaptureFileVersions = true;
+    [ObservableProperty] private bool _protectCloudMetadata;
 
     [ObservableProperty] private bool _retentionEnabled;
     [ObservableProperty] private string _retentionMaxAgeDays = string.Empty;
@@ -87,9 +92,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionResultText = string.Empty;
     [ObservableProperty] private double _retentionProgressValue;
     [ObservableProperty] private bool _isRetentionProgressIndeterminate;
+    [ObservableProperty] private bool _isTransientActionBusy;
+    [ObservableProperty] private string _transientActionTitle = string.Empty;
+    [ObservableProperty] private string _transientActionDetail = string.Empty;
 
     public ObservableCollection<string> SelectedFormats { get; } = [];
     public ObservableCollection<string> AvailableFormats { get; } = [];
+    public ObservableCollection<string> ExcludedPatterns { get; } = [];
+    public ObservableCollection<FormatCategoryItemViewModel> FormatCategories { get; } = [];
     public ObservableCollection<string> SyncConflictStrategies { get; } =
     [
         RepositorySyncConflictStrategies.LastWriteWins,
@@ -110,6 +120,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         _sensitiveActionGuard = sensitiveActionGuard;
         _log = log;
         SelectedFormats.CollectionChanged += OnSelectedFormatsCollectionChanged;
+        BuildFormatCategories();
         _localization.LanguageChanged += OnLanguageChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
         RefreshLocalizationState();
@@ -165,6 +176,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             RepositoryName = repo.Name;
             Description = repo.Description;
             DirectoryPath = repo.DirectoryPath;
+            AutoCaptureFileVersions = repo.AutoCaptureFileVersions;
+            ProtectCloudMetadata = repo.ProtectCloudMetadata;
 
             _allFormatOptions.Clear();
             foreach (var format in allFormats
@@ -187,7 +200,17 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 SelectedFormats.Add(format);
             }
 
+            ExcludedPatterns.Clear();
+            foreach (var pattern in repo.ExcludedPatterns
+                         .Where(static pattern => !string.IsNullOrWhiteSpace(pattern))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(static pattern => pattern, StringComparer.OrdinalIgnoreCase))
+            {
+                ExcludedPatterns.Add(pattern);
+            }
+
             RefreshAvailableFormats();
+            RefreshFormatCategoryState();
 
             ApplyRetentionPolicy(repo.RetentionPolicy);
             ApplyCloudSyncStatus(repo.CloudSync);
@@ -225,7 +248,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 AllowMultiple = false
             });
 
-        var local = res.FirstOrDefault()?.Path.LocalPath;
+        var local = StoragePathResolver.TryGetLocalPath(res.FirstOrDefault());
         if (!string.IsNullOrWhiteSpace(local) && Directory.Exists(local))
             DirectoryPath = local;
     }
@@ -256,6 +279,87 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             SelectedFormats.Add(normalized);
 
         CustomFormat = string.Empty;
+    }
+
+    [RelayCommand]
+    private void ToggleFormatCategory(FormatCategoryItemViewModel? category)
+    {
+        if (category is null)
+            return;
+
+        category.IsApplied = !category.IsApplied;
+        ApplyCategorySelection(category);
+    }
+
+    [RelayCommand]
+    private void AddCustomExclusionPattern()
+    {
+        var normalized = NormalizeExclusionPattern(CustomExclusionPattern);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        if (!ExcludedPatterns.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            ExcludedPatterns.Add(normalized);
+
+        CustomExclusionPattern = string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task BrowseExclusionFolderAsync()
+    {
+        Window? owner = _windows.GetActiveWindow();
+        if (owner is null)
+            return;
+
+        var selection = await owner.StorageProvider.OpenFolderPickerAsync(
+            new FolderPickerOpenOptions
+            {
+                Title = Loc.T("repo_settings.excluded_paths_pick_folder_title"),
+                AllowMultiple = false
+            });
+
+        var localPath = StoragePathResolver.TryGetLocalPath(selection.FirstOrDefault());
+        if (string.IsNullOrWhiteSpace(localPath) || !Directory.Exists(localPath))
+            return;
+
+        var repositoryRoot = NormalizeDirectoryPath(DirectoryPath);
+        if (string.IsNullOrWhiteSpace(repositoryRoot) || !Directory.Exists(repositoryRoot))
+        {
+            ErrorMessage = Loc.T("repo_settings.excluded_paths_outside_repository");
+            return;
+        }
+
+        var relativePath = TryGetRepositoryRelativePath(repositoryRoot, localPath);
+        if (relativePath is null)
+        {
+            ErrorMessage = Loc.T("repo_settings.excluded_paths_outside_repository");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            ErrorMessage = Loc.T("repo_settings.excluded_paths_root_not_allowed");
+            return;
+        }
+
+        var normalized = NormalizeExclusionPattern(relativePath);
+        if (!ExcludedPatterns.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            ExcludedPatterns.Add(normalized);
+
+        CustomExclusionPattern = normalized;
+    }
+
+    [RelayCommand]
+    private void RemoveExclusionPattern(string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+            return;
+
+        var match = ExcludedPatterns.FirstOrDefault(item =>
+            item.Equals(pattern, StringComparison.OrdinalIgnoreCase));
+
+        if (match is not null)
+            ExcludedPatterns.Remove(match);
     }
 
     [RelayCommand]
@@ -291,6 +395,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 Description,
                 DirectoryPath,
                 SelectedFormats.ToList(),
+                AutoCaptureFileVersions,
+                ProtectCloudMetadata,
+                ExcludedPatterns.ToList(),
                 policy,
                 strategy,
                 syncRetryAttempts,
@@ -434,37 +541,35 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (!CanRunBundleOperations)
             return;
 
-        var owner = _windows.GetActiveWindow();
-        if (owner is null)
-        {
-            ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
-            return;
-        }
-
-        var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = Loc.T("repo_settings.bundle_export_title"),
-            SuggestedFileName = BuildSuggestedBundleFileName(),
-            DefaultExtension = "zip",
-            ShowOverwritePrompt = true,
-            FileTypeChoices =
-            [
-                new FilePickerFileType(Loc.T("repo_settings.bundle_file_type"))
+        await RunTransientActionAsync(
+            "repo_settings.bundle_opening_title",
+            "repo_settings.bundle_opening_detail",
+            async () =>
+            {
+                var owner = _windows.GetActiveWindow();
+                if (owner is null)
                 {
-                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
+                    ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
+                    return;
                 }
-            ]
-        });
 
-        var bundlePath = file?.Path.LocalPath;
-        if (string.IsNullOrWhiteSpace(bundlePath))
-            return;
+                var window = _windows.Create<RepositoryBundleExportWizardWindow>();
+                if (window.DataContext is RepositoryBundleExportWizardWindowViewModel vm)
+                    vm.Configure(RepositoryId, RepositoryName);
 
-        await RunBundleOperationAsync(
-            startedMessage: Loc.T("repo_settings.bundle_exporting"),
-            operation: async () => await _mediator.Send(new ExportRepositoryBundleCommand(RepositoryId, bundlePath)),
-            onSuccess: result =>
-                $"{result.Summary}\n{Loc.T("repo_settings.bundle_path_label")}: {result.BundlePath}\n{Loc.T("common.size")}: {FormatSize(result.BundleSizeBytes)}");
+                await _windows.ShowDialogAsync(window, owner);
+
+                if (window.IsCompleted)
+                {
+                    ErrorMessage = null;
+                    BundleOperationMessage = window.ResultSummary;
+                }
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open export bundle wizard for repository {RepositoryId}", RepositoryId);
+                ErrorMessage = Loc.T("repo_settings.error_bundle_failed");
+            });
     }
 
     [RelayCommand(CanExecute = nameof(CanRunBundleOperations))]
@@ -473,62 +578,34 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (!CanRunBundleOperations)
             return;
 
-        var owner = _windows.GetActiveWindow();
-        if (owner is null)
-        {
-            ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
-            return;
-        }
-
-        var bundleSelection = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = Loc.T("repo_settings.bundle_import_title"),
-            AllowMultiple = false,
-            FileTypeFilter =
-            [
-                new FilePickerFileType(Loc.T("repo_settings.bundle_file_type"))
-                {
-                    Patterns = ["*.veyra.zip", "*.veyra-bundle", "*.zip"]
-                }
-            ]
-        });
-
-        var bundlePath = bundleSelection.FirstOrDefault()?.Path.LocalPath;
-        if (string.IsNullOrWhiteSpace(bundlePath))
-            return;
-
-        var validation = await _mediator.Send(new ValidateRepositoryBundleQuery(bundlePath));
-        if (!validation.IsValid)
-        {
-            var validationMessage = UserFacingMessageLocalizer.LocalizeOrFallback(validation.Message, "repo_settings.bundle_validation_failed");
-            ErrorMessage = validationMessage;
-            BundleOperationMessage = validationMessage;
-            return;
-        }
-
-        var targetDirectorySelection = await owner.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = Loc.T("repo_settings.bundle_import_target_title"),
-            AllowMultiple = false
-        });
-
-        var targetDirectory = targetDirectorySelection.FirstOrDefault()?.Path.LocalPath;
-        if (string.IsNullOrWhiteSpace(targetDirectory))
-            return;
-
-        await RunBundleOperationAsync(
-            startedMessage: Loc.T("repo_settings.bundle_importing"),
-            operation: async () => await _mediator.Send(new ImportRepositoryBundleCommand(
-                bundlePath,
-                targetDirectory,
-                RepositoryNameOverride: null)),
-            onSuccess: result =>
+        await RunTransientActionAsync(
+            "repo_settings.bundle_opening_title",
+            "repo_settings.bundle_opening_detail",
+            async () =>
             {
-                var warningText = result.Warnings.Count == 0
-                    ? string.Empty
-                    : $"\n{Loc.T("repo_settings.bundle_warnings")}:\n" + string.Join('\n', result.Warnings);
+                var owner = _windows.GetActiveWindow();
+                if (owner is null)
+                {
+                    ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
+                    return;
+                }
 
-                return $"{result.Summary}\n{Loc.T("repo_settings.bundle_imported_repository_id")}: {result.RepositoryId}{warningText}";
+                var window = _windows.Create<RepositoryBundleImportWizardWindow>();
+                if (window.DataContext is RepositoryBundleImportWizardWindowViewModel vm)
+                    vm.Configure(DirectoryPath);
+
+                await _windows.ShowDialogAsync(window, owner);
+
+                if (window.IsCompleted)
+                {
+                    ErrorMessage = null;
+                    BundleOperationMessage = window.ResultSummary;
+                }
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open import bundle wizard for repository {RepositoryId}", RepositoryId);
+                ErrorMessage = Loc.T("repo_settings.error_bundle_failed");
             });
     }
 
@@ -575,6 +652,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private void OnSelectedFormatsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         RefreshAvailableFormats();
+        RefreshFormatCategoryState();
     }
 
     private void RefreshAvailableFormats()
@@ -588,6 +666,55 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         AvailableFormats.Clear();
         foreach (var format in available)
             AvailableFormats.Add(format);
+    }
+
+    private void BuildFormatCategories()
+    {
+        FormatCategories.Clear();
+        foreach (var definition in TrackedFormatCategoryCatalog.All)
+            FormatCategories.Add(new FormatCategoryItemViewModel(definition));
+    }
+
+    private void ApplyCategorySelection(FormatCategoryItemViewModel category)
+    {
+        if (category.IsApplied)
+        {
+            foreach (var format in category.Formats)
+                AddAvailableFormat(format);
+
+            return;
+        }
+
+        var protectedFormats = FormatCategories
+            .Where(item => !ReferenceEquals(item, category) && item.IsApplied)
+            .SelectMany(item => item.Formats)
+            .Select(NormalizeFormat)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var format in category.Formats.Select(NormalizeFormat))
+        {
+            if (protectedFormats.Contains(format))
+                continue;
+
+            RemoveFormat(format);
+        }
+    }
+
+    private void RefreshFormatCategoryState()
+    {
+        var selected = SelectedFormats
+            .Select(NormalizeFormat)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var category in FormatCategories)
+        {
+            var shouldBeApplied = category.Formats
+                .Select(NormalizeFormat)
+                .All(selected.Contains);
+
+            if (category.IsApplied != shouldBeApplied)
+                category.IsApplied = shouldBeApplied;
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanRunRetention))]
@@ -607,7 +734,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     public bool HasBundleOperationMessage => !string.IsNullOrWhiteSpace(BundleOperationMessage);
     public bool HasCloudRepairMessage => !string.IsNullOrWhiteSpace(CloudRepairMessage);
-    public bool CanRunBundleOperations => RepositoryId > 0 && !IsLoading && !IsBundleOperationRunning;
+    public bool CanRunBundleOperations => RepositoryId > 0 && !IsLoading && !IsBundleOperationRunning && !IsTransientActionBusy;
+    public bool ShowBlockingOverlay => IsLoading || IsTransientActionBusy;
+    public string BlockingOverlayTitle => IsTransientActionBusy
+        ? TransientActionTitle
+        : Loc.T("repo_settings.loading_title");
+    public string BlockingOverlayDetail => IsTransientActionBusy
+        ? TransientActionDetail
+        : Loc.T("repo_settings.loading_detail");
 
     public bool CanRunRetention => RepositoryId > 0 && RetentionEnabled && !IsRetentionRunning;
     public bool CanCancelRetention => IsRetentionRunning;
@@ -626,6 +760,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         ExportBundleCommand.NotifyCanExecuteChanged();
         ImportBundleCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanRunBundleOperations));
+        OnPropertyChanged(nameof(ShowBlockingOverlay));
+        OnPropertyChanged(nameof(BlockingOverlayTitle));
+        OnPropertyChanged(nameof(BlockingOverlayDetail));
     }
 
     partial void OnIsBundleOperationRunningChanged(bool value)
@@ -633,6 +770,16 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         ExportBundleCommand.NotifyCanExecuteChanged();
         ImportBundleCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanRunBundleOperations));
+    }
+
+    partial void OnIsTransientActionBusyChanged(bool value)
+    {
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        ImportBundleCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanRunBundleOperations));
+        OnPropertyChanged(nameof(ShowBlockingOverlay));
+        OnPropertyChanged(nameof(BlockingOverlayTitle));
+        OnPropertyChanged(nameof(BlockingOverlayDetail));
     }
 
     partial void OnRepositoryIdChanged(int value)
@@ -690,6 +837,35 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsBundleOperationRunning = false;
         }
     }
+
+    private async Task RunTransientActionAsync(
+        string titleKey,
+        string detailKey,
+        Func<Task> action,
+        Action<Exception> onError)
+    {
+        if (IsTransientActionBusy)
+            return;
+
+        try
+        {
+            IsTransientActionBusy = true;
+            TransientActionTitle = Loc.T(titleKey);
+            TransientActionDetail = Loc.T(detailKey);
+            await action();
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
+        }
+        finally
+        {
+            IsTransientActionBusy = false;
+            TransientActionTitle = string.Empty;
+            TransientActionDetail = string.Empty;
+        }
+    }
+
     private async Task RunRetentionAsync(bool dryRun)
     {
         if (!CanRunRetention)
@@ -902,6 +1078,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     private void RefreshLocalizationState()
     {
+        foreach (var category in FormatCategories)
+            category.RefreshLocalization();
+
         var selectedStrategy = SyncConflictStrategy;
         SyncConflictStrategies.Clear();
         foreach (var strategy in RepositorySyncConflictStrategies.All)
@@ -922,6 +1101,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CloudRepairButtonLabel));
         OnPropertyChanged(nameof(CloudRepairHint));
         OnPropertyChanged(nameof(RetentionSectionHint));
+        OnPropertyChanged(nameof(ShowBlockingOverlay));
+        OnPropertyChanged(nameof(BlockingOverlayTitle));
+        OnPropertyChanged(nameof(BlockingOverlayDetail));
 
         if (_lastAppliedRetentionPolicy is not null)
             ApplyRetentionPolicy(_lastAppliedRetentionPolicy);
@@ -1004,6 +1186,50 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             v = "." + v;
 
         return v.ToLowerInvariant();
+    }
+
+    private static string NormalizeExclusionPattern(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return value.Trim().Replace('\\', '/').Trim('/');
+    }
+
+    private static string NormalizeDirectoryPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        try
+        {
+            return Path.GetFullPath(value.Trim().Replace('/', '\\')).TrimEnd('\\', '/');
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string? TryGetRepositoryRelativePath(string repositoryRoot, string selectedPath)
+    {
+        try
+        {
+            var normalizedRoot = Path.GetFullPath(repositoryRoot).TrimEnd('\\', '/');
+            var normalizedSelected = Path.GetFullPath(selectedPath).TrimEnd('\\', '/');
+
+            if (!normalizedSelected.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var relative = Path.GetRelativePath(normalizedRoot, normalizedSelected);
+            return string.Equals(relative, ".", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : relative.Replace('\\', '/').Trim('/');
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static int ParseIntOrDefault(string value, int fallback, int min, int max)

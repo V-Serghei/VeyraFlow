@@ -119,8 +119,8 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 repo.Id,
                 scanProgress,
                 new RepositoryScanOptionsDto(
-                    SaveFileVersions: false,
-                    TriggerOverride: "sync_index_initial"),
+                    SaveFileVersions: true,
+                    TriggerOverride: "initial_snapshot"),
                 ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(

@@ -103,6 +103,14 @@ internal static class VeyraCoreNative
         out ulong written);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_zstd_compress(
+        byte[] data,
+        int dataLen,
+        byte[] output,
+        int outputLen,
+        int level);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_zstd_decompress(
         byte[] data,
         int dataLen,
@@ -284,6 +292,41 @@ internal static class VeyraCoreNative
             return output;
 
         return output[..written];
+    }
+
+    public static byte[] ZstdCompress(byte[] inputBytes, int level = 3)
+    {
+        if (inputBytes is null || inputBytes.Length == 0)
+            return [];
+
+        var bufferLength = Math.Max(256, inputBytes.Length + (inputBytes.Length / 8) + 256);
+
+        while (true)
+        {
+            var output = ArrayPool<byte>.Shared.Rent(bufferLength);
+            try
+            {
+                var written = veyra_zstd_compress(
+                    inputBytes,
+                    inputBytes.Length,
+                    output,
+                    output.Length,
+                    level);
+
+                if (written >= 0)
+                    return output[..written];
+
+                var error = GetLastError();
+                if (!error.Contains("buffer too small", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"Native zstd compress failed {error}".Trim());
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(output);
+            }
+
+            bufferLength *= 2;
+        }
     }
 
     public static string CompareSnapshotLinksJson(string currentStatesJson, string previousStatesJson)

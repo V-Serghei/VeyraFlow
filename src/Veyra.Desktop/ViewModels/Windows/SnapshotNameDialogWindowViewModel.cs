@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Application.DTOs;
@@ -21,6 +22,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private const int ContextCollapseThreshold = 14;
     private const int ContextKeepEdgeLines = 3;
     private static readonly Regex WordDiffTokenRegex = new(@"\w+|\s+|[^\w\s]", RegexOptions.Compiled);
+    private readonly IAudioPreviewPlaybackService _audioPlayback;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
     public event Action<bool>? RequestClose;
 
@@ -39,6 +41,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private double? _lastRenderedChangedPixelRatio;
     private int _lastRenderedChangedRegionCount;
     private bool _suspendImageDiffRerender;
+    private string? _audioPlaybackStatusKey;
+    private object[] _audioPlaybackStatusArgs = Array.Empty<object>();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -47,6 +51,11 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSave))]
     private string _snapshotName;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SnapshotTagsSummary))]
+    [NotifyPropertyChangedFor(nameof(HasSnapshotTags))]
+    private string _snapshotTagsInput = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelectedChangedFile))]
@@ -110,6 +119,23 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private Bitmap? _audioWaveformPreview;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectrogramPreview))]
+    private Bitmap? _audioSpectrogramPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectralDeltaPreview))]
+    private Bitmap? _audioSpectralDeltaPreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StopAudioPlaybackCommand))]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    private bool _isAudioPlaybackActive;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    private string _audioPlaybackStatus = string.Empty;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
     private double _imageDiffSensitivity = 72;
@@ -160,14 +186,26 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public ObservableCollection<SnapshotDiffRowItemViewModel> PreviewRows { get; } = [];
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
     public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
+    public ObservableCollection<AudioChangedSegmentItemViewModel> AudioChangedSegments { get; } = [];
 
     public SnapshotNameDialogWindowViewModel()
-        : this($"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}")
+        : this($"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}", new AudioPreviewPlaybackService())
+    {
+    }
+
+    public SnapshotNameDialogWindowViewModel(IAudioPreviewPlaybackService audioPlayback)
+        : this($"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}", audioPlayback)
     {
     }
 
     public SnapshotNameDialogWindowViewModel(string defaultName)
+        : this(defaultName, new AudioPreviewPlaybackService())
     {
+    }
+
+    private SnapshotNameDialogWindowViewModel(string defaultName, IAudioPreviewPlaybackService audioPlayback)
+    {
+        _audioPlayback = audioPlayback;
         _snapshotName = string.IsNullOrWhiteSpace(defaultName)
             ? $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}"
             : defaultName;
@@ -175,7 +213,9 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         ChangedFiles.CollectionChanged += OnChangedFilesCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
+        AudioChangedSegments.CollectionChanged += OnAudioChangedSegmentsCollectionChanged;
         _localization.LanguageChanged += OnLanguageChanged;
+        _audioPlayback.PlaybackStateChanged += OnAudioPlaybackStateChanged;
         RefreshImageDiffModes();
         ResetPreview(Loc.T("snapshot.preview.select_changed_file"));
     }
@@ -185,6 +225,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasNoChangedFiles => !HasChangedFiles;
     public bool HasSelectedChangedFile => SelectedChangedFile is not null;
     public bool CanSave => !string.IsNullOrWhiteSpace(SnapshotName) && HasChangedFiles;
+    public bool HasSnapshotTags => NormalizedSnapshotTags.Count > 0;
 
     public bool HasPreviewRows => PreviewRows.Count > 0;
     public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
@@ -193,6 +234,10 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
     public bool HasNoImagePreviews => !HasAnyImagePreview;
     public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
+    public bool HasAudioSpectrogramPreview => AudioSpectrogramPreview is not null;
+    public bool HasAudioSpectralDeltaPreview => AudioSpectralDeltaPreview is not null;
+    public bool HasAudioChangedSegments => AudioChangedSegments.Count > 0;
+    public bool HasAudioPlaybackStatus => !string.IsNullOrWhiteSpace(AudioPlaybackStatus);
     public bool HasPinnedHunkHeader => !string.IsNullOrWhiteSpace(PinnedHunkHeader);
     public bool HasDeterminateLoadingProgress => !IsLoadingProgressIndeterminate;
     public string LoadingProgressLabel => $"{Math.Clamp(Math.Round(LoadingProgressValue), 0, 100):0}%";
@@ -239,6 +284,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     public string SelectedChangedFileHint => SelectedChangedFile?.ComparisonHint
         ?? Loc.T("snapshot.selected_file.none_hint");
 
+    public IReadOnlyList<string> NormalizedSnapshotTags => ParseSnapshotTags(SnapshotTagsInput);
+
+    public string SnapshotTagsSummary => HasSnapshotTags
+        ? string.Join(", ", NormalizedSnapshotTags.Select(tag => "#" + tag))
+        : Loc.T("snapshot_dialog.snapshot_tags_hint");
+
     public void Initialize(
         string defaultName,
         IReadOnlyCollection<SnapshotPendingFileItemViewModel> changedFiles,
@@ -247,6 +298,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         SnapshotName = string.IsNullOrWhiteSpace(defaultName)
             ? $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}"
             : defaultName;
+        SnapshotTagsInput = string.Empty;
 
         _previewLoader = previewLoader;
 
@@ -263,12 +315,16 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasNoChangedFiles));
         OnPropertyChanged(nameof(CanSave));
         OnPropertyChanged(nameof(ChangedFilesCountLabel));
+        OnPropertyChanged(nameof(SnapshotTagsSummary));
+        OnPropertyChanged(nameof(HasSnapshotTags));
     }
 
     public void CleanupPreviewResources()
     {
         _previewCts?.Cancel();
         _imageDiffRenderCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         ReleasePreviewResources();
     }
 
@@ -281,6 +337,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(WrapToggleLabel));
         OnPropertyChanged(nameof(ChangedFilesCountLabel));
+        OnPropertyChanged(nameof(SnapshotTagsSummary));
+        OnPropertyChanged(nameof(HasSnapshotTags));
         OnPropertyChanged(nameof(SelectedChangedFileTitle));
         OnPropertyChanged(nameof(SelectedChangedFilePath));
         OnPropertyChanged(nameof(SelectedChangedFileHint));
@@ -293,6 +351,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
         OnPropertyChanged(nameof(ImageDiffDetailsToggleLabel));
         RefreshImageDiffModes();
+        RefreshAudioPlaybackStatusLocalization();
 
         var changedFiles = ChangedFiles.ToList();
         var selectedPath = SelectedChangedFile?.RelativePath;
@@ -398,6 +457,8 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void Cancel()
     {
         _previewCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         RequestClose?.Invoke(false);
     }
 
@@ -423,8 +484,17 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             return;
         }
 
+        var tags = NormalizedSnapshotTags;
+        if (tags.Count > 12)
+        {
+            ErrorMessage = Loc.T("snapshot.error.tags_too_many");
+            return;
+        }
+
         SnapshotName = trimmed;
         ErrorMessage = null;
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         RequestClose?.Invoke(true);
     }
 
@@ -539,6 +609,171 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
             PinnedHunkHeader = PreviewRows[i].HunkHeader;
             return;
+        }
+    }
+
+    [RelayCommand]
+    private Task PlayBeforeAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: true);
+
+    [RelayCommand]
+    private Task PlayDifferenceAudioAsync()
+        => PlayAudioDifferenceAsync();
+
+    [RelayCommand]
+    private Task PlayBeforeAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: true);
+
+    [RelayCommand]
+    private Task LoopAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => LoopAudioSegmentCoreAsync(segment);
+
+    [RelayCommand(CanExecute = nameof(IsAudioPlaybackActive))]
+    private void StopAudioPlayback()
+    {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+    }
+
+    private async Task PlayAudioPreviewAsync(bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus(playAfter ? "compare.audio_playing_after" : "compare.audio_playing_before");
+        }
+        catch
+        {
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioDifferenceAsync()
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus("compare.audio_playing_difference");
+        }
+        catch
+        {
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment, bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)));
+
+            SetAudioPlaybackStatus(
+                playAfter ? "compare.audio_playing_segment_after" : "compare.audio_playing_segment_before",
+                segment.SegmentLabel);
+        }
+        catch
+        {
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task LoopAudioSegmentCoreAsync(AudioChangedSegmentItemViewModel? segment)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)),
+                loop: true);
+
+            SetAudioPlaybackStatus("compare.audio_looping_segment_difference", segment.SegmentLabel);
+        }
+        catch
+        {
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private void OnAudioPlaybackStateChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_audioPlayback.IsPlaying)
+                ClearAudioPlaybackStatus();
+            else if (!IsAudioPlaybackActive)
+                IsAudioPlaybackActive = true;
+        });
+    }
+
+    private void SetAudioPlaybackStatus(string localizationKey, params object[] args)
+    {
+        _audioPlaybackStatusKey = localizationKey;
+        _audioPlaybackStatusArgs = args;
+        AudioPlaybackStatus = args.Length == 0
+            ? Loc.T(localizationKey)
+            : Loc.F(localizationKey, args);
+        IsAudioPlaybackActive = true;
+    }
+
+    private void ClearAudioPlaybackStatus()
+    {
+        _audioPlaybackStatusKey = null;
+        _audioPlaybackStatusArgs = Array.Empty<object>();
+        AudioPlaybackStatus = string.Empty;
+        IsAudioPlaybackActive = false;
+    }
+
+    private void RefreshAudioPlaybackStatusLocalization()
+    {
+        if (IsAudioPlaybackActive && !string.IsNullOrWhiteSpace(_audioPlaybackStatusKey))
+        {
+            AudioPlaybackStatus = _audioPlaybackStatusArgs.Length == 0
+                ? Loc.T(_audioPlaybackStatusKey)
+                : Loc.F(_audioPlaybackStatusKey, _audioPlaybackStatusArgs);
+        }
+        else if (!IsAudioPlaybackActive)
+        {
+            AudioPlaybackStatus = string.Empty;
         }
     }
 
@@ -759,6 +994,23 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                 _tempPreviewFiles.Add(audioPreview.WaveformImagePath);
         }
 
+        if (audioPreview.IsDifferenceTempFile && !string.IsNullOrWhiteSpace(audioPreview.DifferenceAudioPath))
+            _tempPreviewFiles.Add(audioPreview.DifferenceAudioPath);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectrogramImagePath) && File.Exists(audioPreview.SpectrogramImagePath))
+        {
+            AudioSpectrogramPreview = await Task.Run(() => new Bitmap(audioPreview.SpectrogramImagePath), ct);
+            if (audioPreview.IsSpectrogramTempFile)
+                _tempPreviewFiles.Add(audioPreview.SpectrogramImagePath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectralDeltaImagePath) && File.Exists(audioPreview.SpectralDeltaImagePath))
+        {
+            AudioSpectralDeltaPreview = await Task.Run(() => new Bitmap(audioPreview.SpectralDeltaImagePath), ct);
+            if (audioPreview.IsSpectralDeltaTempFile)
+                _tempPreviewFiles.Add(audioPreview.SpectralDeltaImagePath);
+        }
+
         if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath) && audioPreview.IsBaselineTempFile)
             _tempPreviewFiles.Add(audioPreview.BaselineAudioPath);
 
@@ -866,6 +1118,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         PendingAudioDiffPreviewDto? audioPreview)
     {
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
         if (summary is null)
             return;
 
@@ -922,6 +1175,27 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
                     $"{audioPreview.SignalSimilarityRatio.Value * 100:F1}%"));
             }
 
+            if (audioPreview.SpectralSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_similarity"),
+                    $"{audioPreview.SpectralSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (audioPreview.SpectralDeltaRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_delta"),
+                    $"{audioPreview.SpectralDeltaRatio.Value * 100:F1}%"));
+            }
+
+            if (audioPreview.BaselineStereoCorrelation.HasValue || audioPreview.CurrentStereoCorrelation.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.stereo_correlation"),
+                    $"{FormatSignedRatio(audioPreview.BaselineStereoCorrelation)} -> {FormatSignedRatio(audioPreview.CurrentStereoCorrelation)}"));
+            }
+
             if (audioPreview.ChangedTimeRatio.HasValue)
             {
                 PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
@@ -932,6 +1206,54 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 Loc.T("metric.changed_segments"),
                 $"{audioPreview.ChangedSegmentCount:N0}"));
+
+            foreach (var bandMetric in audioPreview.BandMetrics)
+            {
+                var bandName = LocalizeAudioBandName(bandMetric.BandDisplayName);
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_energy", bandName),
+                    $"{bandMetric.BaselineEnergyRatio * 100:F1}% -> {bandMetric.CurrentEnergyRatio * 100:F1}%"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_similarity", bandName),
+                    $"{bandMetric.SimilarityRatio * 100:F1}% ({Loc.T("metric.delta_short")} {bandMetric.DeltaRatio * 100:F1}%)"));
+            }
+
+            foreach (var channelMetric in audioPreview.ChannelMetrics)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_peak", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselinePeakAmplitude)} -> {FormatAmplitude(channelMetric.CurrentPeakAmplitude)}"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_rms", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselineRmsAmplitude)} -> {FormatAmplitude(channelMetric.CurrentRmsAmplitude)}"));
+
+                if (channelMetric.SimilarityRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_similarity", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.SimilarityRatio.Value * 100:F1}%"));
+                }
+
+                if (channelMetric.ChangedTimeRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_changed_timeline", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.ChangedTimeRatio.Value * 100:F1}%"));
+                }
+            }
+
+            foreach (var segment in audioPreview.ChangedSegments)
+            {
+                AudioChangedSegments.Add(new AudioChangedSegmentItemViewModel(
+                    SegmentLabel: $"#{segment.SegmentIndex}",
+                    RangeLabel: $"{FormatPreciseAudioDuration(segment.StartSeconds)} - {FormatPreciseAudioDuration(segment.EndSeconds)}",
+                    DurationLabel: FormatPreciseAudioDuration(segment.DurationSeconds),
+                    IntensityLabel: $"{segment.AverageDifferenceRatio * 100:F1}% / {segment.PeakDifferenceRatio * 100:F1}%",
+                    StartSeconds: segment.StartSeconds,
+                    DurationSeconds: segment.DurationSeconds));
+            }
             return;
         }
 
@@ -1061,14 +1383,45 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         return $"{Math.Clamp(amplitude.Value, 0d, 1d):F3}";
     }
 
+    private static string FormatSignedRatio(double? value)
+    {
+        if (!value.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(value.Value, -1d, 1d):+0.00;-0.00;0.00}";
+    }
+
+    private static string FormatPreciseAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return "0:00.000";
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss\.fff")
+            : duration.ToString(@"m\:ss\.fff");
+    }
+
+    private static string LocalizeAudioBandName(string? bandName)
+        => bandName switch
+        {
+            "Low" => Loc.T("audio.band.low"),
+            "Mids" => Loc.T("audio.band.mids"),
+            "Highs" => Loc.T("audio.band.highs"),
+            _ => bandName ?? Loc.T("common.not_available_short")
+        };
+
     private void ResetPreview(string message)
     {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         PreviewKind = PendingDiffPreviewKind.None;
         IsPreviewLoading = false;
         ClearLoadingState();
         PreviewSummary = message;
         PreviewRows.Clear();
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
         PinnedHunkHeader = string.Empty;
         _currentTextLines = Array.Empty<TextDiffLineDto>();
         _currentTextHunks = Array.Empty<TextDiffHunkDto>();
@@ -1083,9 +1436,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     private void ReleasePreviewResources()
     {
         _imageDiffRenderCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         ClearLoadingState();
         PreviewRows.Clear();
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
         PinnedHunkHeader = string.Empty;
         _currentTextLines = Array.Empty<TextDiffLineDto>();
@@ -1101,16 +1457,22 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         var rightImage = RightImagePreview;
         var overlayImage = OverlayImagePreview;
         var audioWaveform = AudioWaveformPreview;
+        var audioSpectrogram = AudioSpectrogramPreview;
+        var audioSpectralDelta = AudioSpectralDeltaPreview;
 
         LeftImagePreview = null;
         RightImagePreview = null;
         OverlayImagePreview = null;
         AudioWaveformPreview = null;
+        AudioSpectrogramPreview = null;
+        AudioSpectralDeltaPreview = null;
 
         leftImage?.Dispose();
         rightImage?.Dispose();
         overlayImage?.Dispose();
         audioWaveform?.Dispose();
+        audioSpectrogram?.Dispose();
+        audioSpectralDelta?.Dispose();
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
@@ -1682,6 +2044,39 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasPreviewMetrics));
         OnPropertyChanged(nameof(IsBinaryPreview));
         OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnAudioChangedSegmentsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasAudioChangedSegments));
+    }
+
+    private static IReadOnlyList<string> ParseSnapshotTags(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tags = new List<string>();
+
+        foreach (var raw in value.Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var normalized = raw.Trim().TrimStart('#');
+            if (string.IsNullOrWhiteSpace(normalized))
+                continue;
+
+            if (normalized.Length > 48)
+                normalized = normalized[..48].Trim();
+
+            if (normalized.Length == 0 || !seen.Add(normalized))
+                continue;
+
+            tags.Add(normalized);
+            if (tags.Count >= 12)
+                break;
+        }
+
+        return tags;
     }
 }
 

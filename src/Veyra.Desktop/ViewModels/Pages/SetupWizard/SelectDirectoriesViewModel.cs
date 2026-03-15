@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Storage;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
@@ -67,7 +68,7 @@ public sealed class SelectDirectoriesViewModel : INotifyPropertyChanged
             new FolderPickerOpenOptions { Title = Loc.T("setup.select_folder_title"), AllowMultiple = false });
 
         IStorageFolder? folder = res.FirstOrDefault();
-        string? local = folder?.Path.LocalPath;
+        string? local = StoragePathResolver.TryGetLocalPath(folder);
 
         if (!string.IsNullOrWhiteSpace(local))
         {

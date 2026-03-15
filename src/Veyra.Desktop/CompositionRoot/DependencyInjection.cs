@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Maintenance;
+using Veyra.Desktop.Services.Monitoring;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Sync;
 using Veyra.Desktop.Services.State;
@@ -12,6 +14,7 @@ using Veyra.Desktop.ViewModels.Pages.AuthWindow;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
+using Veyra.Desktop.ViewModels.Pages.Search;
 using Veyra.Desktop.ViewModels.Pages.SetupWizard;
 using Veyra.Desktop.ViewModels.Pages.Settings;
 using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
@@ -21,6 +24,8 @@ using Veyra.Desktop.Views.Pages.SetupWizard;
 using Veyra.Desktop.Views.Windows;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Onboarding;
+using Veyra.Desktop.Services.System;
+using Veyra.Desktop.Services.Storage;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
@@ -41,6 +46,9 @@ public static class DependencyInjection
 
         var services = new ServiceCollection();
 
+        var schedulerSettingsStore = new SnapshotSchedulerSettingsStore();
+        var schedulerOverrides = schedulerSettingsStore.LoadAsync().GetAwaiter().GetResult();
+
         services.AddSingleton<IConfiguration>(cfg);
         services.AddVeyraLogging(cfg);
 
@@ -54,11 +62,11 @@ public static class DependencyInjection
 
         var schedulerOptions = new SnapshotSchedulerOptions
         {
-            Enabled = cfg.GetValue<bool?>("SnapshotScheduler:Enabled") ?? true,
+            Enabled = schedulerOverrides?.Enabled ?? (cfg.GetValue<bool?>("SnapshotScheduler:Enabled") ?? true),
             PollSeconds = cfg.GetValue<int?>("SnapshotScheduler:PollSeconds") ?? 30,
-            IntervalMinutes = cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? 15,
-            QuietHoursStartHour = cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0,
-            QuietHoursEndHour = cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0,
+            IntervalMinutes = schedulerOverrides?.IntervalMinutes ?? (cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? 15),
+            QuietHoursStartHour = schedulerOverrides?.QuietHoursStartHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0),
+            QuietHoursEndHour = schedulerOverrides?.QuietHoursEndHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0),
             MaxReadBytesPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? 0,
             MaxIoOperationsPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? 0,
             RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,
@@ -70,6 +78,7 @@ public static class DependencyInjection
         };
 
         services.AddSingleton(schedulerOptions);
+        services.AddSingleton<ISnapshotSchedulerSettingsStore>(schedulerSettingsStore);
         services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
         services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
         services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
@@ -77,7 +86,17 @@ public static class DependencyInjection
 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
+        services.AddSingleton<IRetentionDefaultsStore, RetentionDefaultsStore>();
+        services.AddSingleton<IAppTransientStateMaintenanceService, AppTransientStateMaintenanceService>();
+        services.AddTransient<IRepositoryRetentionDefaultsApplier, RepositoryRetentionDefaultsApplier>();
         services.AddTransient<ISensitiveActionGuard, SensitiveActionGuard>();
+        services.AddTransient<IAudioPreviewPlaybackService, AudioPreviewPlaybackService>();
+        services.AddTransient<IOperationMonitorService, OperationMonitorService>();
+        services.AddScoped<ILocalBlockStorageMetricsService, LocalBlockStorageMetricsService>();
+        services.AddSingleton<IWindowsAutostartService>(_ =>
+            OperatingSystem.IsWindows()
+                ? new WindowsAutostartService()
+                : new UnsupportedWindowsAutostartService());
 
         services.AddTransient<WelcomeWindowViewModel>();
         services.AddTransient<WelcomeIntroViewModel>();
@@ -91,6 +110,7 @@ public static class DependencyInjection
         services.AddTransient<RepositoryDashboardViewModel>();
         services.AddTransient<RepositoryExplorerViewModel>();
         services.AddTransient<RepositorySettingsViewModel>();
+        services.AddTransient<GlobalSearchViewModel>();
         services.AddTransient<AppSettingsViewModel>();
 
         services.AddTransient<CreateRepositoryWindowViewModel>();
@@ -100,6 +120,9 @@ public static class DependencyInjection
         services.AddTransient<PasswordVerificationWindowViewModel>();
         services.AddTransient<AuthDialogWindowViewModel>();
         services.AddTransient<OperationJournalWindowViewModel>();
+        services.AddTransient<OperationMonitorWindowViewModel>();
+        services.AddTransient<RepositoryBundleExportWizardWindowViewModel>();
+        services.AddTransient<RepositoryBundleImportWizardWindowViewModel>();
 
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
@@ -133,6 +156,15 @@ public static class DependencyInjection
 
         services.AddTransient<OperationJournalWindow>(sp =>
             new OperationJournalWindow { DataContext = sp.GetRequiredService<OperationJournalWindowViewModel>() });
+
+        services.AddTransient<OperationMonitorWindow>(sp =>
+            new OperationMonitorWindow { DataContext = sp.GetRequiredService<OperationMonitorWindowViewModel>() });
+
+        services.AddTransient<RepositoryBundleExportWizardWindow>(sp =>
+            new RepositoryBundleExportWizardWindow { DataContext = sp.GetRequiredService<RepositoryBundleExportWizardWindowViewModel>() });
+
+        services.AddTransient<RepositoryBundleImportWizardWindow>(sp =>
+            new RepositoryBundleImportWizardWindow { DataContext = sp.GetRequiredService<RepositoryBundleImportWizardWindowViewModel>() });
 
         services.AddTransient<SetupWizardWindow>();
 

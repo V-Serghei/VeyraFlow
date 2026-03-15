@@ -49,6 +49,9 @@ public sealed class UpdateRepositoryConfigurationHandler(
                 repo.Id,
                 safeName,
                 request.Description,
+                request.AutoCaptureFileVersions,
+                request.ProtectCloudMetadata,
+                NormalizeExcludedPatterns(request.ExcludedPatterns),
                 safeRetentionPolicy,
                 safeSyncConflictStrategy,
                 safeSyncRetryMaxAttempts,
@@ -159,4 +162,16 @@ public sealed class UpdateRepositoryConfigurationHandler(
 
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
+
+    private static IReadOnlyCollection<string> NormalizeExcludedPatterns(IEnumerable<string> values)
+    {
+        return values
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim().Replace('\\', '/'))
+            .Select(v => v.Trim('/'))
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }

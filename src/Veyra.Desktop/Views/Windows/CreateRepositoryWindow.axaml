@@ -3,9 +3,11 @@
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:formatted="clr-namespace:Veyra.Desktop.Models.Formatted"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         mc:Ignorable="d"
         x:Class="Veyra.Desktop.Views.Windows.CreateRepositoryWindow"
+        x:Name="Root"
         x:DataType="windows:CreateRepositoryWindowViewModel"
         Width="980"
         Height="700"
@@ -56,6 +58,27 @@
 
                             <StackPanel IsVisible="{Binding IsStepFormats}" Spacing="12">
                             <TextBlock Text="{loc:Tr create_repo.select_formats}" FontSize="15" FontWeight="SemiBold"/>
+                            <TextBlock Text="{loc:Tr create_repo.format_categories_hint}" Classes="muted" TextWrapping="Wrap"/>
+
+                            <ItemsControl ItemsSource="{Binding FormatCategories}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="formatted:FormatCategoryItemViewModel">
+                                        <Button Margin="4"
+                                                Padding="10,5"
+                                                Classes="subtle compact"
+                                                Classes.primary="{Binding IsApplied}"
+                                                Command="{Binding #Root.((windows:CreateRepositoryWindowViewModel)DataContext).ToggleFormatCategoryCommand}"
+                                                CommandParameter="{Binding .}">
+                                            <TextBlock Text="{Binding DisplayName}"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
 
                             <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
                                 <ItemsControl ItemsSource="{Binding Formats}">

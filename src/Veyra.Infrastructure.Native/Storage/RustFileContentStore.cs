@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
@@ -14,6 +16,10 @@ internal sealed class RustFileContentStore : IFileContentStore
 {
     private const int DefaultChunkSize = 64 * 1024;
     private const string ManagedHashPrefix = "sha256-";
+    private const string ManagedPayloadMagic = "VYRBLK";
+    private const byte ManagedPayloadVersion = 1;
+    private const byte ManagedCompressionNone = 0;
+    private const byte ManagedCompressionBrotli = 1;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -221,7 +227,9 @@ internal sealed class RustFileContentStore : IFileContentStore
             fileSizeBytes += read;
 
             var plaintextHash = ComputeSha256(buffer.AsSpan(0, read));
-            var bytesToStore = _artifactCryptor.Protect(buffer.AsSpan(0, read), plaintextHash);
+            var bytesToStore = _artifactCryptor.Protect(
+                BuildManagedEncryptedPayload(buffer.AsSpan(0, read)),
+                plaintextHash);
             var storedHash = ComputeSha256(bytesToStore);
             var blockHash = ManagedHashPrefix + storedHash;
             var blockPath = GetManagedBlockPath(storedHash);
@@ -317,7 +325,7 @@ internal sealed class RustFileContentStore : IFileContentStore
                     throw new FileNotFoundException("Block file not found for restore.", blockPath);
 
                 var storedBytes = await File.ReadAllBytesAsync(blockPath, ct);
-                plaintextBytes = _artifactCryptor.Unprotect(storedBytes);
+                plaintextBytes = DecodeManagedEncryptedPayload(_artifactCryptor.Unprotect(storedBytes));
 
                 if (plaintextBytes.Length < block.LengthBytes)
                     throw new InvalidOperationException(
@@ -439,6 +447,99 @@ internal sealed class RustFileContentStore : IFileContentStore
 
     private static string ComputeSha256(ReadOnlySpan<byte> data)
         => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    private static byte[] BuildManagedEncryptedPayload(ReadOnlySpan<byte> plaintext)
+    {
+        var rawBytes = plaintext.ToArray();
+        var payloadBytes = rawBytes;
+        var compressionKind = ManagedCompressionNone;
+
+        var compressed = TryCompressManagedPayload(rawBytes);
+        if (compressed is not null && compressed.Length > 0 && compressed.Length < rawBytes.Length)
+        {
+            payloadBytes = compressed;
+            compressionKind = ManagedCompressionBrotli;
+        }
+
+        var magicBytes = System.Text.Encoding.ASCII.GetBytes(ManagedPayloadMagic);
+        var envelope = new byte[magicBytes.Length + 1 + 1 + sizeof(int) + payloadBytes.Length];
+        var offset = 0;
+
+        magicBytes.CopyTo(envelope, offset);
+        offset += magicBytes.Length;
+
+        envelope[offset++] = ManagedPayloadVersion;
+        envelope[offset++] = compressionKind;
+        BinaryPrimitives.WriteInt32LittleEndian(envelope.AsSpan(offset, sizeof(int)), rawBytes.Length);
+        offset += sizeof(int);
+
+        payloadBytes.CopyTo(envelope.AsSpan(offset, payloadBytes.Length));
+        return envelope;
+    }
+
+    private static byte[] DecodeManagedEncryptedPayload(ReadOnlySpan<byte> storedPayload)
+    {
+        if (!LooksLikeManagedEncryptedPayload(storedPayload))
+            return storedPayload.ToArray();
+
+        var magicBytes = System.Text.Encoding.ASCII.GetBytes(ManagedPayloadMagic);
+        var offset = magicBytes.Length;
+
+        var version = storedPayload[offset++];
+        if (version != ManagedPayloadVersion)
+            return storedPayload.ToArray();
+
+        var compressionKind = storedPayload[offset++];
+        var expectedLength = BinaryPrimitives.ReadInt32LittleEndian(storedPayload.Slice(offset, sizeof(int)));
+        offset += sizeof(int);
+
+        var payload = storedPayload[offset..].ToArray();
+        return compressionKind switch
+        {
+            ManagedCompressionNone => payload,
+            ManagedCompressionBrotli => DecompressManagedPayload(payload, expectedLength),
+            _ => throw new InvalidOperationException($"Unsupported managed block compression kind {compressionKind}.")
+        };
+    }
+
+    private static bool LooksLikeManagedEncryptedPayload(ReadOnlySpan<byte> payload)
+    {
+        var magicBytes = System.Text.Encoding.ASCII.GetBytes(ManagedPayloadMagic);
+        if (payload.Length < magicBytes.Length + 1 + 1 + sizeof(int))
+            return false;
+
+        return payload[..magicBytes.Length].SequenceEqual(magicBytes);
+    }
+
+    private static byte[]? TryCompressManagedPayload(byte[] rawBytes)
+    {
+        try
+        {
+            using var output = new MemoryStream();
+            using (var brotli = new BrotliStream(output, CompressionLevel.Optimal, leaveOpen: true))
+            {
+                brotli.Write(rawBytes, 0, rawBytes.Length);
+            }
+
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static byte[] DecompressManagedPayload(byte[] compressedBytes, int expectedLength)
+    {
+        using var input = new MemoryStream(compressedBytes, writable: false);
+        using var brotli = new BrotliStream(input, CompressionMode.Decompress, leaveOpen: false);
+        using var output = expectedLength > 0
+            ? new MemoryStream(expectedLength)
+            : new MemoryStream();
+
+        brotli.CopyTo(output);
+        return output.ToArray();
+    }
 
     private string GetManagedBlockPath(string hash)
     {

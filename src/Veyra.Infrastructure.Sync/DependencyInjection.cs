@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Polly;
 using Polly.Extensions.Http;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Security;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Infrastructure.Sync.Auth;
 using Veyra.Infrastructure.Sync.Sync;
@@ -21,6 +22,7 @@ public static class DependencyInjection
                       ?? "http://localhost:8080";
 
         services.AddSingleton<IAccessTokenPolicyService, AccessTokenPolicyService>();
+        services.AddSingleton<ICloudMetadataProtectionService, NoopCloudMetadataProtectionService>();
 
         services.AddHttpClient<IAuthService, AuthHttpService>(c =>
             {

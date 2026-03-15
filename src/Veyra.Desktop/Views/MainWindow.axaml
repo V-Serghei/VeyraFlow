@@ -38,6 +38,19 @@
                            Text="{loc:Tr app.brand}"/>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="MainSearchButton"
+                            MinWidth="96"
+                            Height="36"
+                            Command="{Binding OpenGlobalSearchCommand}"
+                            ToolTip.Tip="{loc:Tr search.title}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE721;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.open_search}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
                     <Button
                             x:Name="MainLanguageButton"
                             MinWidth="56"

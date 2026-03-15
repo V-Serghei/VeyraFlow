@@ -36,8 +36,8 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
                 match.Id,
                 null,
                 new RepositoryScanOptionsDto(
-                    SaveFileVersions: false,
-                    TriggerOverride: "sync_index_setup"),
+                    SaveFileVersions: true,
+                    TriggerOverride: "initial_snapshot"),
                 ct);
 
             await native.ApplySetupAsync(ct);
@@ -52,4 +52,3 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
         }
     }
 }
-

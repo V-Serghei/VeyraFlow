@@ -7,10 +7,13 @@ public sealed record RepositoryDto(
     int DirectoryId,
     string DirectoryPath,
     IReadOnlyList<string> LinkedFormats,
+    IReadOnlyList<string> ExcludedPatterns,
     bool IsDeleted,
     int FileCount,
     int VersionCount,
     long TotalSizeBytes,
     DateTime? LastScannedAt,
     RepositoryRetentionPolicyDto RetentionPolicy,
-    RepositoryCloudSyncStatusDto? CloudSync = null);
+    RepositoryCloudSyncStatusDto? CloudSync = null,
+    bool AutoCaptureFileVersions = true,
+    bool ProtectCloudMetadata = true);

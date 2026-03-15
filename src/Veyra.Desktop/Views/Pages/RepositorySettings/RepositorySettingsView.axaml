@@ -3,6 +3,7 @@
              xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.RepositorySettings"
+             xmlns:formatted="clr-namespace:Veyra.Desktop.Models.Formatted"
              xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              x:Class="Veyra.Desktop.Views.Pages.RepositorySettings.RepositorySettingsView"
              x:Name="Root"
@@ -108,6 +109,30 @@
                             </StackPanel>
 
                             <StackPanel Spacing="12">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="{loc:Tr repo_settings.format_categories_title}" Classes="label"/>
+                                    <TextBlock Text="{loc:Tr repo_settings.format_categories_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                    <ItemsControl ItemsSource="{Binding FormatCategories}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="formatted:FormatCategoryItemViewModel">
+                                                <Button Margin="0,0,8,8"
+                                                        Padding="10,6"
+                                                        Classes="subtle compact"
+                                                        Classes.primary="{Binding IsApplied}"
+                                                        Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).ToggleFormatCategoryCommand}"
+                                                        CommandParameter="{Binding .}">
+                                                    <TextBlock Text="{Binding DisplayName}"/>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
                                 <Border Classes="metric-card">
                                     <StackPanel Spacing="10">
                                         <TextBlock Text="{loc:Tr repo_settings.selected_formats}" Classes="label"/>
@@ -181,6 +206,82 @@
                                             Classes="subtle"/>
                                 </Grid>
                             </StackPanel>
+
+                            <Border Classes="metric-card">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="{loc:Tr repo_settings.excluded_paths_title}" Classes="label"/>
+                                    <TextBlock Text="{loc:Tr repo_settings.excluded_paths_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                    <ScrollViewer MaxHeight="112"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl ItemsSource="{Binding ExcludedPatterns}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="x:String">
+                                                    <Border Classes="chip" Padding="8,4" Margin="0,0,8,8">
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Text="{Binding .}"/>
+                                                            <Button Content="&#xE711;"
+                                                                    Width="22"
+                                                                    Height="22"
+                                                                    Padding="0"
+                                                                    Classes="ghost icon"
+                                                                    ToolTip.Tip="{loc:Tr common.remove}"
+                                                                    Command="{Binding #Root.((settings:RepositorySettingsViewModel)DataContext).RemoveExclusionPatternCommand}"
+                                                                    CommandParameter="{Binding .}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+
+                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                        <TextBox Grid.Column="0"
+                                                 Text="{Binding CustomExclusionPattern, Mode=TwoWay}"
+                                                 Watermark="{loc:Tr repo_settings.excluded_paths_placeholder}"/>
+                                        <Button Grid.Column="1"
+                                                Content="{loc:Tr common.add}"
+                                                Command="{Binding AddCustomExclusionPatternCommand}"
+                                                Classes="subtle"/>
+                                        <Button Grid.Column="2"
+                                                Command="{Binding BrowseExclusionFolderCommand}"
+                                                Classes="subtle responsive-icon"
+                                                ToolTip.Tip="{loc:Tr repo_settings.excluded_paths_pick_folder}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE838;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr repo_settings.excluded_paths_pick_folder}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="metric-card">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <CheckBox Grid.Column="0"
+                                                  Content="{loc:Tr repo_settings.auto_capture_versions}"
+                                                  IsChecked="{Binding AutoCaptureFileVersions, Mode=TwoWay}"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.auto_capture_versions_hint}"/>
+                                    </Grid>
+                                    <TextBlock Text="{loc:Tr repo_settings.auto_capture_versions_description}"
+                                               Classes="muted"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </Border>
 
@@ -289,6 +390,25 @@
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="{Binding CloudRepairTitle}" Classes="label"/>
                                     <TextBlock Text="{Binding CloudRepairHint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="metric-card">
+                                <StackPanel Spacing="8">
+                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
+                                        <CheckBox Grid.Column="0"
+                                                  Content="{loc:Tr repo_settings.protect_cloud_metadata}"
+                                                  IsChecked="{Binding ProtectCloudMetadata, Mode=TwoWay}"/>
+                                        <Button Grid.Column="1"
+                                                Classes="ghost icon"
+                                                Content="?"
+                                                VerticalAlignment="Center"
+                                                ToolTip.Tip="{loc:Tr repo_settings.protect_cloud_metadata_hint}"/>
+                                    </Grid>
+                                    <TextBlock Text="{loc:Tr repo_settings.protect_cloud_metadata_description}"
+                                               Classes="muted"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 
@@ -551,15 +671,15 @@
         </DockPanel>
 
         <Border Classes="loading-overlay"
-                IsVisible="{Binding IsLoading}">
+                IsVisible="{Binding ShowBlockingOverlay}">
             <Border Classes="loading-card"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     MinWidth="320"
                     MaxWidth="420">
                 <StackPanel Classes="loading-state">
-                    <TextBlock Text="{loc:Tr repo_settings.loading_title}" FontSize="18" FontWeight="SemiBold"/>
-                    <TextBlock Text="{loc:Tr repo_settings.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding BlockingOverlayTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding BlockingOverlayDetail}" Classes="muted" TextWrapping="Wrap"/>
                     <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
                 </StackPanel>
             </Border>

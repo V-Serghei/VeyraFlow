@@ -16,38 +16,72 @@ public sealed class AudioDiffPreviewBuilderTests
 
         try
         {
-            WriteMonoPcmWave(
+            WritePcmWave(
                 baselinePath,
                 sampleRate: 22050,
-                samples: BuildSignal(22050, segments:
+                channels:
                 [
-                    new SignalSegment(0.45f, 0.35f, 0.0f),
-                    new SignalSegment(0.45f, 0.35f, 440.0f),
-                    new SignalSegment(0.10f, 0.10f, 0.0f)
-                ]));
+                    BuildSignal(22050, segments:
+                    [
+                        new SignalSegment(0.25f, 0.10f, 0.0f),
+                        new SignalSegment(0.45f, 0.42f, 440.0f),
+                        new SignalSegment(0.30f, 0.12f, 0.0f)
+                    ]),
+                    BuildSignal(22050, segments:
+                    [
+                        new SignalSegment(0.20f, 0.08f, 0.0f),
+                        new SignalSegment(0.55f, 0.34f, 220.0f),
+                        new SignalSegment(0.25f, 0.12f, 0.0f)
+                    ])
+                ]);
 
-            WriteMonoPcmWave(
+            WritePcmWave(
                 currentPath,
                 sampleRate: 22050,
-                samples: BuildSignal(22050, segments:
+                channels:
                 [
-                    new SignalSegment(0.20f, 0.35f, 0.0f),
-                    new SignalSegment(0.35f, 0.80f, 660.0f),
-                    new SignalSegment(0.25f, 0.18f, 330.0f),
-                    new SignalSegment(0.20f, 0.10f, 0.0f)
-                ]));
+                    BuildSignal(22050, segments:
+                    [
+                        new SignalSegment(0.15f, 0.10f, 0.0f),
+                        new SignalSegment(0.30f, 0.86f, 660.0f),
+                        new SignalSegment(0.25f, 0.28f, 330.0f),
+                        new SignalSegment(0.30f, 0.10f, 0.0f)
+                    ]),
+                    BuildSignal(22050, segments:
+                    [
+                        new SignalSegment(0.15f, 0.08f, 0.0f),
+                        new SignalSegment(0.30f, 0.58f, 330.0f),
+                        new SignalSegment(0.25f, 0.22f, 880.0f),
+                        new SignalSegment(0.30f, 0.12f, 0.0f)
+                    ])
+                ]);
 
             var result = await AudioDiffPreviewBuilder.TryBuildAsync(baselinePath, currentPath, CancellationToken.None);
 
             Assert.NotNull(result);
+            Assert.True(File.Exists(result!.DifferenceAudioPath));
             Assert.True(File.Exists(result!.WaveformImagePath));
+            Assert.True(File.Exists(result.SpectrogramImagePath));
+            Assert.True(File.Exists(result.SpectralDeltaImagePath));
             Assert.True(result.BaselineDurationSeconds > 0d);
             Assert.True(result.CurrentDurationSeconds > 0d);
             Assert.True(result.ChangedTimeRatio > 0d);
             Assert.True(result.ChangedSegmentCount > 0);
             Assert.True(result.SignalSimilarityRatio < 0.98d);
+            Assert.True(result.SpectralSimilarityRatio < 0.995d);
+            Assert.True(result.SpectralDeltaRatio > 0d);
             Assert.True(result.BaselinePeakAmplitude > 0d);
             Assert.True(result.CurrentPeakAmplitude > 0d);
+            Assert.NotEmpty(result.ChannelMetrics);
+            Assert.True(result.ChannelMetrics.Count >= 2);
+            Assert.NotEmpty(result.BandMetrics);
+            Assert.Equal(3, result.BandMetrics.Count);
+            Assert.NotEmpty(result.ChangedSegments);
+            Assert.All(result.ChangedSegments, segment =>
+            {
+                Assert.True(segment.EndSeconds >= segment.StartSeconds);
+                Assert.True(segment.DurationSeconds >= 0d);
+            });
         }
         finally
         {
@@ -94,15 +128,16 @@ public sealed class AudioDiffPreviewBuilderTests
         return samples;
     }
 
-    private static void WriteMonoPcmWave(string path, int sampleRate, float[] samples)
+    private static void WritePcmWave(string path, int sampleRate, float[][] channels)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         const short bitsPerSample = 16;
-        const short channels = 1;
-        var blockAlign = (short)(channels * (bitsPerSample / 8));
+        var channelCount = (short)Math.Max(1, channels.Length);
+        var maxSamples = channels.Length == 0 ? 0 : channels.Max(channel => channel.Length);
+        var blockAlign = (short)(channelCount * (bitsPerSample / 8));
         var byteRate = sampleRate * blockAlign;
-        var dataLength = samples.Length * blockAlign;
+        var dataLength = maxSamples * blockAlign;
 
         using var stream = File.Create(path);
         using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: false);
@@ -113,7 +148,7 @@ public sealed class AudioDiffPreviewBuilderTests
         writer.Write(Encoding.ASCII.GetBytes("fmt "));
         writer.Write(16);
         writer.Write((short)1);
-        writer.Write(channels);
+        writer.Write(channelCount);
         writer.Write(sampleRate);
         writer.Write(byteRate);
         writer.Write(blockAlign);
@@ -121,10 +156,15 @@ public sealed class AudioDiffPreviewBuilderTests
         writer.Write(Encoding.ASCII.GetBytes("data"));
         writer.Write(dataLength);
 
-        foreach (var sample in samples)
+        for (var sampleIndex = 0; sampleIndex < maxSamples; sampleIndex++)
         {
-            var pcm = (short)Math.Round(Math.Clamp(sample, -1f, 1f) * short.MaxValue);
-            writer.Write(pcm);
+            for (var channelIndex = 0; channelIndex < channelCount; channelIndex++)
+            {
+                var source = channelIndex < channels.Length ? channels[channelIndex] : Array.Empty<float>();
+                var sample = sampleIndex < source.Length ? source[sampleIndex] : 0f;
+                var pcm = (short)Math.Round(Math.Clamp(sample, -1f, 1f) * short.MaxValue);
+                writer.Write(pcm);
+            }
         }
     }
 

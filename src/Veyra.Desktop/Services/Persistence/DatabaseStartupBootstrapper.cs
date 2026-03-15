@@ -35,6 +35,8 @@ internal static class DatabaseStartupBootstrapper
         BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(db);
         db.Database.Migrate();
         EnsureRepositorySnapshotTitleColumn(db);
+        EnsureRepositorySnapshotTagsColumn(db);
+        EnsureRepositoryCaptureSettingsColumns(db);
         BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
         BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
 
@@ -394,6 +396,77 @@ internal static class DatabaseStartupBootstrapper
         }
     }
 
+    private static void EnsureRepositorySnapshotTagsColumn(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            var hasTagsCsv = false;
+
+            using (var check = connection.CreateCommand())
+            {
+                check.CommandText = "PRAGMA table_info(\"RepositorySnapshots\");";
+                using var reader = check.ExecuteReader();
+                while (reader.Read())
+                {
+                    var name = reader["name"]?.ToString();
+                    if (string.Equals(name, "TagsCsv", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasTagsCsv = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasTagsCsv)
+                return;
+
+            using (var alter = connection.CreateCommand())
+            {
+                alter.CommandText = "ALTER TABLE \"RepositorySnapshots\" ADD COLUMN \"TagsCsv\" TEXT NULL;";
+                alter.ExecuteNonQuery();
+            }
+
+            Log.Warning("Database schema repair applied: added missing RepositorySnapshots.TagsCsv column.");
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureRepositoryCaptureSettingsColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 1");
+            EnsureSqliteColumnExists(connection, "Repositories", "ProtectCloudMetadata", "INTEGER NOT NULL DEFAULT 1");
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
     private static void BackfillUserProfileEmailMigrationHistoryIfNeeded(VeyraDbContext db)
     {
         if (!db.Database.IsSqlite())
@@ -642,6 +715,8 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
         try
         {
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionEnabled", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "Repositories", "ProtectCloudMetadata", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 1");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxAgeDays", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxSnapshots", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxTotalSizeBytes", "INTEGER NULL");

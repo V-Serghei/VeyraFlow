@@ -1,10 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Net.Mail;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,13 +18,22 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Observability;
+using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
+using Veyra.Application.Commands.Repository;
+using Veyra.Application.Commands.Security;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
+using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.Onboarding;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Services.Storage.Models;
+using Veyra.Desktop.Services.System;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -39,6 +53,7 @@ public sealed partial class AppSettingsTabViewModel : ObservableObject
     public string TitleKey { get; }
     public string SubtitleKey { get; }
     [ObservableProperty] private bool _isSelected;
+    [ObservableProperty] private bool _isVisible = true;
 
     public string Title => Loc.T(TitleKey);
     public string Subtitle => Loc.T(SubtitleKey);
@@ -90,7 +105,27 @@ public sealed record AppRepositorySyncIssueItemViewModel(
     string StallText,
     bool HasStall,
     string ErrorText,
-    bool HasError);
+    bool HasError,
+    string IssueCategoryCode,
+    string IssueCategoryText,
+    string ConflictStrategyText,
+    string RecommendationText,
+    bool HasRecommendation);
+
+public sealed record AppArtifactKeyItemViewModel(
+    string KeyId,
+    string StatusCode,
+    string StatusText,
+    string CreatedAtText,
+    string RotatedAtText,
+    string RevokedAtText,
+    string NoteText,
+    bool IsActive,
+    bool CanRevoke,
+    bool IsRetired,
+    bool IsRevoked,
+    bool HasRotatedAt,
+    bool HasRevokedAt);
 
 public sealed partial class AppSettingsViewModel : ObservableObject
 {
@@ -101,10 +136,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly IAccessTokenPolicyService _tokenPolicy;
     private readonly IAuthService _auth;
     private readonly IOperationJournalService _journal;
+    private readonly IAppDiagnosticsService _appDiagnostics;
+    private readonly IRepositoryRetentionService _retention;
     private readonly IRepositoryCloudSyncOrchestrator _sync;
     private readonly ICloudSyncService _cloudSyncService;
+    private readonly ILocalBlockStorageMetricsService _localStorageMetrics;
+    private readonly IRetentionDefaultsStore _retentionDefaultsStore;
+    private readonly IAppTransientStateMaintenanceService _transientStateMaintenance;
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly IWindowService _windows;
+    private readonly IWindowsAutostartService _autostart;
+    private readonly ISnapshotScheduler _snapshotScheduler;
+    private readonly ISnapshotSchedulerSettingsStore _snapshotSchedulerSettingsStore;
+    private readonly SnapshotSchedulerOptions _snapshotSchedulerOptions;
     private readonly IMediator _mediator;
     private readonly ILogger<AppSettingsViewModel> _log;
     private readonly OnboardingStateService _onboardingState;
@@ -122,11 +166,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly Dictionary<int, bool> _stallStateByRepositoryId = [];
     private CancellationTokenSource? _syncStatusAutoRefreshCts;
     private Task? _syncStatusAutoRefreshTask;
+    private LocalBlockStorageMetricsDto? _lastLocalStorageMetrics;
+    private AppDiagnosticsReportDto? _lastDiagnosticsReport;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralTabSelected))]
     [NotifyPropertyChangedFor(nameof(IsUserTabSelected))]
     [NotifyPropertyChangedFor(nameof(IsSyncTabSelected))]
+    [NotifyPropertyChangedFor(nameof(IsMonitoringTabSelected))]
     private AppSettingsTabViewModel? _selectedTab;
 
     [ObservableProperty] private bool _isLoading;
@@ -188,6 +235,31 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [ObservableProperty] private string _cloudStorageBlocksBreakdownText = string.Empty;
     [ObservableProperty] private string _cloudStoragePacksBreakdownText = string.Empty;
     [ObservableProperty] private string _cloudStorageFilesystemBreakdownText = string.Empty;
+    [ObservableProperty] private bool _hasLocalStorageMetrics;
+    [ObservableProperty] private string _localStorageLastUpdatedText = string.Empty;
+    [ObservableProperty] private long _localStorageReferencedBlockCount;
+    [ObservableProperty] private long _localStorageUniqueBlockCount;
+    [ObservableProperty] private long _localStorageMissingBlockCount;
+    [ObservableProperty] private string _localStorageReductionText = string.Empty;
+    [ObservableProperty] private string _localStorageLogicalBytesText = string.Empty;
+    [ObservableProperty] private string _localStoragePhysicalBytesText = string.Empty;
+    [ObservableProperty] private string _localStorageFilesystemBreakdownText = string.Empty;
+    [ObservableProperty] private string _localStorageRepositoryBreakdownText = string.Empty;
+    [ObservableProperty] private string _localStorageMessage = string.Empty;
+    [ObservableProperty] private bool _hasSystemDiagnostics;
+    [ObservableProperty] private bool _isSystemDiagnosticsBusy;
+    [ObservableProperty] private string _systemDiagnosticsLastUpdatedText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsTargetRepositoryText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsMemoryText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsMemoryStatusText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsHistoryText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsHistoryStatusText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsScanText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsScanStatusText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsDedupText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsDedupStatusText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsNativeRuntimeText = string.Empty;
+    [ObservableProperty] private string _systemDiagnosticsMessage = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRepositorySyncIssues))]
     private int _repositorySyncIssueCount;
@@ -195,6 +267,54 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanEditSensitiveActionVerification))]
     private bool _hasActiveProfile;
     [ObservableProperty] private bool _requirePasswordForSensitiveActions;
+    [ObservableProperty] private bool _isWindowsAutostartEnabled;
+    [ObservableProperty] private string _windowsAutostartCommandText = string.Empty;
+    [ObservableProperty] private bool _isAutostartBusy;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AutomaticSnapshotsSummaryText))]
+    private bool _isAutomaticSnapshotsEnabled;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AutomaticSnapshotsSummaryText))]
+    private int _selectedAutomaticSnapshotIntervalMinutes;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AutomaticSnapshotsSummaryText))]
+    private int _selectedAutomaticSnapshotQuietStartHour;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AutomaticSnapshotsSummaryText))]
+    private int _selectedAutomaticSnapshotQuietEndHour;
+    [ObservableProperty] private bool _isAutomaticSnapshotsBusy;
+    [ObservableProperty] private string _automaticSnapshotsMessage = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private bool _globalRetentionEnabled;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private string _globalRetentionMaxAgeDays = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private string _globalRetentionMaxSnapshots = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private string _globalRetentionMaxTotalSizeMb = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private string _globalRetentionTriggerFilter = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(GlobalRetentionSummaryText))]
+    private int _globalRetentionRunIntervalMinutes = 60;
+    [ObservableProperty] private bool _isGlobalRetentionBusy;
+    [ObservableProperty] private string _globalRetentionMessage = string.Empty;
+    [ObservableProperty] private bool _isTransientCacheCleanupBusy;
+    [ObservableProperty] private string _transientCacheCleanupMessage = string.Empty;
+    [ObservableProperty] private bool _isTransientActionBusy;
+    [ObservableProperty] private string _transientActionTitle = string.Empty;
+    [ObservableProperty] private string _transientActionDetail = string.Empty;
+    [ObservableProperty] private bool _isArtifactEncryptionEnabled;
+    [ObservableProperty] private string _artifactEncryptionStatusText = string.Empty;
+    [ObservableProperty] private string _artifactEncryptionActiveKeyText = string.Empty;
+    [ObservableProperty] private string _artifactEncryptionUpdatedText = string.Empty;
+    [ObservableProperty] private string _artifactEncryptionMessage = string.Empty;
+    [ObservableProperty] private bool _isArtifactEncryptionBusy;
 
     [ObservableProperty]
     private AppLanguageOptionItemViewModel? _selectedLanguage;
@@ -248,7 +368,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [
         new("general", "app_settings.tab_general_title", "app_settings.tab_general_subtitle"),
         new("user", "app_settings.tab_user_title", "app_settings.tab_user_subtitle"),
-        new("sync", "app_settings.tab_sync_title", "app_settings.tab_sync_subtitle")
+        new("sync", "app_settings.tab_sync_title", "app_settings.tab_sync_subtitle"),
+        new("monitoring", "app_settings.tab_monitoring_title", "app_settings.tab_monitoring_subtitle")
     ];
 
     public ObservableCollection<AppUserProfileItemViewModel> Profiles { get; } = [];
@@ -257,17 +378,29 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public ObservableCollection<AppExperienceOptionItemViewModel> ExperienceModes { get; } = [];
     public ObservableCollection<AppOperationJournalItemViewModel> OperationJournalItems { get; } = [];
     public ObservableCollection<AppRepositorySyncIssueItemViewModel> RepositorySyncIssues { get; } = [];
+    public ObservableCollection<AppArtifactKeyItemViewModel> ArtifactKeys { get; } = [];
+    public ObservableCollection<int> AutomaticSnapshotIntervalOptions { get; } = [5, 10, 15, 30, 60, 120, 180, 360, 720];
+    public ObservableCollection<int> QuietHourOptions { get; } = new(Enumerable.Range(0, 24));
 
     public AppSettingsViewModel(
         IUserProfileRepository userProfiles,
         IAccessTokenPolicyService tokenPolicy,
         IAuthService auth,
         IOperationJournalService journal,
+        IAppDiagnosticsService appDiagnostics,
+        IRepositoryRetentionService retention,
         IRepositoryCloudSyncOrchestrator sync,
         ICloudSyncService cloudSyncService,
+        ILocalBlockStorageMetricsService localStorageMetrics,
+        IRetentionDefaultsStore retentionDefaultsStore,
+        IAppTransientStateMaintenanceService transientStateMaintenance,
         OnboardingStateService onboardingState,
         ISensitiveActionGuard sensitiveActionGuard,
         IWindowService windows,
+        IWindowsAutostartService autostart,
+        ISnapshotScheduler snapshotScheduler,
+        ISnapshotSchedulerSettingsStore snapshotSchedulerSettingsStore,
+        SnapshotSchedulerOptions snapshotSchedulerOptions,
         IMediator mediator,
         IConfiguration config,
         ILogger<AppSettingsViewModel> log)
@@ -276,11 +409,20 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _tokenPolicy = tokenPolicy;
         _auth = auth;
         _journal = journal;
+        _appDiagnostics = appDiagnostics;
+        _retention = retention;
         _sync = sync;
         _cloudSyncService = cloudSyncService;
+        _localStorageMetrics = localStorageMetrics;
+        _retentionDefaultsStore = retentionDefaultsStore;
+        _transientStateMaintenance = transientStateMaintenance;
         _onboardingState = onboardingState;
         _sensitiveActionGuard = sensitiveActionGuard;
         _windows = windows;
+        _autostart = autostart;
+        _snapshotScheduler = snapshotScheduler;
+        _snapshotSchedulerSettingsStore = snapshotSchedulerSettingsStore;
+        _snapshotSchedulerOptions = snapshotSchedulerOptions;
         _mediator = mediator;
         _log = log;
         _localization = LocalizationManager.Instance;
@@ -290,9 +432,20 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         CloudApiBaseUrl = config["CloudApi:BaseUrl"]
                           ?? Environment.GetEnvironmentVariable("VEYRA_CLOUDAPI_URL")
                           ?? "http://localhost:8080";
+        IsArtifactEncryptionEnabled = config.GetValue<bool?>("Security:ArtifactEncryption:Enabled") ?? false;
 
         TokenPolicyHint = LocalizeUserFacingMessage(_tokenPolicy.GetPolicySummary(), "common.not_available_short");
         ClearCloudStorageMetrics();
+        ClearLocalStorageMetrics();
+        ClearSystemDiagnostics();
+        WindowsAutostartCommandText = Loc.T("common.not_available_short");
+        LoadAutomaticSnapshotSettings();
+        LoadGlobalRetentionDefaultsAsync().GetAwaiter().GetResult();
+        ArtifactEncryptionStatusText = IsArtifactEncryptionEnabled
+            ? Loc.T("app_settings.artifact_encryption_enabled")
+            : Loc.T("app_settings.artifact_encryption_disabled");
+        ArtifactEncryptionActiveKeyText = Loc.T("common.not_available_short");
+        ArtifactEncryptionUpdatedText = Loc.T("common.not_available_short");
         SelectedTab = Tabs.FirstOrDefault();
 
         _localization.LanguageChanged += OnLanguageChanged;
@@ -301,12 +454,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         RebuildLanguageOptions();
         RebuildThemeOptions();
         RebuildExperienceOptions();
+        UpdateTabVisibility();
         UpdateLocalizationDiagnostics();
     }
 
     public bool IsGeneralTabSelected => string.Equals(SelectedTab?.Key, "general", StringComparison.OrdinalIgnoreCase);
     public bool IsUserTabSelected => string.Equals(SelectedTab?.Key, "user", StringComparison.OrdinalIgnoreCase);
     public bool IsSyncTabSelected => string.Equals(SelectedTab?.Key, "sync", StringComparison.OrdinalIgnoreCase);
+    public bool IsMonitoringTabSelected => string.Equals(SelectedTab?.Key, "monitoring", StringComparison.OrdinalIgnoreCase);
 
     public bool HasLocalizationIssues => LocalizationMissingKeysCount > 0 || LocalizationDuplicateKeysCount > 0 || LocalizationExtraKeysCount > 0;
     public bool HasLocalizationMissingSample => !string.IsNullOrWhiteSpace(LocalizationMissingSample);
@@ -317,6 +472,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool HasKnownProfiles => Profiles.Count > 0;
     public bool IsGuestMode => !HasActiveProfile;
     public bool HasOperationJournalItems => OperationJournalItems.Count > 0;
+    public bool HasArtifactKeys => ArtifactKeys.Count > 0;
+    public int ArtifactActiveKeyCount => ArtifactKeys.Count(key => key.IsActive);
+    public int ArtifactRetiredKeyCount => ArtifactKeys.Count(key => key.IsRetired);
+    public int ArtifactRevokedKeyCount => ArtifactKeys.Count(key => key.IsRevoked);
     public bool IsBasicMode => _experience.IsBasicMode;
     public bool IsProfessionalMode => _experience.IsProfessionalMode;
     public bool ShowLocalizationDiagnostics => IsProfessionalMode;
@@ -324,6 +483,22 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool ShowTechnicalProfileDetails => IsProfessionalMode;
     public bool ShowCloudStorageDiagnostics => IsProfessionalMode;
     public bool ShowDetailedRepositorySyncIssueDiagnostics => IsProfessionalMode;
+    public bool CanConfigureWindowsAutostart => _autostart.IsSupported;
+    public string AutomaticSnapshotsSummaryText => !IsAutomaticSnapshotsEnabled
+        ? Loc.T("app_settings.auto_snapshots_summary_disabled")
+        : Loc.F(
+            "app_settings.auto_snapshots_summary_enabled",
+            SelectedAutomaticSnapshotIntervalMinutes,
+            FormatHourRange(SelectedAutomaticSnapshotQuietStartHour),
+            FormatHourRange(SelectedAutomaticSnapshotQuietEndHour));
+    public string GlobalRetentionSummaryText => !GlobalRetentionEnabled
+        ? Loc.T("app_settings.global_retention_summary_disabled")
+        : Loc.F(
+            "app_settings.global_retention_summary_enabled",
+            string.IsNullOrWhiteSpace(GlobalRetentionMaxAgeDays) ? Loc.T("common.not_available_short") : GlobalRetentionMaxAgeDays,
+            string.IsNullOrWhiteSpace(GlobalRetentionMaxSnapshots) ? Loc.T("common.not_available_short") : GlobalRetentionMaxSnapshots,
+            string.IsNullOrWhiteSpace(GlobalRetentionMaxTotalSizeMb) ? Loc.T("common.not_available_short") : GlobalRetentionMaxTotalSizeMb,
+            GlobalRetentionRunIntervalMinutes);
     public string ExperienceModeHint => IsBasicMode
         ? Loc.T("app_settings.experience_basic_hint")
         : Loc.T("app_settings.experience_professional_hint");
@@ -339,6 +514,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public string CloudStorageHelpText => IsBasicMode
         ? Loc.T("app_settings.cloud_storage_help_basic")
         : Loc.T("app_settings.cloud_storage_help_professional");
+    public string LocalStorageHelpText => IsBasicMode
+        ? Loc.T("app_settings.local_storage_help_basic")
+        : Loc.T("app_settings.local_storage_help_professional");
+    public string SystemDiagnosticsHelpText => IsBasicMode
+        ? Loc.T("app_settings.system_diagnostics_help_basic")
+        : Loc.T("app_settings.system_diagnostics_help_professional");
     public string RepositorySyncHealthHelpText => IsBasicMode
         ? Loc.T("app_settings.repository_sync_health_help_basic")
         : Loc.T("app_settings.repository_sync_health_help_professional");
@@ -354,6 +535,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public string ProcessQueueLabel => IsBasicMode
         ? Loc.T("app_settings.process_queue_basic")
         : Loc.T("app_settings.process_queue");
+    public string ArtifactEncryptionCoverageSummary => Loc.T("app_settings.artifact_key_management_coverage_summary");
 
     public bool IsConfirmPasswordVisible => IsRegisterMode;
     public string SubmitAuthLabel => IsRegisterMode ? Loc.T("app_settings.auth_create_account") : Loc.T("auth.sign_in");
@@ -418,6 +600,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             AuthMessage = string.Empty;
             SyncMessage = string.Empty;
             GeneralMessage = string.Empty;
+            LocalStorageMessage = string.Empty;
+            SystemDiagnosticsMessage = string.Empty;
             _log.LogInformation("Loading app settings");
 
             var active = await _userProfiles.GetActiveProfileAsync();
@@ -467,6 +651,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
             UpdateSyncStatusAutoRefreshState();
 
+            await LoadWindowsAutostartStateAsync();
+            await LoadArtifactEncryptionStateAsync();
+            await LoadLocalStorageMetricsAsync(silent: true);
             await LoadCloudStorageMetricsAsync(active, silent: true);
 
             await LoadOperationJournalAsync();
@@ -491,6 +678,36 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private async Task RefreshAsync() => await LoadAsync();
 
     [RelayCommand]
+    private async Task RunSystemDiagnosticsAsync()
+    {
+        try
+        {
+            IsSystemDiagnosticsBusy = true;
+            SystemDiagnosticsMessage = string.Empty;
+
+            var report = await _appDiagnostics.RunAsync();
+            ApplySystemDiagnostics(report);
+            SystemDiagnosticsMessage = Loc.T("app_settings.system_diagnostics_loaded");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to run application diagnostics");
+            ClearSystemDiagnostics();
+            SystemDiagnosticsMessage = Loc.T("app_settings.system_diagnostics_failed");
+        }
+        finally
+        {
+            IsSystemDiagnosticsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task ExportSystemDiagnosticsTextAsync() => ExportSystemDiagnosticsAsync(asJson: false);
+
+    [RelayCommand]
+    private Task ExportSystemDiagnosticsJsonAsync() => ExportSystemDiagnosticsAsync(asJson: true);
+
+    [RelayCommand]
     private void Back() => BackRequested?.Invoke();
 
     [RelayCommand]
@@ -499,6 +716,339 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _log.LogInformation("Guided tour replay requested from app settings");
         _onboardingState.RequestFirstRunTour();
         GeneralMessage = Loc.T("app_settings.guided_tour_replay_started");
+    }
+
+    [RelayCommand]
+    private async Task ToggleWindowsAutostartAsync()
+    {
+        if (!_autostart.IsSupported)
+        {
+            GeneralMessage = Loc.T("app_settings.windows_autostart_not_supported");
+            return;
+        }
+
+        try
+        {
+            IsAutostartBusy = true;
+            GeneralMessage = string.Empty;
+
+            if (IsWindowsAutostartEnabled)
+                await _autostart.DisableAsync();
+            else
+                await _autostart.EnableAsync();
+
+            await LoadWindowsAutostartStateAsync();
+            GeneralMessage = IsWindowsAutostartEnabled
+                ? Loc.T("app_settings.windows_autostart_enabled_message")
+                : Loc.T("app_settings.windows_autostart_disabled_message");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to toggle Windows autostart");
+            GeneralMessage = Loc.T("app_settings.windows_autostart_failed");
+        }
+        finally
+        {
+            IsAutostartBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveAutomaticSnapshotsSettingsAsync()
+    {
+        try
+        {
+            IsAutomaticSnapshotsBusy = true;
+            AutomaticSnapshotsMessage = string.Empty;
+
+            var normalized = new SnapshotSchedulerUserSettings(
+                Enabled: IsAutomaticSnapshotsEnabled,
+                IntervalMinutes: Math.Clamp(SelectedAutomaticSnapshotIntervalMinutes, 1, 24 * 60),
+                QuietHoursStartHour: Math.Clamp(SelectedAutomaticSnapshotQuietStartHour, 0, 23),
+                QuietHoursEndHour: Math.Clamp(SelectedAutomaticSnapshotQuietEndHour, 0, 23));
+
+            _snapshotSchedulerOptions.Enabled = normalized.Enabled;
+            _snapshotSchedulerOptions.IntervalMinutes = normalized.IntervalMinutes;
+            _snapshotSchedulerOptions.QuietHoursStartHour = normalized.QuietHoursStartHour;
+            _snapshotSchedulerOptions.QuietHoursEndHour = normalized.QuietHoursEndHour;
+
+            await _snapshotSchedulerSettingsStore.SaveAsync(normalized);
+            await _snapshotScheduler.StopAsync();
+            if (normalized.Enabled)
+                _snapshotScheduler.Start();
+
+            LoadAutomaticSnapshotSettings();
+            AutomaticSnapshotsMessage = normalized.Enabled
+                ? Loc.F("app_settings.auto_snapshots_saved_enabled", normalized.IntervalMinutes)
+                : Loc.T("app_settings.auto_snapshots_saved_disabled");
+            await AppendJournalAsync("info", "scheduler", "settings_auto_snapshots_updated", AutomaticSnapshotsMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to save automatic snapshot settings");
+            AutomaticSnapshotsMessage = Loc.T("app_settings.auto_snapshots_save_failed");
+            await AppendJournalAsync("error", "scheduler", "settings_auto_snapshots_updated", $"{AutomaticSnapshotsMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsAutomaticSnapshotsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveGlobalRetentionDefaultsAsync()
+    {
+        try
+        {
+            IsGlobalRetentionBusy = true;
+            GlobalRetentionMessage = string.Empty;
+
+            var settings = BuildGlobalRetentionDefaults();
+            await _retentionDefaultsStore.SaveAsync(settings);
+
+            GlobalRetentionMessage = Loc.T("app_settings.global_retention_defaults_saved");
+            await AppendJournalAsync("info", "retention", "settings_global_retention_defaults_saved", GlobalRetentionMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to save global retention defaults");
+            GlobalRetentionMessage = Loc.T("app_settings.global_retention_defaults_save_failed");
+            await AppendJournalAsync("error", "retention", "settings_global_retention_defaults_saved", $"{GlobalRetentionMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsGlobalRetentionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApplyGlobalRetentionDefaultsToAllAsync()
+    {
+        try
+        {
+            IsGlobalRetentionBusy = true;
+            GlobalRetentionMessage = string.Empty;
+
+            var settings = BuildGlobalRetentionDefaults();
+            await _retentionDefaultsStore.SaveAsync(settings);
+            var policy = settings.ToPolicy();
+
+            var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var updated = 0;
+
+            foreach (var repository in repositories)
+            {
+                var detail = await _mediator.Send(new GetRepositoryDetailQuery(repository.Id));
+                if (detail is null)
+                    continue;
+
+                var result = await _mediator.Send(new UpdateRepositoryConfigurationCommand(
+                    detail.Id,
+                    detail.Name,
+                    detail.Description,
+                    detail.DirectoryPath,
+                    detail.LinkedFormats,
+                    detail.AutoCaptureFileVersions,
+                    detail.ProtectCloudMetadata,
+                    detail.ExcludedPatterns,
+                    policy));
+
+                if (result.Success)
+                    updated++;
+            }
+
+            GlobalRetentionMessage = Loc.F("app_settings.global_retention_applied_to_all", updated);
+            await AppendJournalAsync("info", "retention", "settings_global_retention_apply_all", GlobalRetentionMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to apply global retention defaults to all repositories");
+            GlobalRetentionMessage = Loc.T("app_settings.global_retention_apply_failed");
+            await AppendJournalAsync("error", "retention", "settings_global_retention_apply_all", $"{GlobalRetentionMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsGlobalRetentionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RunGlobalRetentionCleanupNowAsync()
+    {
+        try
+        {
+            IsGlobalRetentionBusy = true;
+            GlobalRetentionMessage = string.Empty;
+
+            var results = await _retention.RunDueRetentionAsync();
+            var affected = results.Count(result => result.PolicyApplied);
+            GlobalRetentionMessage = Loc.F("app_settings.global_retention_cleanup_done", affected, results.Count);
+            await AppendJournalAsync("info", "retention", "settings_global_retention_cleanup_now", GlobalRetentionMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to run global retention cleanup");
+            GlobalRetentionMessage = Loc.T("app_settings.global_retention_cleanup_failed");
+            await AppendJournalAsync("error", "retention", "settings_global_retention_cleanup_now", $"{GlobalRetentionMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsGlobalRetentionBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearTransientStateCacheAsync()
+    {
+        try
+        {
+            IsTransientCacheCleanupBusy = true;
+            TransientCacheCleanupMessage = string.Empty;
+
+            var result = await _transientStateMaintenance.ClearAsync();
+            TransientCacheCleanupMessage = Loc.F(
+                "app_settings.transient_cache_cleanup_done",
+                result.DeletedFiles,
+                result.DeletedDirectories,
+                result.RootPath);
+            await AppendJournalAsync("info", "maintenance", "settings_transient_cache_cleanup", TransientCacheCleanupMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to clear transient state cache");
+            TransientCacheCleanupMessage = Loc.T("app_settings.transient_cache_cleanup_failed");
+            await AppendJournalAsync("error", "maintenance", "settings_transient_cache_cleanup", $"{TransientCacheCleanupMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsTransientCacheCleanupBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshArtifactEncryptionAsync()
+    {
+        await ReloadArtifactEncryptionStateAsync();
+    }
+
+    [RelayCommand]
+    private async Task RefreshLocalStorageMetricsAsync()
+    {
+        await LoadLocalStorageMetricsAsync(silent: false);
+    }
+
+    [RelayCommand]
+    private async Task RotateArtifactKeyAsync()
+    {
+        await RotateArtifactKeyWithNoteAsync(null);
+    }
+
+    [RelayCommand]
+    private async Task RevokeArtifactKeyAsync(AppArtifactKeyItemViewModel? key)
+    {
+        await RevokeArtifactKeyWithNoteAsync(key, null);
+    }
+
+    public async Task ReloadArtifactEncryptionStateAsync()
+    {
+        await LoadArtifactEncryptionStateAsync();
+    }
+
+    public async Task RefreshSyncHealthAsync()
+    {
+        await RefreshSyncSectionAsync(silentMetrics: false, refreshStorageMetrics: false);
+    }
+
+    public async Task RotateArtifactKeyWithNoteAsync(string? note)
+    {
+        if (!IsArtifactEncryptionEnabled)
+        {
+            ArtifactEncryptionMessage = Loc.T("app_settings.artifact_encryption_disabled");
+            return;
+        }
+
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_rotate_artifact_key",
+                "security.action_rotate_artifact_key_body");
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ArtifactEncryptionMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            IsArtifactEncryptionBusy = true;
+            ArtifactEncryptionMessage = string.Empty;
+            var result = await _mediator.Send(new RotateArtifactKeyCommand(string.IsNullOrWhiteSpace(note) ? null : note.Trim()));
+            if (!result.Success)
+            {
+                ArtifactEncryptionMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "app_settings.artifact_encryption_rotate_failed");
+                return;
+            }
+
+            await LoadArtifactEncryptionStateAsync();
+            ArtifactEncryptionMessage = Loc.F("app_settings.artifact_encryption_rotate_success", result.Value?.KeyId ?? string.Empty);
+            await AppendJournalAsync("info", "security", "settings_rotate_artifact_key", ArtifactEncryptionMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to rotate artifact encryption key");
+            ArtifactEncryptionMessage = Loc.T("app_settings.artifact_encryption_rotate_failed");
+            await AppendJournalAsync("error", "security", "settings_rotate_artifact_key", $"{ArtifactEncryptionMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsArtifactEncryptionBusy = false;
+        }
+    }
+
+    public async Task RevokeArtifactKeyWithNoteAsync(AppArtifactKeyItemViewModel? key, string? note)
+    {
+        if (key is null || !key.CanRevoke)
+            return;
+
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_revoke_artifact_key",
+                "security.action_revoke_artifact_key_body",
+                [key.KeyId]);
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ArtifactEncryptionMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            IsArtifactEncryptionBusy = true;
+            ArtifactEncryptionMessage = string.Empty;
+            var result = await _mediator.Send(new RevokeArtifactKeyCommand(
+                key.KeyId,
+                string.IsNullOrWhiteSpace(note) ? null : note.Trim()));
+            if (!result.Success)
+            {
+                ArtifactEncryptionMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "app_settings.artifact_encryption_revoke_failed");
+                return;
+            }
+
+            await LoadArtifactEncryptionStateAsync();
+            ArtifactEncryptionMessage = Loc.F("app_settings.artifact_encryption_revoke_success", key.KeyId);
+            await AppendJournalAsync("warning", "security", "settings_revoke_artifact_key", ArtifactEncryptionMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to revoke artifact encryption key {KeyId}", key.KeyId);
+            ArtifactEncryptionMessage = Loc.T("app_settings.artifact_encryption_revoke_failed");
+            await AppendJournalAsync("error", "security", "settings_revoke_artifact_key", $"{ArtifactEncryptionMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsArtifactEncryptionBusy = false;
+        }
     }
 
     public void SelectTabByKey(string key)
@@ -632,7 +1182,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [RelayCommand]
     private void SelectTab(AppSettingsTabViewModel? tab)
     {
-        if (tab is not null)
+        if (tab is not null && tab.IsVisible)
             SelectedTab = tab;
     }
 
@@ -642,6 +1192,50 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             tab.IsSelected = ReferenceEquals(tab, value);
 
         UpdateSyncStatusAutoRefreshState();
+    }
+
+    private void UpdateTabVisibility()
+    {
+        var monitoringTab = Tabs.FirstOrDefault(tab =>
+            string.Equals(tab.Key, "monitoring", StringComparison.OrdinalIgnoreCase));
+
+        if (monitoringTab is not null)
+            monitoringTab.IsVisible = IsProfessionalMode;
+
+        if (SelectedTab is not null && !SelectedTab.IsVisible)
+        {
+            SelectedTab = Tabs.FirstOrDefault(tab =>
+                string.Equals(tab.Key, "general", StringComparison.OrdinalIgnoreCase) && tab.IsVisible)
+                ?? Tabs.FirstOrDefault(tab => tab.IsVisible);
+        }
+    }
+
+    private async Task RunTransientActionAsync(
+        string titleKey,
+        string detailKey,
+        Func<Task> action,
+        Action<Exception> onError)
+    {
+        if (IsTransientActionBusy)
+            return;
+
+        try
+        {
+            IsTransientActionBusy = true;
+            TransientActionTitle = Loc.T(titleKey);
+            TransientActionDetail = Loc.T(detailKey);
+            await action();
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
+        }
+        finally
+        {
+            IsTransientActionBusy = false;
+            TransientActionTitle = string.Empty;
+            TransientActionDetail = string.Empty;
+        }
     }
 
     [RelayCommand]
@@ -852,25 +1446,103 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task ShowOperationJournalAsync()
     {
-        try
-        {
-            var owner = _windows.GetActiveWindow();
-            var window = _windows.Create<OperationJournalWindow>();
-            if (window.DataContext is not OperationJournalWindowViewModel vm)
-                return;
+        await RunTransientActionAsync(
+            "operation_journal.loading_title",
+            "operation_journal.loading_detail",
+            async () =>
+            {
+                var owner = _windows.GetActiveWindow();
+                var window = _windows.Create<OperationJournalWindow>();
+                if (window.DataContext is not OperationJournalWindowViewModel vm)
+                    return;
 
-            await vm.LoadAsync();
+                await vm.LoadAsync();
 
-            if (owner is not null)
-                await _windows.ShowDialogAsync(window, owner);
-            else
+                if (owner is not null)
+                    await _windows.ShowDialogAsync(window, owner);
+                else
+                    _windows.Show(window);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open operation journal window");
+                GeneralMessage = Loc.T("app_settings.operation_journal_open_failed");
+            });
+    }
+
+    [RelayCommand]
+    private async Task OpenOperationMonitorAsync()
+    {
+        await RunTransientActionAsync(
+            "app_settings.operation_monitor_loading_title",
+            "app_settings.operation_monitor_loading_detail",
+            () =>
+            {
+                var window = _windows.Create<OperationMonitorWindow>();
                 _windows.Show(window);
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to open operation journal window");
-            GeneralMessage = Loc.T("app_settings.operation_journal_open_failed");
-        }
+                return Task.CompletedTask;
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open operation monitor window");
+                GeneralMessage = Loc.T("app_settings.operation_monitor_open_failed");
+            });
+    }
+
+    [RelayCommand]
+    private async Task OpenCloudSyncHealthCenterAsync()
+    {
+        await RunTransientActionAsync(
+            "app_settings.sync_health_center_loading_title",
+            "app_settings.sync_health_center_loading_detail",
+            async () =>
+            {
+                await RefreshSyncHealthAsync();
+
+                var owner = _windows.GetActiveWindow();
+                var window = new CloudSyncHealthWindow
+                {
+                    DataContext = new CloudSyncHealthWindowViewModel(this)
+                };
+
+                if (owner is not null)
+                    await _windows.ShowDialogAsync(window, owner);
+                else
+                    _windows.Show(window);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open cloud sync health center");
+                SyncMessage = Loc.T("app_settings.sync_health_center_open_failed");
+            });
+    }
+
+    [RelayCommand]
+    private async Task OpenArtifactKeyManagementAsync()
+    {
+        await RunTransientActionAsync(
+            "app_settings.artifact_key_management_loading_title",
+            "app_settings.artifact_key_management_loading_detail",
+            async () =>
+            {
+                await ReloadArtifactEncryptionStateAsync();
+
+                var owner = _windows.GetActiveWindow();
+                var window = new ArtifactKeyManagementWindow
+                {
+                    DataContext = new ArtifactKeyManagementWindowViewModel(this)
+                };
+
+                if (owner is not null)
+                    await _windows.ShowDialogAsync(window, owner);
+                else
+                    _windows.Show(window);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open artifact key management window");
+                GeneralMessage = Loc.T("app_settings.artifact_key_management_open_failed");
+            });
     }
 
     [RelayCommand]
@@ -996,6 +1668,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             IsCloudMaintenanceBusy = true;
             CloudStorageMessage = string.Empty;
+            LocalStorageMessage = string.Empty;
             _log.LogInformation("Refreshing sync section status and cloud storage metrics");
             await AppendJournalAsync("info", "sync", "settings_cloud_storage_refresh", "Operation started.", ActiveUsername);
 
@@ -1115,6 +1788,132 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
     }
 
+    private async Task LoadWindowsAutostartStateAsync()
+    {
+        if (!_autostart.IsSupported)
+        {
+            IsWindowsAutostartEnabled = false;
+            WindowsAutostartCommandText = Loc.T("app_settings.windows_autostart_not_supported");
+            return;
+        }
+
+        IsWindowsAutostartEnabled = await _autostart.IsEnabledAsync();
+        WindowsAutostartCommandText = await _autostart.GetRegisteredCommandAsync() ?? Loc.T("common.not_available_short");
+    }
+
+    private void LoadAutomaticSnapshotSettings()
+    {
+        IsAutomaticSnapshotsEnabled = _snapshotSchedulerOptions.Enabled;
+        SelectedAutomaticSnapshotIntervalMinutes = Math.Clamp(_snapshotSchedulerOptions.IntervalMinutes, 1, 24 * 60);
+        SelectedAutomaticSnapshotQuietStartHour = Math.Clamp(_snapshotSchedulerOptions.QuietHoursStartHour, 0, 23);
+        SelectedAutomaticSnapshotQuietEndHour = Math.Clamp(_snapshotSchedulerOptions.QuietHoursEndHour, 0, 23);
+        OnPropertyChanged(nameof(AutomaticSnapshotsSummaryText));
+    }
+
+    private async Task LoadGlobalRetentionDefaultsAsync(CancellationToken ct = default)
+    {
+        var settings = await _retentionDefaultsStore.LoadAsync(ct)
+                       ?? new RetentionDefaultsUserSettings(
+                           Enabled: false,
+                           MaxAgeDays: 30,
+                           MaxSnapshots: 200,
+                           MaxTotalSizeBytes: 2L * 1024 * 1024 * 1024,
+                           TriggerFilter: null,
+                           RunIntervalMinutes: 60);
+
+        GlobalRetentionEnabled = settings.Enabled;
+        GlobalRetentionMaxAgeDays = settings.MaxAgeDays?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        GlobalRetentionMaxSnapshots = settings.MaxSnapshots?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+        GlobalRetentionMaxTotalSizeMb = settings.MaxTotalSizeBytes.HasValue
+            ? Math.Max(1, settings.MaxTotalSizeBytes.Value / (1024 * 1024)).ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+        GlobalRetentionTriggerFilter = settings.TriggerFilter ?? string.Empty;
+        GlobalRetentionRunIntervalMinutes = Math.Clamp(settings.RunIntervalMinutes, 5, 7 * 24 * 60);
+        OnPropertyChanged(nameof(GlobalRetentionSummaryText));
+    }
+
+    private RetentionDefaultsUserSettings BuildGlobalRetentionDefaults()
+    {
+        var maxAge = ParseNullablePositiveInt(GlobalRetentionMaxAgeDays, 1, 3650);
+        var maxSnapshots = ParseNullablePositiveInt(GlobalRetentionMaxSnapshots, 1, 100000);
+        var maxTotalSizeMb = ParseNullablePositiveLong(GlobalRetentionMaxTotalSizeMb, 1, 10L * 1024 * 1024);
+
+        return new RetentionDefaultsUserSettings(
+            Enabled: GlobalRetentionEnabled,
+            MaxAgeDays: maxAge,
+            MaxSnapshots: maxSnapshots,
+            MaxTotalSizeBytes: maxTotalSizeMb.HasValue ? maxTotalSizeMb.Value * 1024 * 1024 : null,
+            TriggerFilter: string.IsNullOrWhiteSpace(GlobalRetentionTriggerFilter) ? null : GlobalRetentionTriggerFilter.Trim(),
+            RunIntervalMinutes: Math.Clamp(GlobalRetentionRunIntervalMinutes, 5, 7 * 24 * 60));
+    }
+
+    private async Task LoadArtifactEncryptionStateAsync()
+    {
+        ArtifactEncryptionStatusText = IsArtifactEncryptionEnabled
+            ? Loc.T("app_settings.artifact_encryption_enabled")
+            : Loc.T("app_settings.artifact_encryption_disabled");
+
+        if (!IsArtifactEncryptionEnabled)
+        {
+            ArtifactKeys.Clear();
+            OnPropertyChanged(nameof(HasArtifactKeys));
+            OnPropertyChanged(nameof(ArtifactActiveKeyCount));
+            OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
+            OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
+            ArtifactEncryptionActiveKeyText = Loc.T("common.not_available_short");
+            ArtifactEncryptionUpdatedText = Loc.T("common.not_available_short");
+            return;
+        }
+
+        try
+        {
+            var ring = await _mediator.Send(new GetArtifactKeyRingQuery());
+            ArtifactKeys.Clear();
+
+            foreach (var key in ring.Keys
+                         .OrderByDescending(item => item.CreatedAtUtc))
+            {
+                var status = ArtifactKeyStatus.Normalize(key.Status);
+                var isActive = string.Equals(ring.ActiveKeyId, key.KeyId, StringComparison.OrdinalIgnoreCase);
+                ArtifactKeys.Add(new AppArtifactKeyItemViewModel(
+                    key.KeyId,
+                    status,
+                    LocalizeArtifactKeyStatus(status),
+                    key.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"),
+                    key.RotatedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? Loc.T("common.not_available_short"),
+                    key.RevokedAtUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? Loc.T("common.not_available_short"),
+                    string.IsNullOrWhiteSpace(key.Note) ? Loc.T("common.not_available_short") : key.Note!,
+                    isActive,
+                    !isActive && !string.Equals(status, ArtifactKeyStatus.Revoked, StringComparison.OrdinalIgnoreCase),
+                    string.Equals(status, ArtifactKeyStatus.Retired, StringComparison.OrdinalIgnoreCase),
+                    string.Equals(status, ArtifactKeyStatus.Revoked, StringComparison.OrdinalIgnoreCase),
+                    key.RotatedAtUtc.HasValue,
+                    key.RevokedAtUtc.HasValue));
+            }
+
+            ArtifactEncryptionActiveKeyText = string.IsNullOrWhiteSpace(ring.ActiveKeyId)
+                ? Loc.T("common.not_available_short")
+                : ring.ActiveKeyId;
+            ArtifactEncryptionUpdatedText = ring.UpdatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            OnPropertyChanged(nameof(HasArtifactKeys));
+            OnPropertyChanged(nameof(ArtifactActiveKeyCount));
+            OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
+            OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to load artifact encryption state");
+            ArtifactKeys.Clear();
+            OnPropertyChanged(nameof(HasArtifactKeys));
+            OnPropertyChanged(nameof(ArtifactActiveKeyCount));
+            OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
+            OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
+            ArtifactEncryptionActiveKeyText = Loc.T("common.not_available_short");
+            ArtifactEncryptionUpdatedText = Loc.T("common.not_available_short");
+            ArtifactEncryptionMessage = Loc.T("app_settings.artifact_encryption_load_failed");
+        }
+    }
+
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLocalizationState();
@@ -1128,6 +1927,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private void OnExperienceModeChanged(object? sender, EventArgs e)
     {
         RebuildExperienceOptions();
+        UpdateTabVisibility();
         OnPropertyChanged(nameof(IsBasicMode));
         OnPropertyChanged(nameof(IsProfessionalMode));
         OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
@@ -1140,13 +1940,25 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SyncSectionIntroText));
         OnPropertyChanged(nameof(SyncSectionHelpText));
         OnPropertyChanged(nameof(CloudStorageHelpText));
+        OnPropertyChanged(nameof(LocalStorageHelpText));
+        OnPropertyChanged(nameof(AutomaticSnapshotsSummaryText));
+        OnPropertyChanged(nameof(GlobalRetentionSummaryText));
+        OnPropertyChanged(nameof(SystemDiagnosticsHelpText));
         OnPropertyChanged(nameof(RepositorySyncHealthHelpText));
         OnPropertyChanged(nameof(RepositorySyncProgressHelpText));
         OnPropertyChanged(nameof(RestoreFromCloudLabel));
         OnPropertyChanged(nameof(PushAllRepositoriesLabel));
         OnPropertyChanged(nameof(ProcessQueueLabel));
+        OnPropertyChanged(nameof(ArtifactEncryptionCoverageSummary));
+        OnPropertyChanged(nameof(CanConfigureWindowsAutostart));
+        OnPropertyChanged(nameof(HasArtifactKeys));
+        OnPropertyChanged(nameof(ArtifactActiveKeyCount));
+        OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
+        OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
         _ = LoadOperationJournalAsync();
         _ = RefreshSyncSectionAsync(silentMetrics: true, refreshStorageMetrics: false, CancellationToken.None);
+        _ = LoadWindowsAutostartStateAsync();
+        _ = LoadArtifactEncryptionStateAsync();
     }
 
     private async Task ChangeExperienceModeAsync(AppExperienceOptionItemViewModel value)
@@ -1227,6 +2039,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         RebuildLanguageOptions();
         RebuildThemeOptions();
         RebuildExperienceOptions();
+        UpdateTabVisibility();
         UpdateLocalizationDiagnostics();
         OnPropertyChanged(nameof(IsBasicMode));
         OnPropertyChanged(nameof(IsProfessionalMode));
@@ -1240,14 +2053,30 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SyncSectionIntroText));
         OnPropertyChanged(nameof(SyncSectionHelpText));
         OnPropertyChanged(nameof(CloudStorageHelpText));
+        OnPropertyChanged(nameof(LocalStorageHelpText));
+        OnPropertyChanged(nameof(AutomaticSnapshotsSummaryText));
+        OnPropertyChanged(nameof(GlobalRetentionSummaryText));
         OnPropertyChanged(nameof(RepositorySyncHealthHelpText));
         OnPropertyChanged(nameof(RepositorySyncProgressHelpText));
         OnPropertyChanged(nameof(RestoreFromCloudLabel));
         OnPropertyChanged(nameof(PushAllRepositoriesLabel));
         OnPropertyChanged(nameof(ProcessQueueLabel));
+        OnPropertyChanged(nameof(ArtifactEncryptionCoverageSummary));
+        OnPropertyChanged(nameof(CanConfigureWindowsAutostart));
+        OnPropertyChanged(nameof(HasArtifactKeys));
+        OnPropertyChanged(nameof(ArtifactActiveKeyCount));
+        OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
+        OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
 
         OnPropertyChanged(nameof(SubmitAuthLabel));
         OnPropertyChanged(nameof(ToggleAuthLabel));
+        _ = LoadWindowsAutostartStateAsync();
+        _ = LoadArtifactEncryptionStateAsync();
+
+        if (_lastDiagnosticsReport is not null)
+            ApplySystemDiagnostics(_lastDiagnosticsReport);
+        else
+            UpdateSystemDiagnosticsDedupState();
     }
 
     public string SelectedTabKey => SelectedTab?.Key ?? "general";
@@ -1272,7 +2101,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
 
             if (refreshStorageMetrics)
+            {
+                await LoadLocalStorageMetricsAsync(silentMetrics);
                 await LoadCloudStorageMetricsAsync(active, silent: silentMetrics);
+            }
 
             UpdateSyncStatusAutoRefreshState();
         }
@@ -1336,6 +2168,24 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             CloudStorageMessage = Loc.T("app_settings.cloud_storage_metrics_loaded");
     }
 
+    private async Task LoadLocalStorageMetricsAsync(bool silent)
+    {
+        try
+        {
+            var metrics = await _localStorageMetrics.GetMetricsAsync();
+            ApplyLocalStorageMetrics(metrics);
+            if (!silent)
+                LocalStorageMessage = Loc.T("app_settings.local_storage_metrics_loaded");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Local block storage metrics refresh failed");
+            ClearLocalStorageMetrics();
+            if (!silent)
+                LocalStorageMessage = Loc.T("app_settings.local_storage_metrics_failed");
+        }
+    }
+
     private void ApplyCloudStorageMetrics(CloudStorageMetricsDto metrics)
     {
         HasCloudStorageMetrics = true;
@@ -1363,6 +2213,29 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         CloudStorageLastUpdatedText = DateTime.Now.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     }
 
+    private void ApplyLocalStorageMetrics(LocalBlockStorageMetricsDto metrics)
+    {
+        _lastLocalStorageMetrics = metrics;
+        HasLocalStorageMetrics = true;
+        LocalStorageReferencedBlockCount = metrics.ReferencedBlockCount;
+        LocalStorageUniqueBlockCount = metrics.UniqueBlockCount;
+        LocalStorageMissingBlockCount = metrics.MissingBlockCount;
+        LocalStorageReductionText = $"{metrics.ReducedPercentFloor}%";
+        LocalStorageLogicalBytesText = FormatBytes(metrics.LogicalReferencedBytes);
+        LocalStoragePhysicalBytesText = FormatBytes(metrics.PhysicalStoredBytes);
+        LocalStorageFilesystemBreakdownText = Loc.F(
+            "app_settings.local_storage_filesystem_breakdown_format",
+            metrics.Filesystem.ManagedFileCount,
+            metrics.Filesystem.NativeFileCount,
+            metrics.Filesystem.OtherFileCount);
+        LocalStorageRepositoryBreakdownText = Loc.F(
+            "app_settings.local_storage_repository_breakdown_format",
+            metrics.RepositoryCount,
+            FormatBytes(metrics.SavedBytes));
+        LocalStorageLastUpdatedText = DateTime.Now.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        UpdateSystemDiagnosticsDedupState();
+    }
+
     private bool RefreshRepositorySyncIssues(IReadOnlyList<RepositoryDto> repositories)
     {
         RepositorySyncIssues.Clear();
@@ -1380,6 +2253,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 : cloud.LastSyncedAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
             var isStalled = IsSyncStalled(cloud);
             var stallText = FormatStallText(cloud);
+            var issueCategoryCode = ResolveSyncIssueCategoryCode(cloud, isStalled);
+            var issueCategoryText = LocalizeSyncIssueCategory(issueCategoryCode);
+            var conflictStrategyText = LocalizeConflictStrategy(cloud?.ConflictStrategy);
+            var recommendationText = BuildSyncIssueRecommendation(issueCategoryCode, cloud);
 
             currentStallStates[repository.Id] = isStalled;
             LogStallTransition(repository, isStalled, stallText);
@@ -1419,7 +2296,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 stallText,
                 isStalled,
                 cloud?.LastError ?? string.Empty,
-                !string.IsNullOrWhiteSpace(cloud?.LastError)));
+                !string.IsNullOrWhiteSpace(cloud?.LastError),
+                issueCategoryCode,
+                issueCategoryText,
+                conflictStrategyText,
+                recommendationText,
+                !string.IsNullOrWhiteSpace(recommendationText)));
 
             hasActiveWork |= HasActiveSyncWork(cloud);
         }
@@ -1591,6 +2473,81 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         if (cloud.PendingQueueCount > 0 || cloud.RunningQueueCount > 0)
             return 1;
         return 0;
+    }
+
+    private static string ResolveSyncIssueCategoryCode(RepositoryCloudSyncStatusDto? cloud, bool isStalled)
+    {
+        if (cloud is null)
+            return "attention";
+
+        var normalizedStatus = cloud.LastStatus?.Trim().ToLowerInvariant() ?? string.Empty;
+        var normalizedError = cloud.LastError?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (normalizedStatus == "auth_required"
+            || normalizedError.Contains("unauthorized", StringComparison.Ordinal)
+            || normalizedError.Contains("token", StringComparison.Ordinal))
+        {
+            return "auth";
+        }
+
+        if (cloud.ConflictQueueCount > 0 || normalizedStatus == "conflict")
+            return "conflict";
+
+        if (isStalled)
+            return "stalled";
+
+        if (cloud.DeadLetterQueueCount > 0 || cloud.FailedQueueCount > 0 || normalizedStatus is "failed" or "dead_letter")
+            return "failed";
+
+        if (cloud.RetryQueueCount > 0 || normalizedStatus is "retrying" or "offline_retry")
+            return "retry";
+
+        if (cloud.PendingQueueCount > 0 || cloud.RunningQueueCount > 0 || normalizedStatus is "queued" or "syncing")
+            return "queue";
+
+        return "attention";
+    }
+
+    private static string LocalizeSyncIssueCategory(string code)
+    {
+        return code switch
+        {
+            "auth" => Loc.T("app_settings.sync_issue_category_auth"),
+            "conflict" => Loc.T("app_settings.sync_issue_category_conflict"),
+            "stalled" => Loc.T("app_settings.sync_issue_category_stalled"),
+            "retry" => Loc.T("app_settings.sync_issue_category_retry"),
+            "failed" => Loc.T("app_settings.sync_issue_category_failed"),
+            "queue" => Loc.T("app_settings.sync_issue_category_queue"),
+            _ => Loc.T("app_settings.sync_issue_category_attention")
+        };
+    }
+
+    private static string LocalizeConflictStrategy(string? strategy)
+    {
+        return RepositorySyncConflictStrategies.Normalize(strategy) switch
+        {
+            RepositorySyncConflictStrategies.ManualMerge => Loc.T("app_settings.sync_conflict_strategy_manual_merge"),
+            RepositorySyncConflictStrategies.PreserveBoth => Loc.T("app_settings.sync_conflict_strategy_preserve_both"),
+            _ => Loc.T("app_settings.sync_conflict_strategy_last_write_wins")
+        };
+    }
+
+    private static string BuildSyncIssueRecommendation(string categoryCode, RepositoryCloudSyncStatusDto? cloud)
+    {
+        return categoryCode switch
+        {
+            "auth" => Loc.T("app_settings.sync_issue_recommendation_auth"),
+            "conflict" when RepositorySyncConflictStrategies.Normalize(cloud?.ConflictStrategy) == RepositorySyncConflictStrategies.ManualMerge
+                => Loc.T("app_settings.sync_issue_recommendation_conflict_manual"),
+            "conflict" when RepositorySyncConflictStrategies.Normalize(cloud?.ConflictStrategy) == RepositorySyncConflictStrategies.PreserveBoth
+                => Loc.T("app_settings.sync_issue_recommendation_conflict_preserve"),
+            "conflict" => Loc.T("app_settings.sync_issue_recommendation_conflict_overwrite"),
+            "stalled" => Loc.T("app_settings.sync_issue_recommendation_stalled"),
+            "retry" => Loc.T("app_settings.sync_issue_recommendation_retry"),
+            "failed" => Loc.T("app_settings.sync_issue_recommendation_failed"),
+            "queue" => Loc.T("app_settings.sync_issue_recommendation_queue"),
+            _ => Loc.T("app_settings.sync_issue_recommendation_attention")
+        };
     }
 
     private static string FormatCloudSyncStatus(string? status)
@@ -1784,6 +2741,140 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         CloudStoragePacksBreakdownText = Loc.T("common.not_available_short");
         CloudStorageFilesystemBreakdownText = Loc.T("common.not_available_short");
         CloudStorageLastUpdatedText = Loc.T("common.not_available_short");
+    }
+
+    private void ClearLocalStorageMetrics()
+    {
+        _lastLocalStorageMetrics = null;
+        HasLocalStorageMetrics = false;
+        LocalStorageReferencedBlockCount = 0;
+        LocalStorageUniqueBlockCount = 0;
+        LocalStorageMissingBlockCount = 0;
+        LocalStorageReductionText = Loc.T("common.not_available_short");
+        LocalStorageLogicalBytesText = Loc.T("common.not_available_short");
+        LocalStoragePhysicalBytesText = Loc.T("common.not_available_short");
+        LocalStorageFilesystemBreakdownText = Loc.T("common.not_available_short");
+        LocalStorageRepositoryBreakdownText = Loc.T("common.not_available_short");
+        LocalStorageLastUpdatedText = Loc.T("common.not_available_short");
+        UpdateSystemDiagnosticsDedupState();
+    }
+
+    private void ClearSystemDiagnostics()
+    {
+        _lastDiagnosticsReport = null;
+        HasSystemDiagnostics = false;
+        SystemDiagnosticsLastUpdatedText = Loc.T("common.not_available_short");
+        SystemDiagnosticsTargetRepositoryText = Loc.T("common.not_available_short");
+        SystemDiagnosticsMemoryText = Loc.T("common.not_available_short");
+        SystemDiagnosticsMemoryStatusText = Loc.T("app_settings.system_diagnostics_memory_unavailable");
+        SystemDiagnosticsHistoryText = Loc.T("common.not_available_short");
+        SystemDiagnosticsHistoryStatusText = Loc.T("app_settings.system_diagnostics_history_unavailable");
+        SystemDiagnosticsScanText = Loc.T("common.not_available_short");
+        SystemDiagnosticsScanStatusText = Loc.T("app_settings.system_diagnostics_scan_unavailable");
+        SystemDiagnosticsNativeRuntimeText = Loc.T("app_settings.system_diagnostics_native_unavailable");
+        UpdateSystemDiagnosticsDedupState();
+    }
+
+    private void ApplySystemDiagnostics(AppDiagnosticsReportDto report)
+    {
+        _lastDiagnosticsReport = report;
+        HasSystemDiagnostics = true;
+        SystemDiagnosticsLastUpdatedText = report.GeneratedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+        SystemDiagnosticsTargetRepositoryText = report.HasTargetRepository
+            ? Loc.F(
+                "app_settings.system_diagnostics_target_repository_format",
+                report.TargetRepositoryName ?? Loc.T("common.not_available_short"),
+                report.TargetRepositoryPath ?? Loc.T("common.not_available_short"))
+            : Loc.T("app_settings.system_diagnostics_no_repository");
+
+        var process = report.Process;
+        SystemDiagnosticsMemoryText = FormatBytes(process.WorkingSetBytes);
+        SystemDiagnosticsMemoryStatusText = process.MeetsRecommendedLimit
+            ? Loc.F(
+                "app_settings.system_diagnostics_memory_ok",
+                FormatBytes(process.RecommendedLimitBytes),
+                FormatBytes(process.PrivateMemoryBytes),
+                FormatBytes(process.ManagedHeapBytes))
+            : Loc.F(
+                "app_settings.system_diagnostics_memory_warning",
+                FormatBytes(process.RecommendedLimitBytes),
+                FormatBytes(process.PrivateMemoryBytes),
+                FormatBytes(process.ManagedHeapBytes));
+
+        var history = report.History;
+        if (history.Available)
+        {
+            SystemDiagnosticsHistoryText = $"{history.LatestEntriesLoadMs} ms";
+            SystemDiagnosticsHistoryStatusText = history.MeetsLatestEntriesTarget
+                ? Loc.F(
+                    "app_settings.system_diagnostics_history_ok",
+                    history.LatestEntriesLoadMs,
+                    history.SnapshotHistoryLoadMs,
+                    history.LatestEntriesCount)
+                : Loc.F(
+                    "app_settings.system_diagnostics_history_warning",
+                    history.LatestEntriesLoadMs,
+                    history.TargetMs,
+                    history.SnapshotHistoryLoadMs);
+        }
+        else
+        {
+            SystemDiagnosticsHistoryText = Loc.T("common.not_available_short");
+            SystemDiagnosticsHistoryStatusText = Loc.F(
+                "app_settings.system_diagnostics_history_unavailable_with_reason",
+                history.ErrorMessage ?? Loc.T("common.not_available_short"));
+        }
+
+        var scan = report.Scan;
+        if (scan.Available)
+        {
+            SystemDiagnosticsScanText = FormatThroughput(scan.ThroughputMbPerSecond);
+            SystemDiagnosticsScanStatusText = scan.MeetsRecommendedTarget
+                ? Loc.F(
+                    "app_settings.system_diagnostics_scan_ok",
+                    FormatThroughput(scan.ThroughputMbPerSecond),
+                    scan.FileCount,
+                    FormatBytes(scan.TotalFileBytes))
+                : Loc.F(
+                    "app_settings.system_diagnostics_scan_warning",
+                    FormatThroughput(scan.ThroughputMbPerSecond),
+                    $"{scan.TargetMbPerSecond:0.#}");
+        }
+        else
+        {
+            SystemDiagnosticsScanText = Loc.T("common.not_available_short");
+            SystemDiagnosticsScanStatusText = Loc.F(
+                "app_settings.system_diagnostics_scan_unavailable_with_reason",
+                scan.ErrorMessage ?? Loc.T("common.not_available_short"));
+        }
+
+        var nativeRuntime = report.NativeRuntime;
+        SystemDiagnosticsNativeRuntimeText = nativeRuntime.IsLoaded && nativeRuntime.IsHealthy && nativeRuntime.SupportsScan
+            ? Loc.F(
+                "app_settings.system_diagnostics_native_ok",
+                string.IsNullOrWhiteSpace(nativeRuntime.LoadedPath)
+                    ? Loc.T("common.not_available_short")
+                    : nativeRuntime.LoadedPath)
+            : Loc.F(
+                "app_settings.system_diagnostics_native_warning",
+                nativeRuntime.ErrorMessage ?? Loc.T("common.not_available_short"));
+
+        UpdateSystemDiagnosticsDedupState();
+    }
+
+    private void UpdateSystemDiagnosticsDedupState()
+    {
+        if (_lastLocalStorageMetrics is null)
+        {
+            SystemDiagnosticsDedupText = Loc.T("common.not_available_short");
+            SystemDiagnosticsDedupStatusText = Loc.T("app_settings.system_diagnostics_dedup_unavailable");
+            return;
+        }
+
+        SystemDiagnosticsDedupText = $"{_lastLocalStorageMetrics.ReducedPercentFloor}%";
+        SystemDiagnosticsDedupStatusText = _lastLocalStorageMetrics.ReducedPercentFloor >= 40
+            ? Loc.F("app_settings.system_diagnostics_dedup_ok", _lastLocalStorageMetrics.ReducedPercentFloor)
+            : Loc.F("app_settings.system_diagnostics_dedup_warning", _lastLocalStorageMetrics.ReducedPercentFloor, 40);
     }
 
     private async Task SaveSensitiveActionVerificationSettingAsync(bool value)
@@ -2063,6 +3154,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             : $"{value:0.#} {units[unitIndex]}";
     }
 
+    private static string FormatThroughput(double megabytesPerSecond)
+    {
+        if (double.IsNaN(megabytesPerSecond) || double.IsInfinity(megabytesPerSecond) || megabytesPerSecond <= 0)
+            return Loc.T("common.not_available_short");
+
+        return $"{megabytesPerSecond:0.#} MB/s";
+    }
+
     private static string FormatDuration(TimeSpan duration)
     {
         if (duration <= TimeSpan.Zero)
@@ -2078,6 +3177,29 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
 
         return $"{Math.Max(1, duration.Seconds)}s";
+    }
+
+    private static string FormatHourRange(int hour)
+        => $"{Math.Clamp(hour, 0, 23):00}:00";
+
+    private static int? ParseNullablePositiveInt(string? value, int min, int max)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, min, max)
+            : null;
+    }
+
+    private static long? ParseNullablePositiveLong(string? value, long min, long max)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return long.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, min, max)
+            : null;
     }
 
     private bool TryResolveCloudAccessToken(
@@ -2109,12 +3231,203 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         return UserFacingMessageLocalizer.TryLocalize(message) ?? message.Trim();
     }
 
+    private static string LocalizeArtifactKeyStatus(string status)
+    {
+        return ArtifactKeyStatus.Normalize(status) switch
+        {
+            ArtifactKeyStatus.Active => Loc.T("app_settings.artifact_key_status_active"),
+            ArtifactKeyStatus.Retired => Loc.T("app_settings.artifact_key_status_retired"),
+            ArtifactKeyStatus.Revoked => Loc.T("app_settings.artifact_key_status_revoked"),
+            _ => status
+        };
+    }
+
     private static bool IsCloudConnectivityFailure(Exception ex)
     {
         if (ex is TaskCanceledException or TimeoutException or System.Net.Http.HttpRequestException)
             return true;
 
         return ex.InnerException is not null && IsCloudConnectivityFailure(ex.InnerException);
+    }
+
+    private async Task ExportSystemDiagnosticsAsync(bool asJson)
+    {
+        if (_lastDiagnosticsReport is null)
+        {
+            SystemDiagnosticsMessage = Loc.T("app_settings.system_diagnostics_export_no_data");
+            return;
+        }
+
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+        {
+            SystemDiagnosticsMessage = Loc.T("app_settings.system_diagnostics_export_picker_unavailable");
+            return;
+        }
+
+        try
+        {
+            var extension = asJson ? "json" : "txt";
+            var suggestedName = BuildDiagnosticsSuggestedFileName(extension);
+            var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = Loc.T(asJson
+                    ? "app_settings.system_diagnostics_export_json_title"
+                    : "app_settings.system_diagnostics_export_text_title"),
+                SuggestedFileName = suggestedName,
+                DefaultExtension = extension,
+                ShowOverwritePrompt = true,
+                FileTypeChoices =
+                [
+                    new FilePickerFileType(Loc.T(asJson
+                        ? "app_settings.system_diagnostics_export_json_button"
+                        : "app_settings.system_diagnostics_export_text_button"))
+                    {
+                        Patterns = [asJson ? "*.json" : "*.txt"]
+                    }
+                ]
+            });
+
+            if (file is null)
+                return;
+
+            await using var stream = await file.OpenWriteAsync();
+            if (asJson)
+            {
+                var payload = BuildDiagnosticsExportPayload(_lastDiagnosticsReport, _lastLocalStorageMetrics);
+                await JsonSerializer.SerializeAsync(stream, payload, new JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+                await stream.FlushAsync();
+            }
+            else
+            {
+                await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+                await writer.WriteAsync(BuildDiagnosticsTextReport(_lastDiagnosticsReport, _lastLocalStorageMetrics));
+                await writer.FlushAsync();
+            }
+
+            var savedPath = StoragePathResolver.GetDisplayPath(file);
+            SystemDiagnosticsMessage = Loc.F(
+                asJson
+                    ? "app_settings.system_diagnostics_export_json_done"
+                    : "app_settings.system_diagnostics_export_text_done",
+                savedPath);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to export system diagnostics. Format {Format}", asJson ? "json" : "text");
+            SystemDiagnosticsMessage = Loc.T("app_settings.system_diagnostics_export_failed");
+        }
+    }
+
+    private static string BuildDiagnosticsSuggestedFileName(string extension)
+    {
+        var prefix = Loc.T("app_settings.system_diagnostics_export_prefix");
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        return $"{prefix}-{timestamp}.{extension}";
+    }
+
+    private static object BuildDiagnosticsExportPayload(
+        AppDiagnosticsReportDto report,
+        LocalBlockStorageMetricsDto? localMetrics)
+    {
+        return new
+        {
+            report.GeneratedAtUtc,
+            report.TargetRepositoryId,
+            report.TargetRepositoryName,
+            report.TargetRepositoryPath,
+            report.Process,
+            report.History,
+            report.Scan,
+            report.NativeRuntime,
+            LocalStorage = localMetrics
+        };
+    }
+
+    private static string BuildDiagnosticsTextReport(
+        AppDiagnosticsReportDto report,
+        LocalBlockStorageMetricsDto? localMetrics)
+    {
+        var builder = new StringBuilder();
+        var notAvailable = Loc.T("common.not_available_short");
+
+        builder.AppendLine(Loc.T("app_settings.system_diagnostics_title"));
+        builder.AppendLine(new string('=', 48));
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_last_updated_label")}: {report.GeneratedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine($"UTC: {report.GeneratedAtUtc:O}");
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_target_repository_label")}: {(report.HasTargetRepository ? $"{report.TargetRepositoryName ?? notAvailable} ({report.TargetRepositoryPath ?? notAvailable})" : Loc.T("app_settings.system_diagnostics_no_repository"))}");
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_native_runtime_label")}: {BuildNativeRuntimeExportLine(report.NativeRuntime)}");
+        builder.AppendLine();
+
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_metric_memory")}: {FormatBytes(report.Process.WorkingSetBytes)}");
+        builder.AppendLine($"  Private bytes: {FormatBytes(report.Process.PrivateMemoryBytes)}");
+        builder.AppendLine($"  Managed heap: {FormatBytes(report.Process.ManagedHeapBytes)}");
+        builder.AppendLine($"  Target: {FormatBytes(report.Process.RecommendedLimitBytes)}");
+        builder.AppendLine($"  Status: {(report.Process.MeetsRecommendedLimit ? "OK" : "Warning")}");
+        builder.AppendLine();
+
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_metric_history")}: {(report.History.Available ? $"{report.History.LatestEntriesLoadMs} ms" : notAvailable)}");
+        builder.AppendLine($"  Snapshot history load: {report.History.SnapshotHistoryLoadMs} ms");
+        builder.AppendLine($"  Latest entries count: {report.History.LatestEntriesCount}");
+        builder.AppendLine($"  Target: {report.History.TargetMs} ms");
+        builder.AppendLine($"  Status: {BuildAvailabilityStatus(report.History.Available, report.History.MeetsLatestEntriesTarget, report.History.ErrorMessage)}");
+        builder.AppendLine();
+
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_metric_scan")}: {(report.Scan.Available ? FormatThroughput(report.Scan.ThroughputMbPerSecond) : notAvailable)}");
+        builder.AppendLine($"  Engine: {report.Scan.Engine}");
+        builder.AppendLine($"  Duration: {report.Scan.DurationMs} ms");
+        builder.AppendLine($"  Files: {report.Scan.FileCount}");
+        builder.AppendLine($"  Data: {FormatBytes(report.Scan.TotalFileBytes)}");
+        builder.AppendLine($"  Target: {report.Scan.TargetMbPerSecond:0.#} MB/s");
+        builder.AppendLine($"  Status: {BuildAvailabilityStatus(report.Scan.Available, report.Scan.MeetsRecommendedTarget, report.Scan.ErrorMessage)}");
+        builder.AppendLine();
+
+        builder.AppendLine($"{Loc.T("app_settings.system_diagnostics_metric_dedup")}: {BuildDedupExportHeadline(localMetrics)}");
+        if (localMetrics is not null)
+        {
+            builder.AppendLine($"  Referenced blocks: {localMetrics.ReferencedBlockCount}");
+            builder.AppendLine($"  Unique blocks: {localMetrics.UniqueBlockCount}");
+            builder.AppendLine($"  Missing blocks: {localMetrics.MissingBlockCount}");
+            builder.AppendLine($"  Logical bytes: {FormatBytes(localMetrics.LogicalReferencedBytes)}");
+            builder.AppendLine($"  Physical bytes: {FormatBytes(localMetrics.PhysicalStoredBytes)}");
+            builder.AppendLine($"  Saved bytes: {FormatBytes(localMetrics.SavedBytes)}");
+            builder.AppendLine($"  Repository count: {localMetrics.RepositoryCount}");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string BuildNativeRuntimeExportLine(AppDiagnosticsNativeRuntimeDto nativeRuntime)
+    {
+        if (nativeRuntime.IsLoaded && nativeRuntime.IsHealthy && nativeRuntime.SupportsScan)
+        {
+            return string.IsNullOrWhiteSpace(nativeRuntime.LoadedPath)
+                ? "OK"
+                : $"OK ({nativeRuntime.LoadedPath})";
+        }
+
+        return string.IsNullOrWhiteSpace(nativeRuntime.ErrorMessage)
+            ? "Warning"
+            : $"Warning: {nativeRuntime.ErrorMessage}";
+    }
+
+    private static string BuildAvailabilityStatus(bool available, bool meetsTarget, string? errorMessage)
+    {
+        if (!available)
+            return string.IsNullOrWhiteSpace(errorMessage) ? "Unavailable" : $"Unavailable: {errorMessage}";
+
+        return meetsTarget ? "OK" : "Warning";
+    }
+
+    private static string BuildDedupExportHeadline(LocalBlockStorageMetricsDto? localMetrics)
+    {
+        if (localMetrics is null)
+            return Loc.T("common.not_available_short");
+
+        return $"{localMetrics.ReducedPercentFloor}%";
     }
 }
 

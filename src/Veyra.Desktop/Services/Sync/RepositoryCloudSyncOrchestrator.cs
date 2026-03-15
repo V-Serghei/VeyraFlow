@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -40,6 +42,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
     private static readonly TimeSpan RunningLeaseTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan UploadCheckpointPersistInterval = TimeSpan.FromSeconds(2);
     private const int UploadCheckpointPersistEveryBlocks = 32;
+    private const int UploadBatchMaxBlocks = 16;
+    private const long UploadBatchMaxBytes = 32L * 1024 * 1024;
 
     private readonly SemaphoreSlim _queueGate = new(1, 1);
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -756,8 +760,69 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         missingHashes.Count);
                 }
 
-                for (var i = resumeIndex; i < missingHashes.Count; i++)
+                var batchUploadSupported = true;
+                for (var i = resumeIndex; i < missingHashes.Count;)
                 {
+                    if (batchUploadSupported)
+                    {
+                        var batch = BuildUploadBatch(missingHashes, i);
+                        if (batch.Count > 1)
+                        {
+                            try
+                            {
+                                var uploadItems = batch
+                                    .Select(item => new CloudUploadBlockItemDto(item.BlockHash, item.SourcePath, item.ContentLength))
+                                    .ToList();
+                                var batchResult = await cloudSync.UploadBlockBatchAsync(accessToken, uploadItems, itemCt)
+                                                  ?? throw new InvalidOperationException("Cloud batch block upload returned no result.");
+
+                                uploaded += Math.Max(0, batchResult.StoredBlocks + batchResult.SkippedBlocks);
+                                log.LogInformation(
+                                    "Cloud queue item uploaded batch of missing blocks. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. BatchBlocks {BatchBlocks}. Stored {Stored}. Skipped {Skipped}. Progress {Done}/{Total}",
+                                    queueItem.Id,
+                                    repository.Id,
+                                    queueItem.SnapshotId,
+                                    batch.Count,
+                                    batchResult.StoredBlocks,
+                                    batchResult.SkippedBlocks,
+                                    batch[^1].Index + 1,
+                                    missingHashes.Count);
+
+                                SetUploadCheckpointProgress(
+                                    queueItem,
+                                    repository,
+                                    checkpointSignature,
+                                    missingHashes.Count,
+                                    batch[^1].Index + 1);
+
+                                if (ShouldPersistUploadCheckpoint(
+                                        queueItem.UploadCheckpointNextIndex,
+                                        missingHashes.Count,
+                                        lastCheckpointPersistedIndex,
+                                        lastCheckpointPersistedAtUtc,
+                                        queueItem.UpdatedAt))
+                                {
+                                    await db.SaveChangesAsync(itemCt);
+                                    lastCheckpointPersistedIndex = queueItem.UploadCheckpointNextIndex;
+                                    lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
+                                }
+
+                                i = batch[^1].Index + 1;
+                                continue;
+                            }
+                            catch (Exception ex) when (ShouldFallbackToSingleBlockUpload(ex))
+                            {
+                                batchUploadSupported = false;
+                                log.LogInformation(
+                                    ex,
+                                    "Cloud batch block upload is unavailable. Falling back to single-block upload. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. RemainingBlocks {RemainingBlocks}",
+                                    repository.Id,
+                                    queueItem.SnapshotId,
+                                    missingHashes.Count - i);
+                            }
+                        }
+                    }
+
                     var missingHash = missingHashes[i];
                     if (await TryUploadMissingBlockAsync(accessToken, missingHash, itemCt))
                         uploaded++;
@@ -770,12 +835,12 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         missingHashes.Count,
                         missingHash);
 
-                    queueItem.UploadCheckpointSignature = checkpointSignature;
-                    queueItem.UploadCheckpointTotal = missingHashes.Count;
-                    queueItem.UploadCheckpointNextIndex = i + 1;
-                    queueItem.UpdatedAt = DateTime.UtcNow;
-                    repository.CloudSyncLastStatus = $"syncing_upload {i + 1}/{missingHashes.Count}";
-                    repository.UpdatedAt = queueItem.UpdatedAt;
+                    SetUploadCheckpointProgress(
+                        queueItem,
+                        repository,
+                        checkpointSignature,
+                        missingHashes.Count,
+                        i + 1);
 
                     if (ShouldPersistUploadCheckpoint(
                             queueItem.UploadCheckpointNextIndex,
@@ -788,6 +853,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         lastCheckpointPersistedIndex = queueItem.UploadCheckpointNextIndex;
                         lastCheckpointPersistedAtUtc = queueItem.UpdatedAt;
                     }
+
+                    i++;
                 }
 
                 if (queueItem.UploadCheckpointNextIndex != lastCheckpointPersistedIndex)
@@ -912,14 +979,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
         int nextIndex,
         CancellationToken ct)
     {
-        queueItem.UploadCheckpointSignature = checkpointSignature;
-        queueItem.UploadCheckpointTotal = totalCount;
-        queueItem.UploadCheckpointNextIndex = Math.Clamp(nextIndex, 0, totalCount);
-        queueItem.UpdatedAt = DateTime.UtcNow;
-        repository.CloudSyncLastStatus = nextIndex > 0
-            ? $"syncing_upload {queueItem.UploadCheckpointNextIndex}/{totalCount}"
-            : "syncing_upload";
-        repository.UpdatedAt = queueItem.UpdatedAt;
+        SetUploadCheckpointProgress(queueItem, repository, checkpointSignature, totalCount, nextIndex);
 
         await db.SaveChangesAsync(ct);
     }
@@ -1272,7 +1332,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 snapshot.TotalFileBytes,
                 BuildPayloadSha(snapshot, entries.Count, fileVersions.Count, remoteSnapshotId)),
             entries,
-            fileVersions);
+            fileVersions,
+            repository.ProtectCloudMetadata);
     }
 
     private async Task RestoreFilesFromPackageAsync(
@@ -1382,6 +1443,62 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         await cloudSync.UploadBlockAsync(accessToken, blockHash, stream, stream.Length, ct);
         return true;
+    }
+
+    private static bool ShouldFallbackToSingleBlockUpload(Exception ex)
+    {
+        if (ex is NotSupportedException)
+            return true;
+
+        if (ex is HttpRequestException http &&
+            http.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+        {
+            return true;
+        }
+
+        return ex.InnerException is not null && ShouldFallbackToSingleBlockUpload(ex.InnerException);
+    }
+
+    private static void SetUploadCheckpointProgress(
+        RepositorySyncQueueItem queueItem,
+        Repository repository,
+        string checkpointSignature,
+        int totalCount,
+        int nextIndex)
+    {
+        queueItem.UploadCheckpointSignature = checkpointSignature;
+        queueItem.UploadCheckpointTotal = totalCount;
+        queueItem.UploadCheckpointNextIndex = Math.Clamp(nextIndex, 0, totalCount);
+        queueItem.UpdatedAt = DateTime.UtcNow;
+        repository.CloudSyncLastStatus = nextIndex > 0
+            ? $"syncing_upload {queueItem.UploadCheckpointNextIndex}/{totalCount}"
+            : "syncing_upload";
+        repository.UpdatedAt = queueItem.UpdatedAt;
+    }
+
+    private List<PendingBlockUploadItem> BuildUploadBatch(IReadOnlyList<string> missingHashes, int startIndex)
+    {
+        var items = new List<PendingBlockUploadItem>(Math.Min(UploadBatchMaxBlocks, Math.Max(0, missingHashes.Count - startIndex)));
+        long totalBytes = 0;
+
+        for (var i = startIndex; i < missingHashes.Count && items.Count < UploadBatchMaxBlocks; i++)
+        {
+            var blockHash = missingHashes[i];
+            var path = ResolveLocalBlockPath(blockHash);
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                break;
+            }
+
+            var contentLength = new FileInfo(path).Length;
+            if (items.Count > 0 && totalBytes + contentLength > UploadBatchMaxBytes)
+                break;
+
+            items.Add(new PendingBlockUploadItem(i, blockHash, path, contentLength));
+            totalBytes += contentLength;
+        }
+
+        return items;
     }
 
     private string? ResolveLocalBlockPath(string blockHash)
@@ -1586,5 +1703,11 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         return full;
     }
+
+    private sealed record PendingBlockUploadItem(
+        int Index,
+        string BlockHash,
+        string SourcePath,
+        long ContentLength);
 }
 

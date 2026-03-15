@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using MediatR;
@@ -25,6 +26,8 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
         var category = ResolveCategory(requestType);
         var repositoryId = TryExtractRepositoryId(request);
         var username = TryExtractString(request, "Username");
+        var startedAtUtc = DateTime.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -39,6 +42,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                 cancellationToken);
 
             var response = await next();
+            stopwatch.Stop();
             var (success, message) = ExtractOutcome(response);
 
             await TryAppendAsync(
@@ -48,13 +52,14 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                 repositoryId,
                 username,
                 message,
-                details: null,
+                details: BuildTimingDetails(startedAtUtc, stopwatch.ElapsedMilliseconds),
                 cancellationToken);
 
             return response;
         }
         catch (Exception ex)
         {
+            stopwatch.Stop();
             await TryAppendAsync(
                 "error",
                 category,
@@ -62,7 +67,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                 repositoryId,
                 username,
                 $"Unhandled exception: {ex.Message}",
-                ex.GetType().Name,
+                BuildTimingDetails(startedAtUtc, stopwatch.ElapsedMilliseconds, ex.GetType().Name),
                 cancellationToken);
             throw;
         }
@@ -207,5 +212,13 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
         }
 
         return (true, "Completed successfully.");
+    }
+
+    private static string BuildTimingDetails(DateTime startedAtUtc, long elapsedMs, string? suffix = null)
+    {
+        var details = $"StartedAtUtc={startedAtUtc:O};ElapsedMs={Math.Max(0, elapsedMs)};FinishedAtUtc={DateTime.UtcNow:O}";
+        return string.IsNullOrWhiteSpace(suffix)
+            ? details
+            : $"{details};Info={suffix}";
     }
 }

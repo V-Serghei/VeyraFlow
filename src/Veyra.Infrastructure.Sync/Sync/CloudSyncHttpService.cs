@@ -7,8 +7,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using System.Collections.Generic;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Security;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 
@@ -22,10 +24,12 @@ public sealed class CloudSyncHttpService : ICloudSyncService
 
     private readonly HttpClient _http;
     private readonly ILogger<CloudSyncHttpService> _log;
+    private readonly ICloudMetadataProtectionService _metadataProtection;
     private readonly CloudSyncFaultInjectionOptions _fault;
     private int _listCalls;
     private int _pushCalls;
     private int _uploadCalls;
+    private int _uploadBatchCalls;
     private int _downloadCalls;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -41,10 +45,12 @@ public sealed class CloudSyncHttpService : ICloudSyncService
     public CloudSyncHttpService(
         HttpClient http,
         IConfiguration configuration,
+        ICloudMetadataProtectionService metadataProtection,
         ILogger<CloudSyncHttpService> log)
     {
         _http = http;
         _log = log;
+        _metadataProtection = metadataProtection;
         _fault = CloudSyncFaultInjectionOptions.FromConfiguration(configuration);
 
         if (_fault.Enabled)
@@ -87,16 +93,23 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             return [];
 
         var repositories = payload.Repositories
-            .Select(r => new CloudRepositoryHeaderDto(
-                r.RepositoryId,
-                r.Name ?? string.Empty,
-                r.Description,
-                r.LatestSnapshotId,
-                r.LatestSnapshotCreatedAt,
-                r.LatestSnapshotTitle,
-                r.LatestSnapshotTrigger,
-                r.LatestSnapshotFileCount,
-                r.LatestSnapshotEntryCount))
+            .Select(r =>
+            {
+                var name = UnprotectOrDefault(r.Name, string.Empty, "repository.name");
+                var description = UnprotectOrDefault(r.Description, null, "repository.description");
+                var latestTitle = UnprotectOrDefault(r.LatestSnapshotTitle, null, "snapshot.title");
+
+                return new CloudRepositoryHeaderDto(
+                    r.RepositoryId,
+                    name ?? string.Empty,
+                    description,
+                    r.LatestSnapshotId,
+                    r.LatestSnapshotCreatedAt,
+                    latestTitle,
+                    r.LatestSnapshotTrigger,
+                    r.LatestSnapshotFileCount,
+                    r.LatestSnapshotEntryCount);
+            })
             .ToList();
 
         if (_fault.StaleRemoteHeadOnList)
@@ -159,32 +172,54 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         if (payload is null || !payload.Ok || payload.Repository is null || payload.Snapshot is null)
             return null;
 
+        var repository = payload.Repository;
+        var snapshot = payload.Snapshot;
+
+        var metadataProtected = (
+            _metadataProtection.IsProtected(repository.Name)
+            || _metadataProtection.IsProtected(repository.Description)
+            || _metadataProtection.IsProtected(snapshot.Title)
+            || payload.Entries?.Any(e => _metadataProtection.IsProtected(e.RelativePath) || _metadataProtection.IsProtected(e.Name)) == true
+            || payload.FileVersions?.Any(v => _metadataProtection.IsProtected(v.RelativePath)) == true);
+
         var entries = payload.Entries?
-            .Select(e => new CloudSnapshotEntryDto(
-                e.RelativePath ?? string.Empty,
-                e.ParentRelativePath,
-                e.Name ?? string.Empty,
-                e.IsDirectory,
-                e.Extension,
-                e.SizeBytes,
-                e.LastWriteUtc,
-                e.ContentHashSha256))
+            .Select(e =>
+            {
+                var relativePath = UnprotectOrDefault(e.RelativePath, string.Empty, "entry.relativePath");
+                var parentRelativePath = UnprotectOrDefault(e.ParentRelativePath, null, "entry.parentRelativePath");
+                var name = UnprotectOrDefault(e.Name, string.Empty, "entry.name");
+
+                return new CloudSnapshotEntryDto(
+                    relativePath ?? string.Empty,
+                    parentRelativePath,
+                    name ?? string.Empty,
+                    e.IsDirectory,
+                    e.Extension,
+                    e.SizeBytes,
+                    e.LastWriteUtc,
+                    e.ContentHashSha256);
+            })
             .ToList() ?? [];
 
         var fileVersions = payload.FileVersions?
-            .Select(v => new CloudFileVersionDto(
-                v.RelativePath ?? string.Empty,
-                v.FileVersionId,
-                v.ContentHashSha256 ?? string.Empty,
-                v.SizeBytes,
-                v.IsDeletionMarker,
-                v.CreatedAt,
-                v.Blocks?.Select(b => new CloudBlockRefDto(
-                        b.Sequence,
-                        b.BlockHash ?? string.Empty,
-                        b.LengthBytes,
-                        b.StoredSizeBytes))
-                    .ToList() ?? []))
+            .Select(v =>
+            {
+                var relativePath = UnprotectOrDefault(v.RelativePath, string.Empty, "fileVersion.relativePath");
+
+                return new CloudFileVersionDto(
+                    relativePath ?? string.Empty,
+                    v.FileVersionId,
+                    v.ContentHashSha256 ?? string.Empty,
+                    v.SizeBytes,
+                    v.IsDeletionMarker,
+                    v.CreatedAt,
+                    v.Blocks?.Select(b => new CloudBlockRefDto(
+                            b.Sequence,
+                            b.BlockHash ?? string.Empty,
+                            b.LengthBytes,
+                            b.StoredSizeBytes))
+                        .ToList() ?? []);
+            })
             .ToList() ?? [];
 
         _log.LogInformation(
@@ -199,21 +234,22 @@ public sealed class CloudSyncHttpService : ICloudSyncService
 
         return new CloudSnapshotPackageDto(
             new CloudRepositoryMetadataDto(
-                payload.Repository.Id,
-                payload.Repository.Name ?? string.Empty,
-                payload.Repository.Description),
+                repository.Id,
+                UnprotectOrDefault(repository.Name, string.Empty, "repository.name") ?? string.Empty,
+                UnprotectOrDefault(repository.Description, null, "repository.description")),
             new CloudSnapshotMetadataDto(
-                payload.Snapshot.Id,
-                payload.Snapshot.Title,
-                payload.Snapshot.Trigger ?? string.Empty,
-                payload.Snapshot.CreatedAt,
-                payload.Snapshot.TotalEntries,
-                payload.Snapshot.FileEntries,
-                payload.Snapshot.DirectoryEntries,
-                payload.Snapshot.TotalFileBytes,
-                payload.Snapshot.PayloadSha256),
+                snapshot.Id,
+                UnprotectOrDefault(snapshot.Title, null, "snapshot.title"),
+                snapshot.Trigger ?? string.Empty,
+                snapshot.CreatedAt,
+                snapshot.TotalEntries,
+                snapshot.FileEntries,
+                snapshot.DirectoryEntries,
+                snapshot.TotalFileBytes,
+                snapshot.PayloadSha256),
             entries,
-            fileVersions);
+            fileVersions,
+            metadataProtected);
     }
 
     public async Task<CloudPushResultDto?> PushSnapshotAsync(
@@ -232,13 +268,19 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             Repository = new PushRepositoryMeta
             {
                 Id = package.Repository.Id,
-                Name = package.Repository.Name,
-                Description = package.Repository.Description
+                Name = package.MetadataProtected
+                    ? ProtectRequired(package.Repository.Name)
+                    : package.Repository.Name,
+                Description = package.MetadataProtected
+                    ? _metadataProtection.ProtectNullable(package.Repository.Description)
+                    : package.Repository.Description
             },
             Snapshot = new PushSnapshotMeta
             {
                 Id = package.Snapshot.Id,
-                Title = package.Snapshot.Title,
+                Title = package.MetadataProtected
+                    ? _metadataProtection.ProtectNullable(package.Snapshot.Title)
+                    : package.Snapshot.Title,
                 Trigger = package.Snapshot.Trigger,
                 CreatedAt = package.Snapshot.CreatedAtUtc,
                 TotalEntries = package.Snapshot.TotalEntries,
@@ -249,9 +291,9 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             },
             Entries = package.Entries.Select(e => new PushEntry
             {
-                RelativePath = e.RelativePath,
-                ParentRelativePath = e.ParentRelativePath,
-                Name = e.Name,
+                RelativePath = package.MetadataProtected ? ProtectRequired(e.RelativePath) : e.RelativePath,
+                ParentRelativePath = package.MetadataProtected ? _metadataProtection.ProtectNullable(e.ParentRelativePath) : e.ParentRelativePath,
+                Name = package.MetadataProtected ? ProtectRequired(e.Name) : e.Name,
                 IsDirectory = e.IsDirectory,
                 Extension = e.Extension,
                 SizeBytes = e.SizeBytes,
@@ -260,7 +302,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             }).ToList(),
             FileVersions = package.FileVersions.Select(v => new PushFileVersion
             {
-                RelativePath = v.RelativePath,
+                RelativePath = package.MetadataProtected ? ProtectRequired(v.RelativePath) : v.RelativePath,
                 FileVersionId = v.FileVersionId,
                 ContentHashSha256 = v.ContentHashSha256,
                 SizeBytes = v.SizeBytes,
@@ -359,6 +401,78 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             contentLength ?? -1,
             sendTimer.ElapsedMilliseconds,
             uploadTimer.ElapsedMilliseconds);
+    }
+
+    public async Task<CloudBatchUploadResultDto?> UploadBlockBatchAsync(
+        string accessToken,
+        IReadOnlyList<CloudUploadBlockItemDto> blocks,
+        CancellationToken ct = default)
+    {
+        if (blocks is null || blocks.Count == 0)
+            return new CloudBatchUploadResultDto(true, 0, 0);
+
+        MaybeInjectFault("upload_block_batch", Interlocked.Increment(ref _uploadBatchCalls));
+
+        var totalBytes = blocks.Sum(static b => Math.Max(0, b.ContentLength));
+        var uploadTimer = Stopwatch.StartNew();
+        _log.LogInformation(
+            "Cloud batch block upload started. Blocks {Blocks}. TotalBytes {TotalBytes}",
+            blocks.Count,
+            totalBytes);
+
+        using var req = BuildRequest(HttpMethod.Post, "/api/sync/blocks/batch", accessToken);
+        using var content = new MultipartFormDataContent("veyra-" + Guid.NewGuid().ToString("N"));
+
+        foreach (var block in blocks)
+        {
+            var stream = new FileStream(
+                block.SourcePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 128 * 1024,
+                options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+            var part = new StreamContent(stream);
+            part.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            if (block.ContentLength > 0)
+                part.Headers.ContentLength = block.ContentLength;
+            part.Headers.TryAddWithoutValidation("X-Block-Hash", block.BlockHash);
+            content.Add(part, "blocks", block.BlockHash);
+        }
+
+        req.Content = content;
+
+        var sendTimer = Stopwatch.StartNew();
+        using var resp = await _http.SendAsync(req, ct);
+        sendTimer.Stop();
+        await EnsureSuccessAsync(
+            resp,
+            "upload_block_batch",
+            ct,
+            ("Blocks", blocks.Count),
+            ("TotalBytes", totalBytes));
+
+        var parseTimer = Stopwatch.StartNew();
+        var payload = await resp.Content.ReadFromJsonAsync<BatchUploadBlocksResponse>(JsonOptions, ct);
+        parseTimer.Stop();
+        if (payload is null)
+            return null;
+
+        uploadTimer.Stop();
+        _log.LogInformation(
+            "Cloud batch block upload completed. Blocks {Blocks}. StoredBlocks {StoredBlocks}. SkippedBlocks {SkippedBlocks}. SendMs {SendMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            blocks.Count,
+            payload.StoredBlocks,
+            payload.SkippedBlocks,
+            sendTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            uploadTimer.ElapsedMilliseconds);
+
+        return new CloudBatchUploadResultDto(
+            payload.Ok,
+            payload.StoredBlocks,
+            payload.SkippedBlocks);
     }
 
     public async Task<bool> DownloadBlockToFileAsync(
@@ -691,6 +805,28 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         return new CloudPushResultDto(payload.Ok, payload.MissingBlockHashes ?? []);
     }
 
+    private string ProtectRequired(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? value
+            : _metadataProtection.Protect(value);
+    }
+
+    private string? UnprotectOrDefault(string? value, string? fallback, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return fallback ?? value;
+
+        if (!_metadataProtection.IsProtected(value))
+            return value;
+
+        if (_metadataProtection.TryUnprotect(value, out var plaintext) && !string.IsNullOrWhiteSpace(plaintext))
+            return plaintext;
+
+        _log.LogWarning("Protected cloud metadata could not be decrypted. Field {Field}", fieldName);
+        return fallback;
+    }
+
     private void MaybeInjectFault(string operation, int callNumber)
     {
         if (!_fault.Enabled || callNumber <= 0)
@@ -816,6 +952,13 @@ public sealed class CloudSyncHttpService : ICloudSyncService
     {
         public bool Ok { get; init; }
         public List<string>? MissingBlockHashes { get; init; }
+    }
+
+    private sealed class BatchUploadBlocksResponse
+    {
+        public bool Ok { get; init; }
+        public int StoredBlocks { get; init; }
+        public int SkippedBlocks { get; init; }
     }
 
     private sealed class StorageRepairRequest

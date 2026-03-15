@@ -435,6 +435,11 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AutoCaptureFileVersions")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
                     b.Property<long?>("CloudLastLocalSnapshotId")
                         .HasColumnType("INTEGER");
 
@@ -465,6 +470,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<int>("DirectoryId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ExclusionPatternsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("FileCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -482,6 +490,11 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("ProtectCloudMetadata")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("RetentionEnabled")
                         .ValueGeneratedOnAdd()
@@ -580,6 +593,10 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.Property<int>("RepositoryId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("TagsCsv")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
                         .HasMaxLength(256)

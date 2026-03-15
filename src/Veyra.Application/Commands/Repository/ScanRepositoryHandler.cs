@@ -28,7 +28,7 @@ public sealed class ScanRepositoryHandler(
                 result.TotalEntries,
                 result.Trigger);
 
-            if (request.Options?.SaveFileVersions == true)
+            if (request.Options?.SaveFileVersions == true && result.SnapshotCreated)
             {
                 try
                 {

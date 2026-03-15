@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -28,6 +29,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly ILogger<FileVersionCompareWindowViewModel> _log;
     private readonly INativeWordCompareService _nativeWordCompare;
+    private readonly IAudioPreviewPlaybackService _audioPlayback;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
     private readonly List<string> _tempPreviewFiles = [];
     private CancellationTokenSource? _previewCts;
@@ -48,6 +50,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private string _repositoryPath = string.Empty;
     private string _relativePath = string.Empty;
     private string _displayName = string.Empty;
+    private string? _audioPlaybackStatusKey;
+    private object[] _audioPlaybackStatusArgs = Array.Empty<object>();
 
     public event Action? RequestClose;
     public event Action? RequestSaveImageDiffPreview;
@@ -131,6 +135,23 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasAudioWaveformPreview))]
     private Bitmap? _audioWaveformPreview;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectrogramPreview))]
+    private Bitmap? _audioSpectrogramPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectralDeltaPreview))]
+    private Bitmap? _audioSpectralDeltaPreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StopAudioPlaybackCommand))]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    private bool _isAudioPlaybackActive;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    private string _audioPlaybackStatus = string.Empty;
+
     [ObservableProperty] private string _leftImageCaption = string.Empty;
     [ObservableProperty] private string _rightImageCaption = string.Empty;
     [ObservableProperty] private string _overlayImageCaption = string.Empty;
@@ -208,21 +229,26 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public ObservableCollection<WordSemanticDiffRowViewModel> WordPreviewRows { get; } = [];
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
     public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
+    public ObservableCollection<AudioChangedSegmentItemViewModel> AudioChangedSegments { get; } = [];
 
     public FileVersionCompareWindowViewModel(
         IMediator mediator,
         ILogger<FileVersionCompareWindowViewModel> log,
-        INativeWordCompareService nativeWordCompare)
+        INativeWordCompareService nativeWordCompare,
+        IAudioPreviewPlaybackService audioPlayback)
     {
         _mediator = mediator;
         _log = log;
         _nativeWordCompare = nativeWordCompare;
+        _audioPlayback = audioPlayback;
 
         Versions.CollectionChanged += OnVersionsCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
         WordPreviewRows.CollectionChanged += OnWordPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
+        AudioChangedSegments.CollectionChanged += OnAudioChangedSegmentsCollectionChanged;
         _localization.LanguageChanged += OnLanguageChanged;
+        _audioPlayback.PlaybackStateChanged += OnAudioPlaybackStateChanged;
         RefreshLocalizationState();
     }
 
@@ -247,6 +273,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ImageDiffCompactStateText));
         OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
         RefreshImageDiffModes();
+        RefreshAudioPlaybackStatusLocalization();
 
         RefreshVersionsBindings();
         RefreshSelectedPairSummary();
@@ -408,6 +435,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
     public bool HasNoImagePreviews => !HasAnyImagePreview;
     public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
+    public bool HasAudioSpectrogramPreview => AudioSpectrogramPreview is not null;
+    public bool HasAudioSpectralDeltaPreview => AudioSpectralDeltaPreview is not null;
+    public bool HasAudioChangedSegments => AudioChangedSegments.Count > 0;
+    public bool HasAudioPlaybackStatus => !string.IsNullOrWhiteSpace(AudioPlaybackStatus);
     public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview;
     public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
     public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
@@ -728,6 +759,37 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private Task OpenNativeWordCompareWithFormattingAsync()
         => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.WithFormatting, Loc.T("compare.native_word.opened_formatting"));
 
+    [RelayCommand]
+    private Task PlayBeforeAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: true);
+
+    [RelayCommand]
+    private Task PlayDifferenceAudioAsync()
+        => PlayAudioDifferenceAsync();
+
+    [RelayCommand]
+    private Task PlayBeforeAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: true);
+
+    [RelayCommand]
+    private Task LoopAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => LoopAudioSegmentCoreAsync(segment);
+
+    [RelayCommand(CanExecute = nameof(IsAudioPlaybackActive))]
+    private void StopAudioPlayback()
+    {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+    }
+
     private async Task OpenNativeWordCompareCoreAsync(NativeWordCompareOptions options, string successMessage)
     {
         if (!CanOpenNativeWordCompare || _leftVersion is null || _rightVersion is null)
@@ -808,9 +870,150 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
         }
     }
+
+    private async Task PlayAudioPreviewAsync(bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus(playAfter ? "compare.audio_playing_after" : "compare.audio_playing_before");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio preview playback. Path {Path}", audioPath);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioDifferenceAsync()
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus("compare.audio_playing_difference");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio difference playback. Path {Path}", audioPath);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment, bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)));
+
+            SetAudioPlaybackStatus(
+                playAfter ? "compare.audio_playing_segment_after" : "compare.audio_playing_segment_before",
+                segment.SegmentLabel);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio segment playback. Path {Path}. Segment {Segment}", audioPath, segment.SegmentLabel);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task LoopAudioSegmentCoreAsync(AudioChangedSegmentItemViewModel? segment)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)),
+                loop: true);
+
+            SetAudioPlaybackStatus("compare.audio_looping_segment_difference", segment.SegmentLabel);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio segment loop playback. Path {Path}. Segment {Segment}", audioPath, segment.SegmentLabel);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private void OnAudioPlaybackStateChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_audioPlayback.IsPlaying)
+                ClearAudioPlaybackStatus();
+            else if (!IsAudioPlaybackActive)
+                IsAudioPlaybackActive = true;
+        });
+    }
+
+    private void SetAudioPlaybackStatus(string localizationKey, params object[] args)
+    {
+        _audioPlaybackStatusKey = localizationKey;
+        _audioPlaybackStatusArgs = args;
+        AudioPlaybackStatus = args.Length == 0
+            ? Loc.T(localizationKey)
+            : Loc.F(localizationKey, args);
+        IsAudioPlaybackActive = true;
+    }
+
+    private void ClearAudioPlaybackStatus()
+    {
+        _audioPlaybackStatusKey = null;
+        _audioPlaybackStatusArgs = Array.Empty<object>();
+        AudioPlaybackStatus = string.Empty;
+        IsAudioPlaybackActive = false;
+    }
+
+    private void RefreshAudioPlaybackStatusLocalization()
+    {
+        if (IsAudioPlaybackActive && !string.IsNullOrWhiteSpace(_audioPlaybackStatusKey))
+        {
+            AudioPlaybackStatus = _audioPlaybackStatusArgs.Length == 0
+                ? Loc.T(_audioPlaybackStatusKey)
+                : Loc.F(_audioPlaybackStatusKey, _audioPlaybackStatusArgs);
+        }
+        else if (!IsAudioPlaybackActive)
+        {
+            AudioPlaybackStatus = string.Empty;
+        }
+    }
+
     [RelayCommand]
     private void Close()
     {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         RequestClose?.Invoke();
     }
 
@@ -901,6 +1104,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public void CleanupPreviewResources()
     {
         _previewCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         ReleasePreviewResources();
     }
 
@@ -1221,6 +1426,20 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             TrackTempFile(audioPreview.WaveformImagePath, audioPreview.IsWaveformTempFile);
         }
 
+        TrackTempFile(audioPreview.DifferenceAudioPath, audioPreview.IsDifferenceTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectrogramImagePath) && File.Exists(audioPreview.SpectrogramImagePath))
+        {
+            AudioSpectrogramPreview = await Task.Run(() => new Bitmap(audioPreview.SpectrogramImagePath), ct);
+            TrackTempFile(audioPreview.SpectrogramImagePath, audioPreview.IsSpectrogramTempFile);
+        }
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectralDeltaImagePath) && File.Exists(audioPreview.SpectralDeltaImagePath))
+        {
+            AudioSpectralDeltaPreview = await Task.Run(() => new Bitmap(audioPreview.SpectralDeltaImagePath), ct);
+            TrackTempFile(audioPreview.SpectralDeltaImagePath, audioPreview.IsSpectralDeltaTempFile);
+        }
+
         if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath))
             TrackTempFile(audioPreview.BaselineAudioPath, audioPreview.IsBaselineTempFile);
 
@@ -1322,6 +1541,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void RebuildPreviewMetrics()
     {
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
 
         if (_lastBinarySummary is null)
             return;
@@ -1378,6 +1598,27 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     $"{_lastAudioPreview.SignalSimilarityRatio.Value * 100:F1}%"));
             }
 
+            if (_lastAudioPreview.SpectralSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_similarity"),
+                    $"{_lastAudioPreview.SpectralSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.SpectralDeltaRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_delta"),
+                    $"{_lastAudioPreview.SpectralDeltaRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.BaselineStereoCorrelation.HasValue || _lastAudioPreview.CurrentStereoCorrelation.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.stereo_correlation"),
+                    $"{FormatSignedRatio(_lastAudioPreview.BaselineStereoCorrelation)} -> {FormatSignedRatio(_lastAudioPreview.CurrentStereoCorrelation)}"));
+            }
+
             if (_lastAudioPreview.ChangedTimeRatio.HasValue)
             {
                 PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
@@ -1388,6 +1629,55 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
                 Loc.T("metric.changed_segments"),
                 $"{_lastAudioPreview.ChangedSegmentCount:N0}"));
+
+            foreach (var bandMetric in _lastAudioPreview.BandMetrics)
+            {
+                var bandName = LocalizeAudioBandName(bandMetric.BandDisplayName);
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_energy", bandName),
+                    $"{bandMetric.BaselineEnergyRatio * 100:F1}% -> {bandMetric.CurrentEnergyRatio * 100:F1}%"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_similarity", bandName),
+                    $"{bandMetric.SimilarityRatio * 100:F1}% ({Loc.T("metric.delta_short")} {bandMetric.DeltaRatio * 100:F1}%)"));
+            }
+
+            foreach (var channelMetric in _lastAudioPreview.ChannelMetrics)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_peak", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselinePeakAmplitude)} -> {FormatAmplitude(channelMetric.CurrentPeakAmplitude)}"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_rms", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselineRmsAmplitude)} -> {FormatAmplitude(channelMetric.CurrentRmsAmplitude)}"));
+
+                if (channelMetric.SimilarityRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_similarity", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.SimilarityRatio.Value * 100:F1}%"));
+                }
+
+                if (channelMetric.ChangedTimeRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_changed_timeline", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.ChangedTimeRatio.Value * 100:F1}%"));
+                }
+            }
+
+            foreach (var segment in _lastAudioPreview.ChangedSegments)
+            {
+                AudioChangedSegments.Add(new AudioChangedSegmentItemViewModel(
+                    SegmentLabel: $"#{segment.SegmentIndex}",
+                    RangeLabel: $"{FormatPreciseAudioDuration(segment.StartSeconds)} - {FormatPreciseAudioDuration(segment.EndSeconds)}",
+                    DurationLabel: FormatPreciseAudioDuration(segment.DurationSeconds),
+                    IntensityLabel: $"{segment.AverageDifferenceRatio * 100:F1}% / {segment.PeakDifferenceRatio * 100:F1}%",
+                    StartSeconds: segment.StartSeconds,
+                    DurationSeconds: segment.DurationSeconds));
+            }
+
             return;
         }
 
@@ -1593,6 +1883,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     private void ResetPreview(string message)
     {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         PreviewKind = PendingDiffPreviewKind.None;
         IsPreviewLoading = false;
         ClearLoadingState();
@@ -1600,6 +1892,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         PreviewRows.Clear();
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
         _lastImagePreview = null;
@@ -1616,10 +1909,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void ReleasePreviewResources()
     {
         _imageDiffRenderCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
         ClearLoadingState();
         PreviewRows.Clear();
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
@@ -1635,16 +1931,22 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         var rightImage = RightImagePreview;
         var overlayImage = OverlayImagePreview;
         var audioWaveform = AudioWaveformPreview;
+        var audioSpectrogram = AudioSpectrogramPreview;
+        var audioSpectralDelta = AudioSpectralDeltaPreview;
 
         LeftImagePreview = null;
         RightImagePreview = null;
         OverlayImagePreview = null;
         AudioWaveformPreview = null;
+        AudioSpectrogramPreview = null;
+        AudioSpectralDeltaPreview = null;
 
         leftImage?.Dispose();
         rightImage?.Dispose();
         overlayImage?.Dispose();
         audioWaveform?.Dispose();
+        audioSpectrogram?.Dispose();
+        audioSpectralDelta?.Dispose();
 
         LeftImageCaption = Loc.T("common.before");
         RightImageCaption = Loc.T("common.after");
@@ -1841,6 +2143,34 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         return $"{Math.Clamp(amplitude.Value, 0d, 1d):F3}";
     }
 
+    private static string FormatSignedRatio(double? value)
+    {
+        if (!value.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(value.Value, -1d, 1d):+0.00;-0.00;0.00}";
+    }
+
+    private static string FormatPreciseAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return "0:00.000";
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss\.fff")
+            : duration.ToString(@"m\:ss\.fff");
+    }
+
+    private static string LocalizeAudioBandName(string? bandName)
+        => bandName switch
+        {
+            "Low" => Loc.T("audio.band.low"),
+            "Mids" => Loc.T("audio.band.mids"),
+            "Highs" => Loc.T("audio.band.highs"),
+            _ => bandName ?? Loc.T("common.not_available_short")
+        };
+
     private static void TryDelete(string path)
     {
         try
@@ -1888,6 +2218,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasPreviewMetrics));
         OnPropertyChanged(nameof(IsBinaryPreview));
         OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnAudioChangedSegmentsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasAudioChangedSegments));
     }
 }
 

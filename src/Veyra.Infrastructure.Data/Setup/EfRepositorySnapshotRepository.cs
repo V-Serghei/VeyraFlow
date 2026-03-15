@@ -57,6 +57,7 @@ public sealed class EfRepositorySnapshotRepository(
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
         bool saveFileVersions = true,
         string? snapshotTitle = null,
+        IReadOnlyCollection<string>? snapshotTags = null,
         CancellationToken ct = default)
     {
         var overallTimer = Stopwatch.StartNew();
@@ -164,6 +165,7 @@ public sealed class EfRepositorySnapshotRepository(
             RepositoryId = repositoryId,
             Trigger = safeTrigger,
             Title = NormalizeSnapshotTitle(snapshotTitle),
+            TagsCsv = SerializeSnapshotTags(snapshotTags),
             CreatedAt = scannedAtUtc,
             TotalEntries = totalEntries,
             FileEntries = fileEntries,
@@ -818,7 +820,8 @@ public sealed class EfRepositorySnapshotRepository(
                 s.Id,
                 s.Title,
                 s.CreatedAt,
-                s.Trigger))
+                s.Trigger,
+                s.TagsCsv))
             .ToListAsync(ct);
 
         if (snapshots.Count == 0)
@@ -865,7 +868,8 @@ public sealed class EfRepositorySnapshotRepository(
                 current.Title,
                 current.CreatedAtUtc,
                 current.Trigger,
-                comparison.ChangedFilesCount));
+                comparison.ChangedFilesCount,
+                ParseSnapshotTags(current.TagsCsv)));
         }
 
         return result;
@@ -1159,7 +1163,10 @@ public sealed class EfRepositorySnapshotRepository(
                 var audioPreview = await AudioDiffPreviewBuilder.TryBuildAsync(baselineTempAudio, absolutePath, ct);
                 if (audioPreview is not null)
                 {
+                    tempFilesToCleanup.Add(audioPreview.DifferenceAudioPath);
                     tempFilesToCleanup.Add(audioPreview.WaveformImagePath);
+                    tempFilesToCleanup.Add(audioPreview.SpectrogramImagePath);
+                    tempFilesToCleanup.Add(audioPreview.SpectralDeltaImagePath);
 
                     var audioMessage = BuildAudioPreviewMessage(normalizedPath, binarySummary, audioPreview);
                     tempFilesToCleanup.Clear();
@@ -1167,29 +1174,12 @@ public sealed class EfRepositorySnapshotRepository(
                         relativePath: normalizedPath,
                         message: audioMessage,
                         binarySummary: binarySummary,
-                        audioPreview: new PendingAudioDiffPreviewDto
-                        {
-                            BaselineAudioPath = baselineTempAudio,
-                            IsBaselineTempFile = true,
-                            CurrentAudioPath = absolutePath,
-                            IsCurrentTempFile = false,
-                            WaveformImagePath = audioPreview.WaveformImagePath,
-                            IsWaveformTempFile = audioPreview.IsWaveformTempFile,
-                            BaselineDurationSeconds = audioPreview.BaselineDurationSeconds,
-                            CurrentDurationSeconds = audioPreview.CurrentDurationSeconds,
-                            BaselineSampleRate = audioPreview.BaselineSampleRate,
-                            CurrentSampleRate = audioPreview.CurrentSampleRate,
-                            BaselineChannels = audioPreview.BaselineChannels,
-                            CurrentChannels = audioPreview.CurrentChannels,
-                            BaselinePeakAmplitude = audioPreview.BaselinePeakAmplitude,
-                            CurrentPeakAmplitude = audioPreview.CurrentPeakAmplitude,
-                            BaselineRmsAmplitude = audioPreview.BaselineRmsAmplitude,
-                            CurrentRmsAmplitude = audioPreview.CurrentRmsAmplitude,
-                            SignalSimilarityRatio = audioPreview.SignalSimilarityRatio,
-                            ChangedTimeRatio = audioPreview.ChangedTimeRatio,
-                            ChangedSegmentCount = audioPreview.ChangedSegmentCount,
-                            HasDurationMismatch = audioPreview.HasDurationMismatch
-                        });
+                        audioPreview: CreatePendingAudioPreviewDto(
+                            baselineTempAudio,
+                            true,
+                            absolutePath,
+                            false,
+                            audioPreview));
                 }
 
                 TryDelete(baselineTempAudio);
@@ -1253,7 +1243,10 @@ public sealed class EfRepositorySnapshotRepository(
 
         var keepLeftTemp = false;
         var keepRightTemp = false;
+        string? audioDifferenceTemp = null;
         string? audioWaveformTemp = null;
+        string? audioSpectrogramTemp = null;
+        string? audioSpectralDeltaTemp = null;
 
         try
         {
@@ -1366,7 +1359,10 @@ public sealed class EfRepositorySnapshotRepository(
                 var audioPreview = await AudioDiffPreviewBuilder.TryBuildAsync(leftTemp, rightTemp, ct);
                 if (audioPreview is not null)
                 {
+                    audioDifferenceTemp = audioPreview.DifferenceAudioPath;
                     audioWaveformTemp = audioPreview.WaveformImagePath;
+                    audioSpectrogramTemp = audioPreview.SpectrogramImagePath;
+                    audioSpectralDeltaTemp = audioPreview.SpectralDeltaImagePath;
                     keepLeftTemp = true;
                     keepRightTemp = true;
 
@@ -1374,29 +1370,12 @@ public sealed class EfRepositorySnapshotRepository(
                         relativePath: left.RelativePath,
                         message: BuildAudioPreviewMessage(left.RelativePath, binarySummary, audioPreview),
                         binarySummary: binarySummary,
-                        audioPreview: new PendingAudioDiffPreviewDto
-                        {
-                            BaselineAudioPath = leftTemp,
-                            IsBaselineTempFile = true,
-                            CurrentAudioPath = rightTemp,
-                            IsCurrentTempFile = true,
-                            WaveformImagePath = audioPreview.WaveformImagePath,
-                            IsWaveformTempFile = audioPreview.IsWaveformTempFile,
-                            BaselineDurationSeconds = audioPreview.BaselineDurationSeconds,
-                            CurrentDurationSeconds = audioPreview.CurrentDurationSeconds,
-                            BaselineSampleRate = audioPreview.BaselineSampleRate,
-                            CurrentSampleRate = audioPreview.CurrentSampleRate,
-                            BaselineChannels = audioPreview.BaselineChannels,
-                            CurrentChannels = audioPreview.CurrentChannels,
-                            BaselinePeakAmplitude = audioPreview.BaselinePeakAmplitude,
-                            CurrentPeakAmplitude = audioPreview.CurrentPeakAmplitude,
-                            BaselineRmsAmplitude = audioPreview.BaselineRmsAmplitude,
-                            CurrentRmsAmplitude = audioPreview.CurrentRmsAmplitude,
-                            SignalSimilarityRatio = audioPreview.SignalSimilarityRatio,
-                            ChangedTimeRatio = audioPreview.ChangedTimeRatio,
-                            ChangedSegmentCount = audioPreview.ChangedSegmentCount,
-                            HasDurationMismatch = audioPreview.HasDurationMismatch
-                        });
+                        audioPreview: CreatePendingAudioPreviewDto(
+                            leftTemp,
+                            true,
+                            rightTemp,
+                            true,
+                            audioPreview));
                 }
             }
 
@@ -1427,6 +1406,15 @@ public sealed class EfRepositorySnapshotRepository(
 
             if (!keepLeftTemp && !keepRightTemp && !string.IsNullOrWhiteSpace(audioWaveformTemp))
                 TryDelete(audioWaveformTemp);
+
+            if (!keepLeftTemp && !keepRightTemp && !string.IsNullOrWhiteSpace(audioDifferenceTemp))
+                TryDelete(audioDifferenceTemp);
+
+            if (!keepLeftTemp && !keepRightTemp && !string.IsNullOrWhiteSpace(audioSpectrogramTemp))
+                TryDelete(audioSpectrogramTemp);
+
+            if (!keepLeftTemp && !keepRightTemp && !string.IsNullOrWhiteSpace(audioSpectralDeltaTemp))
+                TryDelete(audioSpectralDeltaTemp);
         }
     }
     public async Task<TextDiffResultDto?> GetStoredTextDiffAsync(
@@ -2535,8 +2523,85 @@ public sealed class EfRepositorySnapshotRepository(
         var sizeLabel = $"{FormatBytes(summary.BaselineSizeBytes)} -> {FormatBytes(summary.CurrentSizeBytes)} ({FormatSignedBytes(summary.SizeDeltaBytes)})";
         var durationLabel = $"{FormatDuration(preview.BaselineDurationSeconds)} -> {FormatDuration(preview.CurrentDurationSeconds)}";
         var similarityLabel = $"signal similarity {preview.SignalSimilarityRatio * 100:F1}%";
+        var spectralLabel = $"spectral similarity {preview.SpectralSimilarityRatio * 100:F1}%";
         var changedLabel = $"changed timeline {preview.ChangedTimeRatio * 100:F1}% in {preview.ChangedSegmentCount} segment(s)";
-        return $"{relativePath}   audio   {sizeLabel}   {durationLabel}   {similarityLabel}, {changedLabel}";
+        return $"{relativePath}   audio   {sizeLabel}   {durationLabel}   {similarityLabel}, {spectralLabel}, {changedLabel}";
+    }
+
+    private static PendingAudioDiffPreviewDto CreatePendingAudioPreviewDto(
+        string baselineAudioPath,
+        bool isBaselineTempFile,
+        string currentAudioPath,
+        bool isCurrentTempFile,
+        AudioDiffPreviewBuildResult audioPreview)
+    {
+        return new PendingAudioDiffPreviewDto
+        {
+            BaselineAudioPath = baselineAudioPath,
+            IsBaselineTempFile = isBaselineTempFile,
+            CurrentAudioPath = currentAudioPath,
+            IsCurrentTempFile = isCurrentTempFile,
+            DifferenceAudioPath = audioPreview.DifferenceAudioPath,
+            IsDifferenceTempFile = audioPreview.IsDifferenceTempFile,
+            WaveformImagePath = audioPreview.WaveformImagePath,
+            IsWaveformTempFile = audioPreview.IsWaveformTempFile,
+            SpectrogramImagePath = audioPreview.SpectrogramImagePath,
+            IsSpectrogramTempFile = audioPreview.IsSpectrogramTempFile,
+            SpectralDeltaImagePath = audioPreview.SpectralDeltaImagePath,
+            IsSpectralDeltaTempFile = audioPreview.IsSpectralDeltaTempFile,
+            BaselineDurationSeconds = audioPreview.BaselineDurationSeconds,
+            CurrentDurationSeconds = audioPreview.CurrentDurationSeconds,
+            BaselineSampleRate = audioPreview.BaselineSampleRate,
+            CurrentSampleRate = audioPreview.CurrentSampleRate,
+            BaselineChannels = audioPreview.BaselineChannels,
+            CurrentChannels = audioPreview.CurrentChannels,
+            BaselinePeakAmplitude = audioPreview.BaselinePeakAmplitude,
+            CurrentPeakAmplitude = audioPreview.CurrentPeakAmplitude,
+            BaselineRmsAmplitude = audioPreview.BaselineRmsAmplitude,
+            CurrentRmsAmplitude = audioPreview.CurrentRmsAmplitude,
+            SignalSimilarityRatio = audioPreview.SignalSimilarityRatio,
+            SpectralSimilarityRatio = audioPreview.SpectralSimilarityRatio,
+            SpectralDeltaRatio = audioPreview.SpectralDeltaRatio,
+            BaselineStereoCorrelation = audioPreview.BaselineStereoCorrelation,
+            CurrentStereoCorrelation = audioPreview.CurrentStereoCorrelation,
+            ChangedTimeRatio = audioPreview.ChangedTimeRatio,
+            ChangedSegmentCount = audioPreview.ChangedSegmentCount,
+            HasDurationMismatch = audioPreview.HasDurationMismatch,
+            ChannelMetrics = audioPreview.ChannelMetrics
+                .Select(metric => new PendingAudioChannelMetricDto
+                {
+                    ChannelIndex = metric.ChannelIndex,
+                    ChannelDisplayName = metric.ChannelDisplayName,
+                    BaselinePeakAmplitude = metric.BaselinePeakAmplitude,
+                    CurrentPeakAmplitude = metric.CurrentPeakAmplitude,
+                    BaselineRmsAmplitude = metric.BaselineRmsAmplitude,
+                    CurrentRmsAmplitude = metric.CurrentRmsAmplitude,
+                    SimilarityRatio = metric.SimilarityRatio,
+                    ChangedTimeRatio = metric.ChangedTimeRatio
+                })
+                .ToArray(),
+            BandMetrics = audioPreview.BandMetrics
+                .Select(metric => new PendingAudioBandMetricDto
+                {
+                    BandDisplayName = metric.BandDisplayName,
+                    BaselineEnergyRatio = metric.BaselineEnergyRatio,
+                    CurrentEnergyRatio = metric.CurrentEnergyRatio,
+                    DeltaRatio = metric.DeltaRatio,
+                    SimilarityRatio = metric.SimilarityRatio
+                })
+                .ToArray(),
+            ChangedSegments = audioPreview.ChangedSegments
+                .Select(segment => new PendingAudioChangedSegmentDto
+                {
+                    SegmentIndex = segment.SegmentIndex,
+                    StartSeconds = segment.StartSeconds,
+                    EndSeconds = segment.EndSeconds,
+                    DurationSeconds = segment.DurationSeconds,
+                    AverageDifferenceRatio = segment.AverageDifferenceRatio,
+                    PeakDifferenceRatio = segment.PeakDifferenceRatio
+                })
+                .ToArray()
+        };
     }
 
     private static string FormatSignedBytes(long value)
@@ -2625,6 +2690,50 @@ public sealed class EfRepositorySnapshotRepository(
             return title;
         return title[..256];
     }
+
+    private static string? SerializeSnapshotTags(IReadOnlyCollection<string>? tags)
+    {
+        var normalized = NormalizeSnapshotTags(tags);
+        return normalized.Count == 0 ? null : string.Join(';', normalized);
+    }
+
+    private static IReadOnlyList<string> ParseSnapshotTags(string? tagsCsv)
+    {
+        if (string.IsNullOrWhiteSpace(tagsCsv))
+            return Array.Empty<string>();
+
+        return NormalizeSnapshotTags(tagsCsv
+            .Split([';', ',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static IReadOnlyList<string> NormalizeSnapshotTags(IEnumerable<string>? tags)
+    {
+        if (tags is null)
+            return Array.Empty<string>();
+
+        var values = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var raw in tags)
+        {
+            var candidate = (raw ?? string.Empty).Trim().TrimStart('#');
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            if (candidate.Length > 48)
+                candidate = candidate[..48].Trim();
+
+            if (candidate.Length == 0 || !seen.Add(candidate))
+                continue;
+
+            values.Add(candidate);
+            if (values.Count >= 12)
+                break;
+        }
+
+        return values;
+    }
+
     private static SnapshotLinkStateDto ToSnapshotLinkStateDto(SnapshotLinkState state)
         => new(
             state.FileIdentityId,
@@ -2687,7 +2796,8 @@ public sealed class EfRepositorySnapshotRepository(
         long SnapshotId,
         string? Title,
         DateTime CreatedAtUtc,
-        string Trigger);
+        string Trigger,
+        string? TagsCsv);
 
     private sealed record SnapshotLinkState(
         long SnapshotId,

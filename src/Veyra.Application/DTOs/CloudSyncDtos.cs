@@ -56,11 +56,22 @@ public sealed record CloudSnapshotPackageDto(
     CloudRepositoryMetadataDto Repository,
     CloudSnapshotMetadataDto Snapshot,
     IReadOnlyList<CloudSnapshotEntryDto> Entries,
-    IReadOnlyList<CloudFileVersionDto> FileVersions);
+    IReadOnlyList<CloudFileVersionDto> FileVersions,
+    bool MetadataProtected = false);
 
 public sealed record CloudPushResultDto(
     bool Ok,
     IReadOnlyList<string> MissingBlockHashes);
+
+public sealed record CloudUploadBlockItemDto(
+    string BlockHash,
+    string SourcePath,
+    long ContentLength);
+
+public sealed record CloudBatchUploadResultDto(
+    bool Ok,
+    int StoredBlocks,
+    int SkippedBlocks);
 
 public sealed record CloudStorageSummaryDto(
     long LogicalBlockCount,

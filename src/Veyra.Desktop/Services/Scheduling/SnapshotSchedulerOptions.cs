@@ -2,18 +2,18 @@ namespace Veyra.Desktop.Services.Scheduling;
 
 public sealed class SnapshotSchedulerOptions
 {
-    public bool Enabled { get; init; } = true;
-    public int PollSeconds { get; init; } = 30;
-    public int IntervalMinutes { get; init; } = 15;
-    public int QuietHoursStartHour { get; init; } = 0;
-    public int QuietHoursEndHour { get; init; } = 0;
-    public int MaxReadBytesPerSecond { get; init; } = 0;
-    public int MaxIoOperationsPerSecond { get; init; } = 0;
-    public int RetryCount { get; init; } = 2;
-    public int RetryDelaySeconds { get; init; } = 10;
+    public bool Enabled { get; set; } = true;
+    public int PollSeconds { get; set; } = 30;
+    public int IntervalMinutes { get; set; } = 15;
+    public int QuietHoursStartHour { get; set; } = 0;
+    public int QuietHoursEndHour { get; set; } = 0;
+    public int MaxReadBytesPerSecond { get; set; } = 0;
+    public int MaxIoOperationsPerSecond { get; set; } = 0;
+    public int RetryCount { get; set; } = 2;
+    public int RetryDelaySeconds { get; set; } = 10;
 
-    public bool IntegrityEnabled { get; init; } = true;
-    public int IntegrityIntervalMinutes { get; init; } = 180;
-    public bool IntegrityRepairFromCloud { get; init; } = false;
-    public int IntegrityIssueSampleLimit { get; init; } = 200;
+    public bool IntegrityEnabled { get; set; } = true;
+    public int IntegrityIntervalMinutes { get; set; } = 180;
+    public bool IntegrityRepairFromCloud { get; set; } = false;
+    public int IntegrityIssueSampleLimit { get; set; } = 200;
 }

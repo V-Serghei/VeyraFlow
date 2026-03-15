@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -27,6 +29,7 @@ public partial class SnapshotNameDialogWindow : Window
 
     public bool IsConfirmed { get; private set; }
     public string? SnapshotTitle { get; private set; }
+    public IReadOnlyList<string> SnapshotTags { get; private set; } = Array.Empty<string>();
 
     public SnapshotNameDialogWindow()
     {
@@ -169,9 +172,15 @@ public partial class SnapshotNameDialogWindow : Window
         IsConfirmed = confirmed;
 
         if (confirmed && DataContext is SnapshotNameDialogWindowViewModel vm)
+        {
             SnapshotTitle = vm.SnapshotName;
+            SnapshotTags = vm.NormalizedSnapshotTags.ToArray();
+        }
         else
+        {
             SnapshotTitle = null;
+            SnapshotTags = Array.Empty<string>();
+        }
 
         Close();
     }

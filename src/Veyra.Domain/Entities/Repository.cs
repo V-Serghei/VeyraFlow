@@ -7,6 +7,7 @@ public class Repository
     public int Id { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
+    public string? ExclusionPatternsJson { get; set; }
 
     public int DirectoryId { get; set; }
     public Watched.WatchedDirectory Directory { get; set; } = null!;
@@ -15,6 +16,8 @@ public class Repository
     public int VersionCount { get; set; }
     public long TotalSizeBytes { get; set; }
     public DateTime? LastScannedAt { get; set; }
+    public bool AutoCaptureFileVersions { get; set; } = true;
+    public bool ProtectCloudMetadata { get; set; } = true;
 
     public bool RetentionEnabled { get; set; }
     public int? RetentionMaxAgeDays { get; set; }

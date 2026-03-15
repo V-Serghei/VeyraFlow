@@ -5,4 +5,5 @@ public sealed record RepositorySnapshotHistoryItemDto(
     string? Title,
     DateTime CreatedAtUtc,
     string Trigger,
-    int ChangedFilesCount);
+    int ChangedFilesCount,
+    IReadOnlyList<string>? Tags = null);

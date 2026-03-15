@@ -34,8 +34,8 @@ public sealed class CreateRepositoryHandler(
                     match.Id,
                     null,
                     new RepositoryScanOptionsDto(
-                        SaveFileVersions: false,
-                        TriggerOverride: "sync_index_setup"),
+                        SaveFileVersions: true,
+                        TriggerOverride: "initial_snapshot"),
                     ct);
 
                 log.LogInformation("Repository ensured for {Path}: Id={Id}", request.DirectoryPath, match.Id);
@@ -51,4 +51,3 @@ public sealed class CreateRepositoryHandler(
         }
     }
 }
-

@@ -11,6 +11,7 @@ public interface IRepositorySnapshotRepository
         IReadOnlyCollection<RepositoryScanEntryDto> entries,
         bool saveFileVersions = true,
         string? snapshotTitle = null,
+        IReadOnlyCollection<string>? snapshotTags = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(

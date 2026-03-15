@@ -140,7 +140,7 @@ public sealed class SnapshotSchedulerService(
             if (repo.LastScannedAt is not null && nowUtc - repo.LastScannedAt.Value < interval)
                 continue;
 
-            await RunScheduledScanWithRetryAsync(scanner, repo.Id, ct);
+            await RunScheduledScanWithRetryAsync(scanner, cloudSync, repo.Id, repo.AutoCaptureFileVersions, ct);
         }
 
         var retentionRuns = await retention.RunDueRetentionAsync(ct: ct);
@@ -199,7 +199,9 @@ public sealed class SnapshotSchedulerService(
 
     private async Task RunScheduledScanWithRetryAsync(
         IRepositoryScanner scanner,
+        IRepositoryCloudSyncOrchestrator cloudSync,
         int repositoryId,
+        bool autoCaptureFileVersions,
         CancellationToken ct)
     {
         var totalAttempts = Math.Clamp(options.RetryCount, 0, 10) + 1;
@@ -209,15 +211,18 @@ public sealed class SnapshotSchedulerService(
         {
             try
             {
-                await scanner.ScanRepositoryAsync(
+                var result = await scanner.ScanRepositoryAsync(
                     repositoryId,
                     null,
                     new RepositoryScanOptionsDto(
                         IsScheduled: true,
                         MaxReadBytesPerSecond: Math.Max(0, options.MaxReadBytesPerSecond),
                         MaxIoOperationsPerSecond: Math.Max(0, options.MaxIoOperationsPerSecond),
-                        SaveFileVersions: false),
+                        SaveFileVersions: autoCaptureFileVersions),
                     ct);
+
+                if (autoCaptureFileVersions && result.SnapshotCreated)
+                    await cloudSync.TryPushLatestSnapshotAsync(repositoryId, ct);
 
                 return;
             }

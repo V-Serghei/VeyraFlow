@@ -22,6 +22,7 @@ using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.State;
+using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.Sync;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -53,6 +54,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private FileSystemWatcher? _liveSyncWatcher;
     private Timer? _liveSyncTimer;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
+    private bool _autoCaptureFileVersions = true;
+    private string _liveSyncRootPath = string.Empty;
+    private readonly List<string> _liveSyncTrackedFormats = [];
+    private RepositoryFsEventQueueStatus _liveSyncQueueStatus = RepositoryFsEventQueueStatus.Empty;
     private bool _isSyncingSelectionFromSnapshot;
     private bool _isClearingSnapshotFileSelection;
     private long? _preferredSnapshotId;
@@ -89,6 +94,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
     [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
     [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
+    [NotifyPropertyChangedFor(nameof(ShowBlockingOverlay))]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayTitle))]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayDetail))]
     private bool _isLoading;
 
     [ObservableProperty] private bool _isEmpty;
@@ -192,6 +200,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [ObservableProperty] private string? _scanMessage;
     [ObservableProperty] private bool _scanIsIndeterminate;
     [ObservableProperty] private bool _isLiveSyncActive;
+    [ObservableProperty] private bool _isLiveSyncPaused;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLiveSyncIssue))]
+    private string _liveSyncLastIssue = string.Empty;
 
     [ObservableProperty] private string _pendingChangesSummary = "";
     [ObservableProperty] private string _lastSnapshotLabel = "";
@@ -208,6 +220,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private bool _hasSnapshotHistory;
     [ObservableProperty] private string _snapshotHistorySearchQuery = string.Empty;
     [ObservableProperty] private string _selectedSnapshotTriggerFilter = "all";
+    [ObservableProperty] private string _selectedSnapshotTagFilter = "all";
     [ObservableProperty] private string _snapshotHistoryMinChangedFiles = string.Empty;
 
     [ObservableProperty]
@@ -228,6 +241,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     [ObservableProperty] private bool _isSnapshotHistoryMenuOpen;
     [ObservableProperty] private bool _isDiffPreviewMenuOpen;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowBlockingOverlay))]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayTitle))]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayDetail))]
+    [NotifyPropertyChangedFor(nameof(CanRunScanActions))]
+    [NotifyPropertyChangedFor(nameof(CanCreateSnapshot))]
+    [NotifyPropertyChangedFor(nameof(CanRunMaintenanceActions))]
+    [NotifyPropertyChangedFor(nameof(CanToggleLiveSyncMonitoring))]
+    [NotifyPropertyChangedFor(nameof(CanProcessLiveSyncQueueNow))]
+    [NotifyPropertyChangedFor(nameof(CanRestoreSelectedVersion))]
+    [NotifyPropertyChangedFor(nameof(CanRunDiffForSelectedVersion))]
+    [NotifyPropertyChangedFor(nameof(CanCompareSelectedVersionPair))]
+    private bool _isTransientActionBusy;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayTitle))]
+    private string _transientActionTitle = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BlockingOverlayDetail))]
+    private string _transientActionDetail = string.Empty;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoDiffPreviewRows))]
     [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
@@ -287,6 +323,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public bool HasComparableVersions => ComparableFileVersions.Count > 0;
     public bool HasFullFilePreviewContent
         => !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
+    public bool ShowBlockingOverlay => IsLoading || IsTransientActionBusy;
+    public string BlockingOverlayTitle => IsTransientActionBusy
+        ? TransientActionTitle
+        : Loc.T("explorer.loading_title");
+    public string BlockingOverlayDetail => IsTransientActionBusy
+        ? TransientActionDetail
+        : Loc.T("explorer.loading_detail");
+    public bool ShowLiveSyncMonitorCard => RepositoryId > 0;
+    public bool HasLiveSyncIssue => !string.IsNullOrWhiteSpace(LiveSyncLastIssue);
     public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasDiffPreviewRows;
     public bool ShowNoDiffPreviewMessage => !IsFullFilePreviewMode && HasNoDiffPreviewRows;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode;
@@ -309,15 +354,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         : Loc.T("compare.full_preview.view_full_file");
     public bool CanToggleFullFilePreview => !IsDiffPreviewLoading && _diffPreviewBeforeVersionId is > 0 && _diffPreviewAfterVersionId is > 0;
     public bool CanOpenSelectedFileOnDisk => GetSelectedFileFullPath() is not null;
-    public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
-    public bool CanRunMaintenanceActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning;
+    public bool CanRunScanActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning && !IsTransientActionBusy;
+    public bool CanRunMaintenanceActions => RepositoryId > 0 && !IsLoading && !IsScanRunning && !IsMaintenanceRunning && !IsTransientActionBusy;
     public bool CanCreateSnapshot => CanRunScanActions && HasPendingChanges;
+    public bool CanToggleLiveSyncMonitoring => RepositoryId > 0 && !IsLoading && !IsTransientActionBusy && !string.IsNullOrWhiteSpace(_liveSyncRootPath);
+    public bool CanProcessLiveSyncQueueNow => RepositoryId > 0 && !IsLoading && !IsScanRunning
+        && !IsTransientActionBusy
+        && (!string.IsNullOrWhiteSpace(_liveSyncRootPath) || _liveSyncQueueStatus.TotalCount > 0);
     public bool CanRestoreSelectedVersion
-        => !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
+        => !IsTransientActionBusy && !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanRunDiffForSelectedVersion
-        => !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
+        => !IsTransientActionBusy && !IsVersionActionRunning && SelectedVersion is { HasContentBlocks: true, IsDeletionMarker: false };
     public bool CanCompareSelectedVersionPair
-        => !IsVersionActionRunning
+        => !IsTransientActionBusy
+           && !IsVersionActionRunning
            && CompareLeftVersion is { HasContentBlocks: true, IsDeletionMarker: false } left
            && CompareRightVersion is { HasContentBlocks: true, IsDeletionMarker: false } right
            && left.FileVersionId != right.FileVersionId;
@@ -332,6 +382,46 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public string FileVersionsToggleLabel => ShowAllFileVersions
         ? Loc.F("explorer.file_versions.show_latest", CollapsedVisibleFileVersions)
         : Loc.F("explorer.file_versions.show_all", FileVersions.Count);
+    public string LiveSyncStateText
+    {
+        get
+        {
+            if (IsLiveSyncPaused)
+                return Loc.T("explorer.monitoring_state_paused");
+
+            if (IsLiveSyncActive)
+                return Loc.T("explorer.monitoring_state_active");
+
+            return string.IsNullOrWhiteSpace(_liveSyncRootPath) || Directory.Exists(_liveSyncRootPath)
+                ? Loc.T("explorer.monitoring_state_stopped")
+                : Loc.T("explorer.monitoring_state_unavailable");
+        }
+    }
+
+    public string LiveSyncModeText => _autoCaptureFileVersions
+        ? Loc.T("explorer.monitoring_mode_versions")
+        : Loc.T("explorer.monitoring_mode_index_only");
+
+    public string LiveSyncQueueText => _liveSyncQueueStatus.TotalCount <= 0
+        ? Loc.T("explorer.monitoring_queue_idle")
+        : Loc.F(
+            "explorer.monitoring_queue_counts",
+            _liveSyncQueueStatus.PendingCount,
+            _liveSyncQueueStatus.RunningCount,
+            _liveSyncQueueStatus.TotalCount,
+            _liveSyncQueueStatus.MaxRetryCount);
+
+    public string LiveSyncLastActivityText => _lastLiveSyncUtc == DateTime.MinValue
+        ? Loc.T("explorer.monitoring_last_processed_never")
+        : Loc.F("explorer.monitoring_last_processed_format", _lastLiveSyncUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+
+    public string LiveSyncTrackedFormatsText => _liveSyncExtensions.Count == 0
+        ? Loc.T("explorer.monitoring_formats_all")
+        : Loc.F("explorer.monitoring_formats_count", _liveSyncExtensions.Count);
+
+    public string LiveSyncToggleLabel => IsLiveSyncPaused || !IsLiveSyncActive
+        ? Loc.T("explorer.monitoring_resume")
+        : Loc.T("explorer.monitoring_pause");
 
     public ObservableCollection<ExplorerTreeNodeViewModel> TreeNodes { get; } = [];
     public ObservableCollection<ExplorerItemViewModel> Items { get; } = [];
@@ -340,6 +430,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public ObservableCollection<string> ModifiedWindowFilters { get; } = ["all", "24h", "7d", "30d"];
     public ObservableCollection<RepositoryExplorerSavedFilterViewModel> SavedExplorerFilters { get; } = [];
     public ObservableCollection<string> SnapshotTriggerFilters { get; } = ["all"];
+    public ObservableCollection<string> SnapshotTagFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotFileChangeKindFilters { get; } = ["all", "added", "modified", "removed"];
     public ObservableCollection<string> SnapshotFileExtensionFilters { get; } = ["all"];
     public ObservableCollection<ExplorerFileVersionViewModel> FileVersions { get; } = [];
@@ -442,6 +533,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             RepositoryId = repo.Id;
             RepositoryName = repo.Name;
             RepositoryPath = repo.DirectoryPath;
+            _autoCaptureFileVersions = repo.AutoCaptureFileVersions;
 
             await RefreshEntriesAndTreeAsync(clearSelection: true);
             _log.LogInformation(
@@ -508,6 +600,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnMaxSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
     partial void OnSnapshotHistorySearchQueryChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSelectedSnapshotTriggerFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSelectedSnapshotTagFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSnapshotHistoryMinChangedFilesChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSnapshotFilesSearchQueryChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
     partial void OnSelectedSnapshotFileChangeKindFilterChanged(string value) => ApplySnapshotFilesFiltersIfNeeded();
@@ -668,12 +761,44 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ToggleLiveSyncMonitoringAsync()
+    {
+        if (!CanToggleLiveSyncMonitoring)
+            return;
+
+        if (IsLiveSyncActive && !IsLiveSyncPaused)
+            PauseLiveSync();
+        else
+            ResumeLiveSync();
+
+        await RefreshLiveSyncIndicatorsAsync();
+    }
+
+    [RelayCommand]
+    private async Task ProcessLiveSyncQueueNowAsync()
+    {
+        if (!CanProcessLiveSyncQueueNow)
+            return;
+
+        await FlushQueuedLiveSyncAsync(allowPaused: true, manualTrigger: true);
+        await RefreshLiveSyncIndicatorsAsync();
+    }
+
+    [RelayCommand]
     private async Task OpenSettingsAsync()
     {
         if (RepositoryId == 0 || OpenSettingsRequested is null)
             return;
 
-        await OpenSettingsRequested.Invoke(RepositoryId);
+        await RunTransientPreparationAsync(
+            "explorer.open_settings_title",
+            "explorer.open_settings_detail",
+            () => OpenSettingsRequested.Invoke(RepositoryId),
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open repository settings from explorer. RepositoryId {RepositoryId}", RepositoryId);
+                ErrorMessage = Loc.T("common.error_generic");
+            });
     }
 
     [RelayCommand]
@@ -776,6 +901,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             SnapshotHistorySearchQuery = string.Empty;
             SelectedSnapshotTriggerFilter = "all";
+            SelectedSnapshotTagFilter = "all";
             SnapshotHistoryMinChangedFiles = string.Empty;
         }
         finally
@@ -808,51 +934,64 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private async Task CreateSnapshotAsync()
     {
-        await LoadPendingChangesAsync();
-
-        if (!HasPendingChanges)
-        {
-            ErrorMessage = Loc.T("explorer.error_no_changes_for_snapshot");
-            return;
-        }
-
-        var owner = _windows.GetActiveWindow();
-        if (owner is null)
-        {
-            ErrorMessage = Loc.T("explorer.error_snapshot_dialog_unavailable");
-            return;
-        }
-
-        var dialog = _windows.Create<SnapshotNameDialogWindow>();
-        if (dialog.DataContext is SnapshotNameDialogWindowViewModel vm)
-        {
-            var defaultName = $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}";
-            var changedFiles = PendingChanges.Select(change => new SnapshotPendingFileItemViewModel
+        await RunTransientPreparationAsync(
+            "explorer.snapshot_opening_title",
+            "explorer.snapshot_opening_detail",
+            async () =>
             {
-                RelativePath = change.RelativePath,
-                Name = change.Name,
-                ChangeKind = change.ChangeKind,
-                CurrentSizeBytes = change.CurrentSizeBytes,
-                BaselineSizeBytes = change.BaselineSizeBytes
-            }).ToList();
+                await LoadPendingChangesAsync();
 
-            vm.Initialize(defaultName, changedFiles, LoadSnapshotDialogPreviewAsync);
-        }
+                if (!HasPendingChanges)
+                {
+                    ErrorMessage = Loc.T("explorer.error_no_changes_for_snapshot");
+                    return;
+                }
 
-        await _windows.ShowDialogAsync(dialog, owner);
+                var owner = _windows.GetActiveWindow();
+                if (owner is null)
+                {
+                    ErrorMessage = Loc.T("explorer.error_snapshot_dialog_unavailable");
+                    return;
+                }
 
-        if (!dialog.IsConfirmed)
-            return;
+                var dialog = _windows.Create<SnapshotNameDialogWindow>();
+                if (dialog.DataContext is SnapshotNameDialogWindowViewModel vm)
+                {
+                    var defaultName = $"{Loc.T("snapshot.default_name_prefix")}_{DateTime.Now:yyyyMMdd_HHmmss}";
+                    var changedFiles = PendingChanges.Select(change => new SnapshotPendingFileItemViewModel
+                    {
+                        RelativePath = change.RelativePath,
+                        Name = change.Name,
+                        ChangeKind = change.ChangeKind,
+                        CurrentSizeBytes = change.CurrentSizeBytes,
+                        BaselineSizeBytes = change.BaselineSizeBytes
+                    }).ToList();
 
-        var snapshotTitle = dialog.SnapshotTitle;
+                    vm.Initialize(defaultName, changedFiles, LoadSnapshotDialogPreviewAsync);
+                }
 
-        await ExecuteScanAsync(
-            saveFileVersions: true,
-            triggerOverride: "manual_snapshot",
-            fallbackMessage: Loc.T("explorer.scan.saving_snapshot"),
-            showErrors: true,
-            successMessage: Loc.T("explorer.scan.snapshot_saved"),
-            snapshotTitle: snapshotTitle);
+                await _windows.ShowDialogAsync(dialog, owner);
+
+                if (!dialog.IsConfirmed)
+                    return;
+
+                var snapshotTitle = dialog.SnapshotTitle;
+                var snapshotTags = dialog.SnapshotTags;
+
+                await ExecuteScanAsync(
+                    saveFileVersions: true,
+                    triggerOverride: "manual_snapshot",
+                    fallbackMessage: Loc.T("explorer.scan.saving_snapshot"),
+                    showErrors: true,
+                    successMessage: Loc.T("explorer.scan.snapshot_saved"),
+                    snapshotTitle: snapshotTitle,
+                    snapshotTags: snapshotTags);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open snapshot dialog for repository {RepositoryId}", RepositoryId);
+                ErrorMessage = Loc.T("explorer.error_snapshot_dialog_unavailable");
+            });
     }
 
     private async Task<PendingFileDiffPreviewDto> LoadSnapshotDialogPreviewAsync(
@@ -922,7 +1061,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ]
         });
 
-        var bundlePath = file?.Path.LocalPath;
+        var bundlePath = StoragePathResolver.TryGetLocalPath(file);
         if (string.IsNullOrWhiteSpace(bundlePath))
             return;
 
@@ -966,7 +1105,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             ]
         });
 
-        var bundlePath = bundleSelection.FirstOrDefault()?.Path.LocalPath;
+        var bundlePath = StoragePathResolver.TryGetLocalPath(bundleSelection.FirstOrDefault());
         if (string.IsNullOrWhiteSpace(bundlePath))
             return;
 
@@ -983,7 +1122,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             AllowMultiple = false
         });
 
-        var targetDirectory = targetDirectorySelection.FirstOrDefault()?.Path.LocalPath;
+        var targetDirectory = StoragePathResolver.TryGetLocalPath(targetDirectorySelection.FirstOrDefault());
         if (string.IsNullOrWhiteSpace(targetDirectory))
             return;
 
@@ -1248,6 +1387,73 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+    public Task FocusEntryAsync(string relativePath, bool isDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return Task.CompletedTask;
+
+        var normalized = NormalizeRelativePath(relativePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return Task.CompletedTask;
+
+        _suppressExplorerFilterApply = true;
+        try
+        {
+            SearchQuery = GetLeafName(normalized);
+            SelectedEntryTypeFilter = "all";
+            SelectedExtensionFilter = "all";
+            SelectedModifiedWindowFilter = "all";
+            MinSizeMb = string.Empty;
+            MaxSizeMb = string.Empty;
+            SelectedExplorerSavedFilter = null;
+            SavedExplorerFilterName = string.Empty;
+        }
+        finally
+        {
+            _suppressExplorerFilterApply = false;
+        }
+
+        var targetDirectory = isDirectory
+            ? normalized
+            : GetParentRelativePath(normalized);
+
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+            ExpandAndSelectTreePath(targetDirectory);
+        else
+            ShowItemsForPath(null);
+
+        ShowItemsForPath(targetDirectory);
+
+        if (!isDirectory)
+        {
+            var targetItem = Items.FirstOrDefault(item =>
+                item.RelativePath.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (targetItem is not null)
+                SelectedItem = targetItem;
+        }
+        else
+        {
+            SelectedItem = null;
+            ExpandAndSelectTreePath(normalized);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public async Task FocusSnapshotAsync(long snapshotId)
+    {
+        if (snapshotId <= 0 || RepositoryId <= 0)
+            return;
+
+        IsSnapshotHistoryMenuOpen = true;
+        await LoadSnapshotHistoryAsync(snapshotId);
+
+        var target = SnapshotHistory.FirstOrDefault(item => item.SnapshotId == snapshotId);
+        if (target is not null)
+            SelectedSnapshot = target;
+    }
+
 
     [RelayCommand]
     private async Task CompareSelectedWithPreviousAsync()
@@ -1336,13 +1542,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var dialog = _windows.Create<FileVersionCompareWindow>();
         if (dialog.DataContext is FileVersionCompareWindowViewModel vm)
         {
-            await vm.InitializeAsync(
-                repositoryId: RepositoryId,
-                repositoryPath: RepositoryPath,
-                relativePath: SelectedItem?.RelativePath ?? leftVersion.RelativePath,
-                fileDisplayName: SelectedItem?.Name ?? leftVersion.FileName,
-                preferredLeftVersionId: leftVersion.FileVersionId,
-                preferredRightVersionId: rightVersion.FileVersionId);
+            await RunTransientPreparationAsync(
+                "explorer.compare_opening_title",
+                "explorer.compare_opening_detail",
+                async () =>
+                {
+                    await vm.InitializeAsync(
+                        repositoryId: RepositoryId,
+                        repositoryPath: RepositoryPath,
+                        relativePath: SelectedItem?.RelativePath ?? leftVersion.RelativePath,
+                        fileDisplayName: SelectedItem?.Name ?? leftVersion.FileName,
+                        preferredLeftVersionId: leftVersion.FileVersionId,
+                        preferredRightVersionId: rightVersion.FileVersionId);
+                },
+                ex =>
+                {
+                    _log.LogError(
+                        ex,
+                        "Failed to initialize compare window. RepositoryId {RepositoryId}. LeftVersion {LeftVersionId}. RightVersion {RightVersionId}",
+                        RepositoryId,
+                        leftVersion.FileVersionId,
+                        rightVersion.FileVersionId);
+                    VersionPanelError = Loc.T("explorer.version_error.compare_window_unavailable");
+                });
         }
 
         await _windows.ShowDialogAsync(dialog, owner);
@@ -1431,7 +1653,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         string fallbackMessage,
         bool showErrors,
         string? successMessage,
-        string? snapshotTitle = null)
+        string? snapshotTitle = null,
+        IReadOnlyList<string>? snapshotTags = null)
     {
         if (RepositoryId == 0)
             return false;
@@ -1472,7 +1695,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 new RepositoryScanOptionsDto(
                     SaveFileVersions: saveFileVersions,
                     TriggerOverride: triggerOverride,
-                    SnapshotTitle: snapshotTitle))));
+                    SnapshotTitle: snapshotTitle,
+                    SnapshotTags: snapshotTags))));
 
             if (!result.Success)
             {
@@ -1796,6 +2020,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         RefreshLocalizationState();
     }
 
+    partial void OnIsLoadingChanged(bool value) => RaiseLiveSyncStateChanged();
+    partial void OnIsScanRunningChanged(bool value) => RaiseLiveSyncStateChanged();
+    partial void OnIsLiveSyncActiveChanged(bool value) => RaiseLiveSyncStateChanged();
+    partial void OnIsLiveSyncPausedChanged(bool value) => RaiseLiveSyncStateChanged();
+    partial void OnLiveSyncLastIssueChanged(string value) => RaiseLiveSyncStateChanged();
+
     private void RefreshLocalizationState()
     {
         RefreshFilterOptionBindings();
@@ -1816,6 +2046,21 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(MaintenanceProgressTitle));
         OnPropertyChanged(nameof(MaintenanceProgressDetail));
         NotifyExplorerChromeStateChanged();
+        RaiseLiveSyncStateChanged();
+    }
+
+    private void RaiseLiveSyncStateChanged()
+    {
+        OnPropertyChanged(nameof(ShowLiveSyncMonitorCard));
+        OnPropertyChanged(nameof(HasLiveSyncIssue));
+        OnPropertyChanged(nameof(LiveSyncStateText));
+        OnPropertyChanged(nameof(LiveSyncModeText));
+        OnPropertyChanged(nameof(LiveSyncQueueText));
+        OnPropertyChanged(nameof(LiveSyncLastActivityText));
+        OnPropertyChanged(nameof(LiveSyncTrackedFormatsText));
+        OnPropertyChanged(nameof(LiveSyncToggleLabel));
+        OnPropertyChanged(nameof(CanToggleLiveSyncMonitoring));
+        OnPropertyChanged(nameof(CanProcessLiveSyncQueueNow));
     }
 
     private void RefreshFilterOptionBindings()
@@ -1827,6 +2072,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var selectedTrigger = SelectedSnapshotTriggerFilter;
         var currentTriggers = SnapshotTriggerFilters.ToList();
         RebuildStaticFilterOptions(SnapshotTriggerFilters, selectedTrigger, currentTriggers, value => SelectedSnapshotTriggerFilter = value);
+        RebuildSnapshotTagFilters();
     }
 
     private void RebuildStaticFilterOptions(
@@ -1936,7 +2182,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     Title = item.Title,
                     CreatedAtUtc = item.CreatedAtUtc,
                     Trigger = item.Trigger,
-                    ChangedFilesCount = item.ChangedFilesCount
+                    ChangedFilesCount = item.ChangedFilesCount,
+                    Tags = item.Tags ?? Array.Empty<string>()
                 });
             }
 
@@ -1944,6 +2191,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 ? preferredSnapshotId
                 : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
             RebuildSnapshotTriggerFilters();
+            RebuildSnapshotTagFilters();
             ApplySnapshotHistoryFilters(targetSnapshotId);
         }
         catch (Exception ex)
@@ -2254,13 +2502,24 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void StartLiveSync(string rootPath, IReadOnlyCollection<string> linkedFormats)
     {
-        StopLiveSync();
+        _liveSyncRootPath = rootPath?.Trim() ?? string.Empty;
+        _liveSyncTrackedFormats.Clear();
+        _liveSyncTrackedFormats.AddRange(linkedFormats ?? Array.Empty<string>());
+        DisposeLiveSyncInfrastructure();
+        IsLiveSyncPaused = false;
+        LiveSyncLastIssue = string.Empty;
 
         if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+        {
+            if (!string.IsNullOrWhiteSpace(_liveSyncRootPath))
+                LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_root_missing");
+
+            _ = RefreshLiveSyncIndicatorsAsync();
             return;
+        }
 
         _liveSyncExtensions.Clear();
-        foreach (var ext in NormalizeTrackedExtensions(linkedFormats))
+        foreach (var ext in NormalizeTrackedExtensions(linkedFormats ?? Array.Empty<string>()))
             _liveSyncExtensions.Add(ext);
 
         try
@@ -2290,15 +2549,49 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             _lastLiveSyncUtc = DateTime.MinValue;
             IsLiveSyncActive = true;
             ArmLiveSyncTimer(250);
+            _ = RefreshLiveSyncIndicatorsAsync();
         }
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Failed to start live sync watcher for {Path}", rootPath);
-            StopLiveSync();
+            LiveSyncLastIssue = UserFacingMessageLocalizer.TryLocalize(ex.Message)?.Trim()
+                                ?? Loc.T("explorer.monitoring_issue_root_missing");
+            DisposeLiveSyncInfrastructure();
+            _ = RefreshLiveSyncIndicatorsAsync();
         }
     }
 
     private void StopLiveSync()
+    {
+        _liveSyncRootPath = string.Empty;
+        _liveSyncTrackedFormats.Clear();
+        IsLiveSyncPaused = false;
+        LiveSyncLastIssue = string.Empty;
+        _liveSyncQueueStatus = RepositoryFsEventQueueStatus.Empty;
+        _lastLiveSyncUtc = DateTime.MinValue;
+        DisposeLiveSyncInfrastructure();
+        RaiseLiveSyncStateChanged();
+    }
+
+    private void PauseLiveSync()
+    {
+        if (!IsLiveSyncActive)
+            return;
+
+        DisposeLiveSyncInfrastructure();
+        IsLiveSyncPaused = true;
+        _ = RefreshLiveSyncIndicatorsAsync();
+    }
+
+    private void ResumeLiveSync()
+    {
+        if (string.IsNullOrWhiteSpace(_liveSyncRootPath))
+            return;
+
+        StartLiveSync(_liveSyncRootPath, _liveSyncTrackedFormats);
+    }
+
+    private void DisposeLiveSyncInfrastructure()
     {
         IsLiveSyncActive = false;
         CancelPanelLoadRequests();
@@ -2338,6 +2631,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private void OnLiveSyncError(object sender, ErrorEventArgs e)
     {
         _log.LogWarning(e.GetException(), "Live sync watcher error for repository {RepositoryId}", RepositoryId);
+        Dispatcher.UIThread.Post(() =>
+        {
+            var message = e.GetException()?.Message;
+            LiveSyncLastIssue = string.IsNullOrWhiteSpace(message)
+                ? Loc.T("explorer.monitoring_issue_watcher_error")
+                : Loc.F("explorer.monitoring_issue_watcher_error_with_reason", message.Trim());
+        });
         _ = QueueLiveSyncEventAsync(RepositoryPath, "error");
     }
 
@@ -2366,6 +2666,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             await _fsEventQueue.EnqueueAsync(RepositoryId, fullPath, eventKind);
             ArmLiveSyncTimer(LiveSyncDebounceMs);
+            _ = RefreshLiveSyncIndicatorsAsync();
         }
         catch (Exception ex)
         {
@@ -2375,17 +2676,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 RepositoryId,
                 fullPath,
                 eventKind);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", ex.Message));
         }
     }
 
-    private async Task FlushQueuedLiveSyncAsync()
+    private async Task FlushQueuedLiveSyncAsync(bool allowPaused = false, bool manualTrigger = false)
     {
-        if (!IsLiveSyncActive || RepositoryId == 0)
+        if ((!IsLiveSyncActive && !allowPaused) || RepositoryId == 0)
             return;
 
         if (IsLoading || IsScanRunning)
         {
-            ArmLiveSyncTimer(LiveSyncDebounceMs);
+            if (IsLiveSyncActive)
+                ArmLiveSyncTimer(LiveSyncDebounceMs);
             return;
         }
 
@@ -2407,21 +2711,33 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Failed to lease durable FS events for repository {RepositoryId}", RepositoryId);
-            ArmLiveSyncTimer(LiveSyncDebounceMs);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", ex.Message));
+
+            if (IsLiveSyncActive)
+                ArmLiveSyncTimer(LiveSyncDebounceMs);
             return;
         }
 
         if (lease.Count == 0)
+        {
+            await RefreshLiveSyncIndicatorsAsync();
             return;
+        }
 
         _lastLiveSyncUtc = DateTime.UtcNow;
 
         var success = await ExecuteScanAsync(
-            saveFileVersions: false,
-            triggerOverride: "sync_live_watcher",
+            saveFileVersions: _autoCaptureFileVersions,
+            triggerOverride: _autoCaptureFileVersions ? "auto_snapshot_live_watcher" : "sync_live_watcher",
             fallbackMessage: Loc.T("explorer.scan.syncing_file_changes"),
             showErrors: false,
             successMessage: null);
+
+        if (success)
+            await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = string.Empty);
+        else if (manualTrigger)
+            await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_scan_failed"));
 
         try
         {
@@ -2433,10 +2749,49 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogWarning(ex, "Failed to finalize durable FS event lease for repository {RepositoryId}", RepositoryId);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", ex.Message));
         }
 
-        if (await _fsEventQueue.HasPendingAsync(RepositoryId))
+        await RefreshLiveSyncIndicatorsAsync();
+
+        if (IsLiveSyncActive && await _fsEventQueue.HasPendingAsync(RepositoryId))
             ArmLiveSyncTimer(success ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
+    }
+
+    private async Task RefreshLiveSyncIndicatorsAsync(CancellationToken ct = default)
+    {
+        RepositoryFsEventQueueStatus status;
+        try
+        {
+            status = RepositoryId <= 0
+                ? RepositoryFsEventQueueStatus.Empty
+                : await _fsEventQueue.GetStatusAsync(RepositoryId, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Failed to load live sync queue status for repository {RepositoryId}", RepositoryId);
+            status = RepositoryFsEventQueueStatus.Empty;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _liveSyncQueueStatus = status;
+
+            if (!IsLiveSyncActive
+                && !IsLiveSyncPaused
+                && !string.IsNullOrWhiteSpace(_liveSyncRootPath)
+                && !Directory.Exists(_liveSyncRootPath))
+            {
+                LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_root_missing");
+            }
+            else if (string.IsNullOrWhiteSpace(LiveSyncLastIssue) && !string.IsNullOrWhiteSpace(status.LastError))
+            {
+                LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", status.LastError);
+            }
+
+            RaiseLiveSyncStateChanged();
+        });
     }
 
     private void ArmLiveSyncTimer(int dueMs)
@@ -2569,6 +2924,35 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+    private void RebuildSnapshotTagFilters()
+    {
+        var selected = NormalizeSnapshotTagFilter(SelectedSnapshotTagFilter);
+        var tags = _snapshotHistorySource
+            .SelectMany(x => x.Tags)
+            .Select(NormalizeSnapshotTagFilter)
+            .Where(x => x != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotTagFilters.Clear();
+        SnapshotTagFilters.Add("all");
+        foreach (var tag in tags)
+            SnapshotTagFilters.Add(tag);
+
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SelectedSnapshotTagFilter = SnapshotTagFilters.Contains(selected, StringComparer.OrdinalIgnoreCase)
+                ? selected
+                : "all";
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+    }
+
     private void RebuildSnapshotFileExtensionFilters()
     {
         var selected = NormalizeSnapshotFileExtensionFilter(SelectedSnapshotFileExtensionFilter);
@@ -2612,6 +2996,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (triggerFilter == "all" && !string.IsNullOrWhiteSpace(directives.TriggerFilter))
             triggerFilter = directives.TriggerFilter;
 
+        var snapshotTagFilter = NormalizeSnapshotTagFilter(SelectedSnapshotTagFilter);
+        if (snapshotTagFilter == "all" && !string.IsNullOrWhiteSpace(directives.TagFilter))
+            snapshotTagFilter = directives.TagFilter;
+
         var minChangedFiles = ParseNullableInt(SnapshotHistoryMinChangedFiles) ?? directives.MinChangedFiles;
         if (minChangedFiles < 0)
             minChangedFiles = null;
@@ -2623,11 +3011,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             filtered = filtered.Where(x =>
                 x.DisplayTitle.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
                 x.Trigger.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.Tags.Any(tag => tag.Contains(textQuery, StringComparison.OrdinalIgnoreCase)) ||
                 x.DisplayTime.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
         }
 
         if (triggerFilter != "all")
             filtered = filtered.Where(x => string.Equals(NormalizeSnapshotTriggerFilter(x.Trigger), triggerFilter, StringComparison.OrdinalIgnoreCase));
+
+        if (snapshotTagFilter != "all")
+            filtered = filtered.Where(x => x.Tags.Any(tag => string.Equals(NormalizeSnapshotTagFilter(tag), snapshotTagFilter, StringComparison.OrdinalIgnoreCase)));
 
         if (minChangedFiles is > 0)
             filtered = filtered.Where(x => x.ChangedFilesCount >= minChangedFiles.Value);
@@ -2964,6 +3356,37 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(HasActiveExplorerFilters));
         OnPropertyChanged(nameof(ExplorerFilterButtonLabel));
         OnPropertyChanged(nameof(ExplorerResultsSummary));
+        OnPropertyChanged(nameof(ShowBlockingOverlay));
+        OnPropertyChanged(nameof(BlockingOverlayTitle));
+        OnPropertyChanged(nameof(BlockingOverlayDetail));
+    }
+
+    private async Task RunTransientPreparationAsync(
+        string titleKey,
+        string detailKey,
+        Func<Task> action,
+        Action<Exception> onError)
+    {
+        if (IsTransientActionBusy)
+            return;
+
+        try
+        {
+            IsTransientActionBusy = true;
+            TransientActionTitle = Loc.T(titleKey);
+            TransientActionDetail = Loc.T(detailKey);
+            await action();
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
+        }
+        finally
+        {
+            IsTransientActionBusy = false;
+            TransientActionTitle = string.Empty;
+            TransientActionDetail = string.Empty;
+        }
     }
 
     private static string? GetParentRelativePath(string relativePath)
@@ -3247,6 +3670,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private static string NormalizeRelativePath(string value)
         => value.Replace('\\', '/').Trim('/');
+
+    private static string GetLeafName(string relativePath)
+    {
+        var normalized = NormalizeRelativePath(relativePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return string.Empty;
+
+        var lastSlash = normalized.LastIndexOf('/');
+        return lastSlash >= 0 ? normalized[(lastSlash + 1)..] : normalized;
+    }
 
     private void ResetFullFilePreviewState()
     {
@@ -3605,6 +4038,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 continue;
             }
 
+            if (lower.StartsWith("tag:", StringComparison.Ordinal))
+            {
+                var tag = NormalizeSnapshotTagFilter(normalized[4..]);
+                if (tag != "all")
+                    directives = directives with { TagFilter = tag };
+                continue;
+            }
+
             if (TryParseChangedDirective(lower, out var minChanged))
             {
                 directives = directives with { MinChangedFiles = minChanged };
@@ -3703,6 +4144,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             : normalized;
     }
 
+    private static string NormalizeSnapshotTagFilter(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().TrimStart('#').ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(normalized) || normalized == "all"
+            ? "all"
+            : normalized;
+    }
+
     private static string NormalizeSnapshotFileChangeKindFilter(string value)
     {
         var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
@@ -3778,11 +4227,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private readonly record struct SearchSnapshotHistoryDirectives(
         string TextQuery,
         string TriggerFilter,
+        string TagFilter,
         int? MinChangedFiles)
     {
         public static SearchSnapshotHistoryDirectives Empty => new(
             TextQuery: string.Empty,
             TriggerFilter: string.Empty,
+            TagFilter: string.Empty,
             MinChangedFiles: null);
     }
 

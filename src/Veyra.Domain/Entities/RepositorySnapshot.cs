@@ -9,6 +9,7 @@ public class RepositorySnapshot
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public required string Trigger { get; set; }
     public string? Title { get; set; }
+    public string? TagsCsv { get; set; }
 
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }

@@ -47,8 +47,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     public ObservableCollection<string> FormatTagFilters { get; } = ["all"];
 
     [ObservableProperty] private bool _isLoading;
+    [ObservableProperty] private bool _isTransientActionBusy;
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private bool _isEmpty;
+    [ObservableProperty] private string _transientActionTitle = string.Empty;
+    [ObservableProperty] private string _transientActionDetail = string.Empty;
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private string _selectedAvailabilityFilter = "all";
     [ObservableProperty] private string _selectedSyncStateFilter = "all";
@@ -62,6 +65,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private bool _hasSavedFilters;
 
     public bool HasActiveFilters => GetActiveFilterCount() > 0;
+    public bool ShowLoadingOverlay => IsLoading || IsTransientActionBusy;
+    public string LoadingOverlayTitle => IsTransientActionBusy
+        ? TransientActionTitle
+        : Loc.T("dashboard.loading_title");
+    public string LoadingOverlayDetail => IsTransientActionBusy
+        ? TransientActionDetail
+        : Loc.T("dashboard.loading_detail");
     public string FilterButtonLabel => HasActiveFilters
         ? Loc.F("dashboard.filters_active_button", GetActiveFilterCount())
         : Loc.T("dashboard.filters_button");
@@ -201,9 +211,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (repo is null)
             return;
 
-        _log.LogInformation("Dashboard open repository requested. RepositoryId {RepositoryId}", repo.Id);
-        if (OpenRepositoryRequested is not null)
-            await OpenRepositoryRequested.Invoke(repo.Id);
+        await RunTransientActionAsync(
+            "dashboard.open_repository_title",
+            "dashboard.open_repository_detail",
+            async () =>
+            {
+                _log.LogInformation("Dashboard open repository requested. RepositoryId {RepositoryId}", repo.Id);
+                if (OpenRepositoryRequested is not null)
+                    await OpenRepositoryRequested.Invoke(repo.Id);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open repository from dashboard. RepositoryId {RepositoryId}", repo.Id);
+                ErrorMessage = Loc.T("dashboard.error_load_failed");
+            });
     }
 
     [RelayCommand]
@@ -212,43 +233,57 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (repo is null)
             return;
 
-        _log.LogInformation("Dashboard open repository settings requested. RepositoryId {RepositoryId}", repo.Id);
-        if (OpenRepositorySettingsRequested is not null)
-            await OpenRepositorySettingsRequested.Invoke(repo.Id);
+        await RunTransientActionAsync(
+            "dashboard.open_repository_settings_title",
+            "dashboard.open_repository_settings_detail",
+            async () =>
+            {
+                _log.LogInformation("Dashboard open repository settings requested. RepositoryId {RepositoryId}", repo.Id);
+                if (OpenRepositorySettingsRequested is not null)
+                    await OpenRepositorySettingsRequested.Invoke(repo.Id);
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open repository settings from dashboard. RepositoryId {RepositoryId}", repo.Id);
+                ErrorMessage = Loc.T("dashboard.error_load_failed");
+            });
     }
 
     [RelayCommand]
     private async Task AddRepositoryAsync()
     {
-        try
-        {
-            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
-                "security.action_add_repository",
-                "security.action_add_repository_body");
-
-            if (!guardResult.IsAllowed)
+        await RunTransientActionAsync(
+            "dashboard.create_repository_opening_title",
+            "dashboard.create_repository_opening_detail",
+            async () =>
             {
-                if (!guardResult.IsCancelled)
-                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
-                return;
-            }
+                var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                    "security.action_add_repository",
+                    "security.action_add_repository_body");
 
-            var wizard = _windows.Create<CreateRepositoryWindow>();
-            var owner = _windows.GetActiveWindow();
-            _log.LogInformation("Opening create repository window from dashboard");
+                if (!guardResult.IsAllowed)
+                {
+                    if (!guardResult.IsCancelled)
+                        ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                    return;
+                }
 
-            if (owner is not null)
-                await _windows.ShowDialogAsync(wizard, owner);
-            else
-                _windows.Show(wizard);
+                var wizard = _windows.Create<CreateRepositoryWindow>();
+                var owner = _windows.GetActiveWindow();
+                _log.LogInformation("Opening create repository window from dashboard");
 
-            await LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Failed to open repository creation wizard");
-            ErrorMessage = Loc.T("dashboard.error_open_create_repository");
-        }
+                if (owner is not null)
+                    await _windows.ShowDialogAsync(wizard, owner);
+                else
+                    _windows.Show(wizard);
+
+                await LoadAsync();
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to open repository creation wizard");
+                ErrorMessage = Loc.T("dashboard.error_open_create_repository");
+            });
     }
 
     [RelayCommand]
@@ -902,6 +937,51 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         OnPropertyChanged(nameof(HasActiveFilters));
         OnPropertyChanged(nameof(FilterButtonLabel));
         OnPropertyChanged(nameof(RepositoryResultsSummary));
+        OnPropertyChanged(nameof(ShowLoadingOverlay));
+        OnPropertyChanged(nameof(LoadingOverlayTitle));
+        OnPropertyChanged(nameof(LoadingOverlayDetail));
+    }
+
+    partial void OnIsLoadingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowLoadingOverlay));
+        OnPropertyChanged(nameof(LoadingOverlayTitle));
+        OnPropertyChanged(nameof(LoadingOverlayDetail));
+    }
+
+    partial void OnIsTransientActionBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowLoadingOverlay));
+        OnPropertyChanged(nameof(LoadingOverlayTitle));
+        OnPropertyChanged(nameof(LoadingOverlayDetail));
+    }
+
+    private async Task RunTransientActionAsync(
+        string titleKey,
+        string detailKey,
+        Func<Task> action,
+        Action<Exception> onError)
+    {
+        if (IsTransientActionBusy)
+            return;
+
+        try
+        {
+            IsTransientActionBusy = true;
+            TransientActionTitle = Loc.T(titleKey);
+            TransientActionDetail = Loc.T(detailKey);
+            await action();
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
+        }
+        finally
+        {
+            IsTransientActionBusy = false;
+            TransientActionTitle = string.Empty;
+            TransientActionDetail = string.Empty;
+        }
     }
 
     private static string FormatSize(long bytes)

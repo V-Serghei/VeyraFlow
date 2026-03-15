@@ -11,6 +11,7 @@ using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
 using Veyra.Desktop.ViewModels.Pages.Explorer;
 using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
+using Veyra.Desktop.ViewModels.Pages.Search;
 using Veyra.Desktop.ViewModels.Pages.Settings;
 
 namespace Veyra.Desktop.ViewModels.Windows;
@@ -34,10 +35,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _isLoaded;
     private bool _isShellRefreshInProgress;
     private bool _pendingShellRefresh;
+    private object? _pageBeforeSearch;
 
     public RepositoryDashboardViewModel Dashboard { get; }
     public RepositoryExplorerViewModel Explorer { get; }
     public RepositorySettingsViewModel Settings { get; }
+    public GlobalSearchViewModel Search { get; }
     public AppSettingsViewModel AppSettings { get; }
 
     [ObservableProperty] private object? _currentPage;
@@ -58,6 +61,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RepositoryDashboardViewModel dashboard,
         RepositoryExplorerViewModel explorer,
         RepositorySettingsViewModel settings,
+        GlobalSearchViewModel search,
         AppSettingsViewModel appSettings,
         OnboardingStateService onboardingState,
         ILogger<MainWindowViewModel> log)
@@ -65,6 +69,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Dashboard = dashboard;
         Explorer = explorer;
         Settings = settings;
+        Search = search;
         AppSettings = appSettings;
         _onboardingState = onboardingState;
         _log = log;
@@ -78,6 +83,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Settings.BackRequested += ShowDashboard;
         Settings.RepositoryUpdated += OnRepositoryUpdatedAsync;
         Settings.RepositoryDeleted += OnRepositoryDeleted;
+
+        Search.BackRequested += ReturnFromSearch;
+        Search.OpenRepositoryRequested += OpenRepositoryAsync;
+        Search.OpenRepositorySettingsRequested += OpenRepositorySettingsAsync;
+        Search.OpenEntryRequested += OpenRepositoryEntryFromSearchAsync;
+        Search.OpenSnapshotRequested += OpenRepositorySnapshotFromSearchAsync;
 
         AppSettings.BackRequested += ShowDashboard;
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
@@ -97,6 +108,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _log.LogInformation("Opening global settings page");
         await AppSettings.LoadAsync();
         CurrentPage = AppSettings;
+    }
+
+    [RelayCommand]
+    private async Task OpenGlobalSearchAsync()
+    {
+        _pageBeforeSearch = CurrentPage;
+        _log.LogInformation("Opening global search page");
+        await Search.LoadAsync(forceRefresh: true);
+        CurrentPage = Search;
     }
 
     [RelayCommand]
@@ -163,6 +183,31 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = Settings;
     }
 
+    private async Task OpenRepositoryEntryFromSearchAsync(int repositoryId, string relativePath, bool isDirectory)
+    {
+        _log.LogInformation(
+            "Opening repository entry from search. RepositoryId {RepositoryId}. RelativePath {RelativePath}. IsDirectory {IsDirectory}",
+            repositoryId,
+            relativePath,
+            isDirectory);
+
+        await Explorer.LoadAsync(repositoryId);
+        await Explorer.FocusEntryAsync(relativePath, isDirectory);
+        CurrentPage = Explorer;
+    }
+
+    private async Task OpenRepositorySnapshotFromSearchAsync(int repositoryId, long snapshotId)
+    {
+        _log.LogInformation(
+            "Opening repository snapshot from search. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}",
+            repositoryId,
+            snapshotId);
+
+        await Explorer.LoadAsync(repositoryId);
+        await Explorer.FocusSnapshotAsync(snapshotId);
+        CurrentPage = Explorer;
+    }
+
     private async Task OnRepositoryUpdatedAsync(int repositoryId)
     {
         await Dashboard.LoadAsync();
@@ -183,6 +228,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _returnToAppSettingsFromRepositorySettings = false;
             _log.LogInformation("Returning from repository settings to app settings");
             CurrentPage = AppSettings;
+            return;
+        }
+
+        _ = ShowDashboardAsync();
+    }
+
+    private void ReturnFromSearch()
+    {
+        if (_pageBeforeSearch is not null && !ReferenceEquals(_pageBeforeSearch, Search))
+        {
+            CurrentPage = _pageBeforeSearch;
             return;
         }
 
@@ -284,6 +340,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (settingsRepositoryId > 0)
             await Settings.LoadAsync(settingsRepositoryId);
 
+        if (ReferenceEquals(currentPage, Search))
+            await Search.LoadAsync(forceRefresh: true);
+
         await AppSettings.LoadAsync();
         AppSettings.SelectTabByKey(selectedSettingsTab);
 
@@ -302,6 +361,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (ReferenceEquals(currentPage, AppSettings))
         {
             CurrentPage = AppSettings;
+            return;
+        }
+
+        if (ReferenceEquals(currentPage, Search))
+        {
+            CurrentPage = Search;
             return;
         }
 

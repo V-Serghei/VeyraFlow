@@ -42,6 +42,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             VersionCount = 0,
             TotalSizeBytes = 0,
             LastScannedAt = null,
+            AutoCaptureFileVersions = true,
+            ProtectCloudMetadata = true,
             RetentionEnabled = false,
             RetentionRunIntervalMinutes = 60,
             RetentionLastRunAt = null,
@@ -86,6 +88,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         int id,
         string name,
         string? description,
+        bool autoCaptureFileVersions,
+        bool protectCloudMetadata,
+        IReadOnlyCollection<string> excludedPatterns,
         RepositoryRetentionPolicyDto retentionPolicy,
         string syncConflictStrategy,
         int syncRetryMaxAttempts,
@@ -102,6 +107,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
         entity.Name = name;
         entity.Description = description;
+        entity.AutoCaptureFileVersions = autoCaptureFileVersions;
+        entity.ProtectCloudMetadata = protectCloudMetadata;
+        entity.ExclusionPatternsJson = SerializeExclusionPatterns(excludedPatterns);
         entity.RetentionEnabled = retentionPolicy.Enabled;
         entity.RetentionMaxAgeDays = NormalizePositive(retentionPolicy.MaxAgeDays);
         entity.RetentionMaxSnapshots = NormalizePositive(retentionPolicy.MaxSnapshots);
@@ -393,6 +401,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repo.DirectoryId,
             repo.Directory.Path,
             formats,
+            ParseExclusionPatterns(repo.ExclusionPatternsJson),
             repo.IsDeleted,
             repo.FileCount,
             repo.VersionCount,
@@ -411,7 +420,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 runningProgress?.UploadCheckpointNextIndex ?? 0,
                 runningProgress?.UploadCheckpointTotal ?? 0,
                 runningProgress?.CreatedAt,
-                runningProgress?.UpdatedAt));
+                runningProgress?.UpdatedAt),
+            repo.AutoCaptureFileVersions,
+            repo.ProtectCloudMetadata);
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -505,6 +516,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 r.DirectoryId,
                 r.Directory.Path,
                 formatsByDir.GetValueOrDefault(r.DirectoryId, Array.Empty<string>()),
+                ParseExclusionPatterns(r.ExclusionPatternsJson),
                 r.IsDeleted,
                 r.FileCount,
                 r.VersionCount,
@@ -523,7 +535,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     progress.Current,
                     progress.Total,
                     progress == default ? null : progress.CreatedAt,
-                    progress == default ? null : progress.UpdatedAt));
+                    progress == default ? null : progress.UpdatedAt),
+                r.AutoCaptureFileVersions,
+                r.ProtectCloudMetadata);
         }).ToList();
     }
 
@@ -562,6 +576,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
                 if (existing.SyncRetryBaseDelaySeconds <= 0)
                     existing.SyncRetryBaseDelaySeconds = 30;
+
             }
             else
             {
@@ -577,6 +592,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     VersionCount = 0,
                     TotalSizeBytes = 0,
                     LastScannedAt = null,
+                    AutoCaptureFileVersions = true,
+                    ProtectCloudMetadata = true,
                     RetentionEnabled = false,
                     RetentionRunIntervalMinutes = 60,
                     RetentionLastRunAt = null,
@@ -691,5 +708,33 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
+
+    private static IReadOnlyList<string> ParseExclusionPatterns(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+
+        return value
+            .Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => v.Replace('\\', '/').Trim('/'))
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? SerializeExclusionPatterns(IReadOnlyCollection<string> patterns)
+    {
+        var normalized = patterns
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim().Replace('\\', '/'))
+            .Select(v => v.Trim('/'))
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return normalized.Count == 0 ? null : string.Join(';', normalized);
+    }
 }
 

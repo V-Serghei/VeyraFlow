@@ -29,6 +29,8 @@ internal sealed class BundleRepositoryInfo
     public int VersionCount { get; set; }
     public long TotalSizeBytes { get; set; }
     public DateTime? LastScannedAtUtc { get; set; }
+    public bool AutoCaptureFileVersions { get; set; } = true;
+    public bool ProtectCloudMetadata { get; set; } = true;
 }
 
 internal sealed class BundleStatsInfo

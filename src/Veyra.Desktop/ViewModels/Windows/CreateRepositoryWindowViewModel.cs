@@ -13,7 +13,10 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Models.Formatted;
+using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Storage;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -49,6 +52,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
     private readonly ILogger<CreateRepositoryWindowViewModel> _log;
+    private readonly IRepositoryRetentionDefaultsApplier _retentionDefaultsApplier;
 
     private int _stepIndex;
     private string? _lastProgressLogSignature;
@@ -90,6 +94,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     public bool HasProgressLog => ProgressLogItems.Count > 0;
 
     public ObservableCollection<RepositoryFormatOptionViewModel> Formats { get; } = [];
+    public ObservableCollection<FormatCategoryItemViewModel> FormatCategories { get; } = [];
     public ObservableCollection<RepositoryCreationLogItemViewModel> ProgressLogItems { get; } = [];
 
     public IRelayCommand BackCommand { get; }
@@ -97,14 +102,17 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     public IRelayCommand CancelCommand { get; }
     public IAsyncRelayCommand BrowseDirectoryCommand { get; }
     public IRelayCommand AddCustomFormatCommand { get; }
+    public IRelayCommand<FormatCategoryItemViewModel?> ToggleFormatCategoryCommand { get; }
 
     public CreateRepositoryWindowViewModel(
         IMediator mediator,
         IWindowService windows,
+        IRepositoryRetentionDefaultsApplier retentionDefaultsApplier,
         ILogger<CreateRepositoryWindowViewModel> log)
     {
         _mediator = mediator;
         _windows = windows;
+        _retentionDefaultsApplier = retentionDefaultsApplier;
         _log = log;
 
         BackCommand = new RelayCommand(Back, CanBack);
@@ -112,15 +120,19 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         CancelCommand = new RelayCommand(Cancel);
         BrowseDirectoryCommand = new AsyncRelayCommand(BrowseDirectoryAsync, () => !IsBusy);
         AddCustomFormatCommand = new RelayCommand(AddCustomFormat, () => !IsBusy);
+        ToggleFormatCategoryCommand = new RelayCommand<FormatCategoryItemViewModel?>(ToggleFormatCategory, _ => !IsBusy);
 
         LocalizationManager.Instance.LanguageChanged += (_, _) =>
         {
+            foreach (var category in FormatCategories)
+                category.RefreshLocalization();
             OnPropertyChanged(nameof(Title));
             OnPropertyChanged(nameof(StepInfo));
             OnPropertyChanged(nameof(NextButtonText));
         };
 
         AddDefaultFormats();
+        BuildFormatCategories();
         SetStep(0);
     }
 
@@ -186,6 +198,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         NextCommand.NotifyCanExecuteChanged();
         BrowseDirectoryCommand.NotifyCanExecuteChanged();
         AddCustomFormatCommand.NotifyCanExecuteChanged();
+        ToggleFormatCategoryCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NextButtonText));
     }
 
@@ -228,7 +241,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         IReadOnlyList<IStorageFolder> res = await owner.StorageProvider.OpenFolderPickerAsync(
             new FolderPickerOpenOptions { Title = Loc.T("create_repo.select_directory_title"), AllowMultiple = false });
 
-        var local = res.FirstOrDefault()?.Path.LocalPath;
+        var local = StoragePathResolver.TryGetLocalPath(res.FirstOrDefault());
         if (!string.IsNullOrWhiteSpace(local) && Directory.Exists(local))
         {
             DirectoryPath = local;
@@ -258,6 +271,51 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
 
         CustomFormat = string.Empty;
+        OnPropertyChanged(nameof(SelectedFormatCount));
+        RefreshCommands();
+    }
+
+    private void ToggleFormatCategory(FormatCategoryItemViewModel? category)
+    {
+        if (IsBusy || category is null)
+            return;
+
+        category.IsApplied = !category.IsApplied;
+
+        if (category.IsApplied)
+        {
+            foreach (var format in category.Formats)
+            {
+                var normalized = RepositoryFormatOptionViewModel.NormalizeFormat(format);
+                var existing = Formats.FirstOrDefault(x => x.Format.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+                if (existing is null)
+                {
+                    existing = CreateFormatOption(normalized, true);
+                    Formats.Add(existing);
+                }
+
+                existing.IsSelected = true;
+            }
+        }
+        else
+        {
+            var protectedFormats = FormatCategories
+                .Where(item => !ReferenceEquals(item, category) && item.IsApplied)
+                .SelectMany(item => item.Formats)
+                .Select(RepositoryFormatOptionViewModel.NormalizeFormat)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var format in category.Formats.Select(RepositoryFormatOptionViewModel.NormalizeFormat))
+            {
+                if (protectedFormats.Contains(format))
+                    continue;
+
+                var existing = Formats.FirstOrDefault(x => x.Format.Equals(format, StringComparison.OrdinalIgnoreCase));
+                if (existing is not null)
+                    existing.IsSelected = false;
+            }
+        }
+
         OnPropertyChanged(nameof(SelectedFormatCount));
         RefreshCommands();
     }
@@ -310,6 +368,9 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 return;
             }
 
+            if (result.Value is int repositoryId)
+                await _retentionDefaultsApplier.ApplyToRepositoryAsync(repositoryId);
+
             ProgressPercent = 100;
             ProgressMessage = Loc.T("create_repo.success_progress_label");
             IsProgressIndeterminate = false;
@@ -360,17 +421,21 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     private void AddDefaultFormats()
     {
-        foreach (var ext in new[]
-                 {
-                     ".docx", ".pdf", ".txt", ".rtf", ".odt", ".xlsx",
-                     ".png", ".jpg", ".jpeg", ".gif", ".svg",
-                     ".json", ".xml", ".cs", ".js", ".ts", ".java", ".py", ".md"
-                 })
+        foreach (var ext in TrackedFormatCategoryCatalog.All
+                     .SelectMany(category => category.Formats)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            Formats.Add(CreateFormatOption(ext, true));
+            Formats.Add(CreateFormatOption(ext, false));
         }
 
         OnPropertyChanged(nameof(SelectedFormatCount));
+    }
+
+    private void BuildFormatCategories()
+    {
+        FormatCategories.Clear();
+        foreach (var definition in TrackedFormatCategoryCatalog.All)
+            FormatCategories.Add(new FormatCategoryItemViewModel(definition));
     }
 
     private RepositoryFormatOptionViewModel CreateFormatOption(string ext, bool isSelected)
@@ -380,12 +445,31 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         {
             if (args.PropertyName == nameof(RepositoryFormatOptionViewModel.IsSelected))
             {
+                RefreshFormatCategoryState();
                 OnPropertyChanged(nameof(SelectedFormatCount));
                 RefreshCommands();
             }
         };
 
         return vm;
+    }
+
+    private void RefreshFormatCategoryState()
+    {
+        var selected = Formats
+            .Where(format => format.IsSelected)
+            .Select(format => format.Format)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var category in FormatCategories)
+        {
+            var shouldBeApplied = category.Formats
+                .Select(RepositoryFormatOptionViewModel.NormalizeFormat)
+                .All(selected.Contains);
+
+            if (category.IsApplied != shouldBeApplied)
+                category.IsApplied = shouldBeApplied;
+        }
     }
 
     private void AppendProgressLog(string? message, int filesFound)

@@ -26,9 +26,9 @@
                     <TextBlock x:Name="ExplorerHeroTitle" Text="{Binding RepositoryName}" FontSize="22" FontWeight="SemiBold"/>
                     <TextBlock Classes="muted" Text="{Binding RepositoryPath}" FontSize="12" TextTrimming="CharacterEllipsis"/>
                     <TextBlock Classes="muted"
-                               Text="{loc:Tr explorer.live_sync}"
+                               Text="{Binding LiveSyncStateText}"
                                FontSize="11"
-                               IsVisible="{Binding IsLiveSyncActive}"/>
+                               IsVisible="{Binding ShowLiveSyncMonitorCard}"/>
                 </StackPanel>
 
                 <WrapPanel x:Name="ExplorerHeroActionsPanel"
@@ -666,6 +666,22 @@
                                                     <ComboBox.ItemTemplate>
                                                         <DataTemplate x:DataType="x:String">
                                                             <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_trigger}"/>
+                                                           </DataTemplate>
+                                                       </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <ComboBox Width="150"
+                                                          Margin="0,0,8,8"
+                                                          Classes="compact"
+                                                          ItemsSource="{Binding SnapshotTagFilters}"
+                                                          SelectedItem="{Binding SelectedSnapshotTagFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
                                                         </DataTemplate>
                                                     </ComboBox.ItemTemplate>
                                                 </ComboBox>
@@ -700,13 +716,14 @@
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate x:DataType="explorer:RepositorySnapshotHistoryEntryViewModel">
                                                         <Border Padding="10" Background="Transparent" BorderThickness="0">
-                                                            <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="4">
-                                                                <TextBlock Grid.Row="0" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Grid.Row="1" Text="{Binding DisplayTime}" Classes="muted" FontSize="11"/>
-                                                                <TextBlock Grid.Row="2" Text="{Binding ChangedFilesLabel}" Classes="muted" FontSize="11"/>
-                                                            </Grid>
-                                                        </Border>
-                                                    </DataTemplate>
+                                                       <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="4">
+                                                           <TextBlock Grid.Row="0" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                           <TextBlock Grid.Row="1" Text="{Binding DisplayTime}" Classes="muted" FontSize="11"/>
+                                                           <TextBlock Grid.Row="2" Text="{Binding ChangedFilesLabel}" Classes="muted" FontSize="11"/>
+                                                           <TextBlock Grid.Row="3" Text="{Binding TagsLabel}" Classes="muted" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasTags}"/>
+                                                       </Grid>
+                                                   </Border>
+                                               </DataTemplate>
                                                 </ListBox.ItemTemplate>
                                             </ListBox>
                                         </ScrollViewer>
@@ -1196,15 +1213,15 @@
 
             <Border Classes="loading-overlay"
                     Grid.RowSpan="3"
-                    IsVisible="{Binding IsLoading}">
+                    IsVisible="{Binding ShowBlockingOverlay}">
                 <Border Classes="loading-card"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         MinWidth="320"
                         MaxWidth="420">
                     <StackPanel Classes="loading-state">
-                        <TextBlock Text="{loc:Tr explorer.loading_title}" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Text="{loc:Tr explorer.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding BlockingOverlayTitle}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding BlockingOverlayDetail}" Classes="muted" TextWrapping="Wrap"/>
                         <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
                     </StackPanel>
                 </Border>

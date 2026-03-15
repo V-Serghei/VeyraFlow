@@ -207,6 +207,55 @@ public sealed class RepositoryFsEventQueueService(
         }
     }
 
+    public async Task<RepositoryFsEventQueueStatus> GetStatusAsync(int repositoryId, CancellationToken ct = default)
+    {
+        if (repositoryId <= 0)
+            return RepositoryFsEventQueueStatus.Empty;
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var state = await LoadStateAsync(ct);
+            var items = state.Items
+                .Where(x => x.RepositoryId == repositoryId)
+                .ToList();
+
+            if (items.Count == 0)
+                return RepositoryFsEventQueueStatus.Empty;
+
+            var pendingCount = items.Count(x => x.Status == FsEventStatus.Pending);
+            var runningCount = items.Count(x => x.Status == FsEventStatus.Running);
+            var maxRetryCount = items.Count == 0 ? 0 : items.Max(x => x.RetryCount);
+            var oldestPendingAtUtc = items
+                .Where(x => x.Status == FsEventStatus.Pending)
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => (DateTime?)x.CreatedAtUtc)
+                .FirstOrDefault();
+            var lastUpdatedAtUtc = items
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => (DateTime?)x.UpdatedAtUtc)
+                .FirstOrDefault();
+            var lastError = items
+                .Where(x => !string.IsNullOrWhiteSpace(x.LastError))
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => x.LastError)
+                .FirstOrDefault();
+
+            return new RepositoryFsEventQueueStatus(
+                pendingCount,
+                runningCount,
+                items.Count,
+                maxRetryCount,
+                oldestPendingAtUtc,
+                lastUpdatedAtUtc,
+                lastError);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private static string ResolvePath()
     {
         var explicitPath = Environment.GetEnvironmentVariable(QueuePathOverrideEnvironmentVariable);

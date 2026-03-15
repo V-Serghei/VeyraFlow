@@ -99,7 +99,13 @@ public sealed class SaveInitialSetupHandler(
                             $"{repository.Name}: {progress.Message}"));
                     });
 
-                var result = await scanner.ScanRepositoryAsync(repository.Id, repositoryProgress, null, ct);
+                var result = await scanner.ScanRepositoryAsync(
+                    repository.Id,
+                    repositoryProgress,
+                    new RepositoryScanOptionsDto(
+                        SaveFileVersions: true,
+                        TriggerOverride: "initial_snapshot"),
+                    ct);
                 scannedFiles += result.FileEntries;
 
                 request.Progress?.Report(new RepositoryCreationProgressDto(

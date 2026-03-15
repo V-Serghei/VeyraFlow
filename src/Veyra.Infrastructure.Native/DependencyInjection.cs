@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Security;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Services;
+using Veyra.Infrastructure.Native.Diagnostics;
 using Veyra.Infrastructure.Native.Diffing;
 using Veyra.Infrastructure.Native.Scanning;
 using Veyra.Infrastructure.Native.Security;
@@ -24,6 +26,7 @@ public static class DependencyInjection
         services.AddSingleton<ArtifactKeyManagementService>();
         services.AddSingleton<IArtifactKeyManagementService>(sp => sp.GetRequiredService<ArtifactKeyManagementService>());
         services.AddSingleton<ArtifactBlockCryptor>();
+        services.AddSingleton<ICloudMetadataProtectionService, CloudMetadataProtectionService>();
 
         services.AddSingleton<IFileContentStore, RustFileContentStore>();
 
@@ -38,6 +41,7 @@ public static class DependencyInjection
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RustSnapshotComparisonEngine>>()));
 
         services.AddScoped<IRepositoryScanner, RustRepositoryScanner>();
+        services.AddScoped<IAppDiagnosticsService, AppDiagnosticsService>();
         return services;
     }
 }
