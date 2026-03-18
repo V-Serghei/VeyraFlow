@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -33,8 +34,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private int _guidedTourIndex = -1;
     private bool _isGuidedTourStarting;
     private bool _isLoaded;
-    private bool _isShellRefreshInProgress;
-    private bool _pendingShellRefresh;
     private object? _pageBeforeSearch;
 
     public RepositoryDashboardViewModel Dashboard { get; }
@@ -51,6 +50,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _guidedTourDescription = string.Empty;
     [ObservableProperty] private string _guidedTourStepText = string.Empty;
     [ObservableProperty] private string _guidedTourTargetName = string.Empty;
+    [ObservableProperty] private bool _isShellBusy;
+    [ObservableProperty] private string _shellBusyTitle = string.Empty;
+    [ObservableProperty] private string _shellBusyDetail = string.Empty;
 
     public bool CanGuidedTourGoBack => _guidedTourIndex > 0;
     public string GuidedTourNextLabel => _guidedTourIndex >= _guidedTourSteps.Count - 1
@@ -93,6 +95,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         AppSettings.BackRequested += ShowDashboard;
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
         AppSettings.ExperienceModeRefreshRequested += OnExperienceModeRefreshRequestedAsync;
+        AppSettings.LanguageRefreshRequested += OnLanguageRefreshRequestedAsync;
         _theme.ThemeChanged += OnThemeChanged;
         _localization.LanguageChanged += OnLanguageChanged;
         _onboardingState.FirstRunTourRequested += OnFirstRunTourRequested;
@@ -106,8 +109,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task OpenGlobalSettingsAsync()
     {
         _log.LogInformation("Opening global settings page");
-        await AppSettings.LoadAsync();
-        CurrentPage = AppSettings;
+        await RunShellBusyActionAsync(
+            "app_settings.loading_title",
+            "app_settings.loading_detail",
+            async () =>
+            {
+                CurrentPage = AppSettings;
+                await WaitForUiFrameAsync();
+                await AppSettings.LoadAsync();
+            });
     }
 
     [RelayCommand]
@@ -115,8 +125,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _pageBeforeSearch = CurrentPage;
         _log.LogInformation("Opening global search page");
-        await Search.LoadAsync(forceRefresh: true);
-        CurrentPage = Search;
+        await RunShellBusyActionAsync(
+            "search.loading_title",
+            "search.loading_detail",
+            async () =>
+            {
+                CurrentPage = Search;
+                await WaitForUiFrameAsync();
+                await Search.LoadAsync(forceRefresh: !Search.HasLoadedData);
+            });
     }
 
     [RelayCommand]
@@ -128,7 +145,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ToggleLanguage()
+    private async Task ToggleLanguageAsync()
     {
         var languages = _localization.AvailableLanguages;
         if (languages.Count == 0)
@@ -146,16 +163,29 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ? 0
             : (currentIndex + 1) % languages.Count;
 
-        _localization.SetLanguage(languages[nextIndex].Code);
-        RefreshLanguageState();
-        _log.LogInformation("Language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
+        await RunShellBusyActionAsync(
+            "main.language_switch_title",
+            "main.language_switch_detail",
+            async () =>
+            {
+                _localization.SetLanguage(languages[nextIndex].Code);
+                RefreshLanguageState();
+                _log.LogInformation("Language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
+                await RefreshShellStateAsync();
+            });
     }
 
     public async void OnLoaded()
     {
         _log.LogInformation("Main window loaded. Loading dashboard");
-        await Dashboard.LoadAsync();
-        CurrentPage = Dashboard;
+        await RunShellBusyActionAsync(
+            "dashboard.loading_title",
+            "dashboard.loading_detail",
+            async () =>
+            {
+                await Dashboard.LoadAsync();
+                CurrentPage = Dashboard;
+            });
         _isLoaded = true;
         await TryStartPendingGuidedTourAsync();
     }
@@ -163,24 +193,42 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task OpenRepositoryAsync(int repositoryId)
     {
         _log.LogInformation("Opening repository explorer. RepositoryId {RepositoryId}", repositoryId);
-        await Explorer.LoadAsync(repositoryId);
-        CurrentPage = Explorer;
+        await RunShellBusyActionAsync(
+            "dashboard.open_repository_title",
+            "dashboard.open_repository_detail",
+            async () =>
+            {
+                await Explorer.LoadAsync(repositoryId);
+                CurrentPage = Explorer;
+            });
     }
 
     private async Task OpenRepositorySettingsAsync(int repositoryId)
     {
         _returnToAppSettingsFromRepositorySettings = false;
         _log.LogInformation("Opening repository settings. RepositoryId {RepositoryId}", repositoryId);
-        await Settings.LoadAsync(repositoryId);
-        CurrentPage = Settings;
+        await RunShellBusyActionAsync(
+            "repo_settings.loading_title",
+            "repo_settings.loading_detail",
+            async () =>
+            {
+                await Settings.LoadAsync(repositoryId);
+                CurrentPage = Settings;
+            });
     }
 
     private async Task OpenRepositorySettingsFromAppSettingsAsync(int repositoryId)
     {
         _returnToAppSettingsFromRepositorySettings = true;
         _log.LogInformation("Opening repository settings from app settings. RepositoryId {RepositoryId}", repositoryId);
-        await Settings.LoadAsync(repositoryId);
-        CurrentPage = Settings;
+        await RunShellBusyActionAsync(
+            "repo_settings.loading_title",
+            "repo_settings.loading_detail",
+            async () =>
+            {
+                await Settings.LoadAsync(repositoryId);
+                CurrentPage = Settings;
+            });
     }
 
     private async Task OpenRepositoryEntryFromSearchAsync(int repositoryId, string relativePath, bool isDirectory)
@@ -191,9 +239,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             relativePath,
             isDirectory);
 
-        await Explorer.LoadAsync(repositoryId);
-        await Explorer.FocusEntryAsync(relativePath, isDirectory);
-        CurrentPage = Explorer;
+        await RunShellBusyActionAsync(
+            "dashboard.open_repository_title",
+            "dashboard.open_repository_detail",
+            async () =>
+            {
+                await Explorer.LoadAsync(repositoryId);
+                await Explorer.FocusEntryAsync(relativePath, isDirectory);
+                CurrentPage = Explorer;
+            });
     }
 
     private async Task OpenRepositorySnapshotFromSearchAsync(int repositoryId, long snapshotId)
@@ -203,16 +257,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
             repositoryId,
             snapshotId);
 
-        await Explorer.LoadAsync(repositoryId);
-        await Explorer.FocusSnapshotAsync(snapshotId);
-        CurrentPage = Explorer;
+        await RunShellBusyActionAsync(
+            "dashboard.open_repository_title",
+            "dashboard.open_repository_detail",
+            async () =>
+            {
+                await Explorer.LoadAsync(repositoryId);
+                await Explorer.FocusSnapshotAsync(snapshotId);
+                CurrentPage = Explorer;
+            });
     }
 
     private async Task OnRepositoryUpdatedAsync(int repositoryId)
     {
-        await Dashboard.LoadAsync();
-        await Explorer.LoadAsync(repositoryId);
-        CurrentPage = Explorer;
+        await RunShellBusyActionAsync(
+            "dashboard.open_repository_title",
+            "dashboard.open_repository_detail",
+            async () =>
+            {
+                await Dashboard.LoadAsync();
+                await Explorer.LoadAsync(repositoryId);
+                CurrentPage = Explorer;
+            });
     }
 
     private void OnRepositoryDeleted()
@@ -248,14 +314,32 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task ShowDashboardAsync()
     {
         _log.LogInformation("Showing dashboard page");
-        await Dashboard.LoadAsync();
-        CurrentPage = Dashboard;
+        await RunShellBusyActionAsync(
+            "dashboard.loading_title",
+            "dashboard.loading_detail",
+            async () =>
+            {
+                await Dashboard.LoadAsync();
+                CurrentPage = Dashboard;
+            });
     }
 
     private async Task OnExperienceModeRefreshRequestedAsync(string modeCode)
     {
         _log.LogInformation("Refreshing app after experience mode change. Mode {Mode}", modeCode);
-        await RefreshShellStateAsync();
+        await RunShellBusyActionAsync(
+            "app_settings.loading_title",
+            "app_settings.loading_detail",
+            RefreshShellStateAsync);
+    }
+
+    private async Task OnLanguageRefreshRequestedAsync(string languageCode)
+    {
+        _log.LogInformation("Refreshing app after language change. Language {Language}", languageCode);
+        await RunShellBusyActionAsync(
+            "main.language_switch_title",
+            "main.language_switch_detail",
+            RefreshShellStateAsync);
     }
 
     [RelayCommand]
@@ -295,8 +379,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         RefreshLanguageState();
         RefreshGuidedTourLocalization();
-        if (_isLoaded)
-            _ = RefreshShellStateAfterLanguageChangeAsync();
     }
 
     private void RefreshThemeState()
@@ -373,32 +455,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = Dashboard;
     }
 
-    private async Task RefreshShellStateAfterLanguageChangeAsync()
+    private async Task RunShellBusyActionAsync(string titleKey, string detailKey, Func<Task> action)
     {
-        if (_isShellRefreshInProgress)
+        if (IsShellBusy)
         {
-            _pendingShellRefresh = true;
+            await action();
             return;
         }
 
         try
         {
-            _isShellRefreshInProgress = true;
+            IsShellBusy = true;
+            ShellBusyTitle = Loc.T(titleKey);
+            ShellBusyDetail = Loc.T(detailKey);
 
-            do
-            {
-                _pendingShellRefresh = false;
-                await RefreshShellStateAsync();
-            }
-            while (_pendingShellRefresh);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "Shell refresh after language change failed");
+            await WaitForUiFrameAsync();
+            await action();
         }
         finally
         {
-            _isShellRefreshInProgress = false;
+            IsShellBusy = false;
+            ShellBusyTitle = string.Empty;
+            ShellBusyDetail = string.Empty;
         }
     }
 
@@ -557,26 +635,34 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task<bool> ShowAppSettingsForTourAsync()
     {
+        CurrentPage = AppSettings;
+        await WaitForUiFrameAsync();
         await AppSettings.LoadAsync();
         AppSettings.SelectTabByKey("general");
-        CurrentPage = AppSettings;
         return true;
     }
 
     private async Task<bool> ShowAppSettingsUserForTourAsync()
     {
+        CurrentPage = AppSettings;
+        await WaitForUiFrameAsync();
         await AppSettings.LoadAsync();
         AppSettings.SelectTabByKey("user");
-        CurrentPage = AppSettings;
         return true;
     }
 
     private async Task<bool> ShowAppSettingsSyncForTourAsync()
     {
+        CurrentPage = AppSettings;
+        await WaitForUiFrameAsync();
         await AppSettings.LoadAsync();
         AppSettings.SelectTabByKey("sync");
-        CurrentPage = AppSettings;
         return true;
+    }
+
+    private static async Task WaitForUiFrameAsync()
+    {
+        await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background);
     }
 
     private async Task<bool> EnsureRepositorySettingsForTourAsync()

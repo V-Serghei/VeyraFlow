@@ -13,6 +13,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Common.Results;
@@ -35,6 +36,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
     private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
+    private readonly IUserProfileRepository _userProfiles;
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly ILogger<RepositorySettingsViewModel> _log;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
@@ -57,7 +59,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _directoryPath = string.Empty;
     [ObservableProperty] private string _customFormat = string.Empty;
     [ObservableProperty] private string _customExclusionPattern = string.Empty;
-    [ObservableProperty] private bool _autoCaptureFileVersions = true;
+    [ObservableProperty] private bool _autoCaptureFileVersions;
     [ObservableProperty] private bool _protectCloudMetadata;
 
     [ObservableProperty] private bool _retentionEnabled;
@@ -76,6 +78,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _cloudSyncLastSyncText = "";
     [ObservableProperty] private string _cloudSyncQueueText = "";
     [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
+    [ObservableProperty] private bool _hasCloudAccess;
     [ObservableProperty] private bool _isSyncNowRunning;
     [ObservableProperty] private bool _isCloudRepairRunning;
     [ObservableProperty] private bool _isBundleOperationRunning;
@@ -111,12 +114,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         IMediator mediator,
         IWindowService windows,
         IRepositoryCloudSyncOrchestrator cloudSync,
+        IUserProfileRepository userProfiles,
         ISensitiveActionGuard sensitiveActionGuard,
         ILogger<RepositorySettingsViewModel> log)
     {
         _mediator = mediator;
         _windows = windows;
         _cloudSync = cloudSync;
+        _userProfiles = userProfiles;
         _sensitiveActionGuard = sensitiveActionGuard;
         _log = log;
         SelectedFormats.CollectionChanged += OnSelectedFormatsCollectionChanged;
@@ -151,9 +156,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public string CloudRepairHint => IsBasicMode
         ? Loc.T("repo_settings.cloud_repair_hint_basic")
         : Loc.T("repo_settings.cloud_repair_hint");
+    public string CloudGuestHint => Loc.T("app_settings.guest_auth_hint");
     public string RetentionSectionHint => IsBasicMode
         ? Loc.T("repo_settings.retention_hint_basic")
         : Loc.T("repo_settings.retention_hint");
+    public bool CanRunSyncNow => HasCloudAccess && !IsSyncNowRunning;
+    public bool CanRunCloudRepair => HasCloudAccess && !IsCloudRepairRunning;
+    public bool ShowGuestCloudHint => !HasCloudAccess;
 
     public async Task LoadAsync(int repositoryId)
     {
@@ -162,6 +171,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsLoading = true;
             ErrorMessage = null;
             _log.LogInformation("Loading repository settings. RepositoryId {RepositoryId}", repositoryId);
+            await Task.Yield();
 
             var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
@@ -171,6 +181,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             }
 
             var allFormats = await _mediator.Send(new GetTrackedExtensionsQuery());
+            HasCloudAccess = (await _userProfiles.GetActiveProfileAsync()) is not null;
 
             RepositoryId = repo.Id;
             RepositoryName = repo.Name;
@@ -431,8 +442,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task SyncNowAsync()
     {
-        if (RepositoryId <= 0)
+        if (RepositoryId <= 0 || IsSyncNowRunning)
             return;
+
+        if (!HasCloudAccess)
+        {
+            ErrorMessage = CloudGuestHint;
+            return;
+        }
 
         try
         {
@@ -450,16 +467,30 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsSyncNowRunning = true;
             ErrorMessage = null;
             _log.LogInformation("Repository cloud sync requested. RepositoryId {RepositoryId}", RepositoryId);
-
-            await _cloudSync.TryPushLatestSnapshotAsync(RepositoryId);
-            await _cloudSync.ProcessPendingQueueAsync();
-
-            await LoadAsync(RepositoryId);
-            _log.LogInformation("Repository cloud sync finished. RepositoryId {RepositoryId}", RepositoryId);
+            _ = RunSyncNowInBackgroundAsync(RepositoryId);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to run cloud sync for repository {RepositoryId}", RepositoryId);
+            ErrorMessage = Loc.T("repo_settings.error_sync_failed");
+        }
+    }
+
+    private async Task RunSyncNowInBackgroundAsync(int repositoryId)
+    {
+        try
+        {
+            await Task.Yield();
+            await _cloudSync.TryPushLatestSnapshotAsync(repositoryId);
+
+            if (RepositoryId == repositoryId)
+                await LoadAsync(repositoryId);
+
+            _log.LogInformation("Repository cloud sync finished. RepositoryId {RepositoryId}", repositoryId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to run cloud sync for repository {RepositoryId}", repositoryId);
             ErrorMessage = Loc.T("repo_settings.error_sync_failed");
         }
         finally
@@ -471,8 +502,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task RepairCloudDataAsync()
     {
-        if (RepositoryId <= 0)
+        if (RepositoryId <= 0 || IsCloudRepairRunning)
             return;
+
+        if (!HasCloudAccess)
+        {
+            ErrorMessage = CloudGuestHint;
+            return;
+        }
 
         try
         {
@@ -492,9 +529,25 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             ErrorMessage = null;
             CloudRepairMessage = Loc.T("repo_settings.cloud_repair_running");
             _log.LogInformation("Repository cloud repair requested. RepositoryId {RepositoryId}", RepositoryId);
+            _ = RunCloudRepairInBackgroundAsync(RepositoryId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to repair cloud data for repository {RepositoryId}", RepositoryId);
+            ErrorMessage = Loc.T("repo_settings.cloud_repair_failed");
+            CloudRepairMessage = ErrorMessage;
+        }
+    }
 
-            var result = await _cloudSync.RepairRepositoryCloudDataAsync(RepositoryId);
-            await LoadAsync(RepositoryId);
+    private async Task RunCloudRepairInBackgroundAsync(int repositoryId)
+    {
+        try
+        {
+            await Task.Yield();
+
+            var result = await _cloudSync.RepairRepositoryCloudDataAsync(repositoryId);
+            if (RepositoryId == repositoryId)
+                await LoadAsync(repositoryId);
 
             CloudRepairMessage = result.Success
                 ? Loc.F(
@@ -516,7 +569,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             _log.LogInformation(
                 "Repository cloud repair finished. RepositoryId {RepositoryId}. Success {Success}. ReferencedBlocks {ReferencedBlocks}. UploadedBlocks {UploadedBlocks}. MissingLocalBlocks {MissingLocalBlocks}. FailedUploads {FailedUploads}",
-                RepositoryId,
+                repositoryId,
                 result.Success,
                 result.ReferencedBlocks,
                 result.UploadedBlocks,
@@ -525,7 +578,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Failed to repair cloud data for repository {RepositoryId}", RepositoryId);
+            _log.LogError(ex, "Failed to repair cloud data for repository {RepositoryId}", repositoryId);
             ErrorMessage = Loc.T("repo_settings.cloud_repair_failed");
             CloudRepairMessage = ErrorMessage;
         }
@@ -797,6 +850,23 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         RunRetentionDryRunCommand.NotifyCanExecuteChanged();
         RunRetentionApplyCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanRunRetention));
+    }
+
+    partial void OnHasCloudAccessChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunSyncNow));
+        OnPropertyChanged(nameof(CanRunCloudRepair));
+        OnPropertyChanged(nameof(ShowGuestCloudHint));
+    }
+
+    partial void OnIsSyncNowRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunSyncNow));
+    }
+
+    partial void OnIsCloudRepairRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanRunCloudRepair));
     }
 
 
@@ -1100,7 +1170,11 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CloudRepairTitle));
         OnPropertyChanged(nameof(CloudRepairButtonLabel));
         OnPropertyChanged(nameof(CloudRepairHint));
+        OnPropertyChanged(nameof(CloudGuestHint));
         OnPropertyChanged(nameof(RetentionSectionHint));
+        OnPropertyChanged(nameof(CanRunSyncNow));
+        OnPropertyChanged(nameof(CanRunCloudRepair));
+        OnPropertyChanged(nameof(ShowGuestCloudHint));
         OnPropertyChanged(nameof(ShowBlockingOverlay));
         OnPropertyChanged(nameof(BlockingOverlayTitle));
         OnPropertyChanged(nameof(BlockingOverlayDetail));
@@ -1262,4 +1336,3 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             : null;
     }
 }
-

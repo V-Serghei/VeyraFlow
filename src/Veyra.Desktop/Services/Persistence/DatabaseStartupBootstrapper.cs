@@ -37,6 +37,7 @@ internal static class DatabaseStartupBootstrapper
         EnsureRepositorySnapshotTitleColumn(db);
         EnsureRepositorySnapshotTagsColumn(db);
         EnsureRepositoryCaptureSettingsColumns(db);
+        DisableLegacyAutomaticVersionCapture(db);
         BackfillSnapshotTitleMigrationHistoryIfNeeded(db);
         BackfillTextDiffHunksMigrationHistoryIfNeeded(db);
 
@@ -457,7 +458,7 @@ internal static class DatabaseStartupBootstrapper
 
         try
         {
-            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 1");
+            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 0");
             EnsureSqliteColumnExists(connection, "Repositories", "ProtectCloudMetadata", "INTEGER NOT NULL DEFAULT 1");
         }
         finally
@@ -716,7 +717,7 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
         {
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionEnabled", "INTEGER NOT NULL DEFAULT 0");
             EnsureSqliteColumnExists(connection, "Repositories", "ProtectCloudMetadata", "INTEGER NOT NULL DEFAULT 0");
-            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 1");
+            EnsureSqliteColumnExists(connection, "Repositories", "AutoCaptureFileVersions", "INTEGER NOT NULL DEFAULT 0");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxAgeDays", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxSnapshots", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxTotalSizeBytes", "INTEGER NULL");
@@ -822,6 +823,37 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
                 createIdx8.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_FileVersionTextDiffLines_DiffId_IsDeleted_Sequence\" ON \"FileVersionTextDiffLines\" (\"DiffId\", \"IsDeleted\", \"Sequence\");";
                 createIdx8.ExecuteNonQuery();
             }
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void DisableLegacyAutomaticVersionCapture(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            using var update = connection.CreateCommand();
+            update.CommandText = """
+                UPDATE "Repositories"
+                SET "AutoCaptureFileVersions" = 0
+                WHERE "AutoCaptureFileVersions" <> 0;
+                """;
+
+            var changed = update.ExecuteNonQuery();
+            if (changed > 0)
+                Log.Information("Disabled legacy automatic file-version capture for {Count} repositories.", changed);
         }
         finally
         {

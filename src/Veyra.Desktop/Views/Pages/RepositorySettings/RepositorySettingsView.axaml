@@ -264,24 +264,6 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Classes="metric-card">
-                                <StackPanel Spacing="8">
-                                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
-                                        <CheckBox Grid.Column="0"
-                                                  Content="{loc:Tr repo_settings.auto_capture_versions}"
-                                                  IsChecked="{Binding AutoCaptureFileVersions, Mode=TwoWay}"/>
-                                        <Button Grid.Column="1"
-                                                Classes="ghost icon"
-                                                Content="?"
-                                                VerticalAlignment="Center"
-                                                ToolTip.Tip="{loc:Tr repo_settings.auto_capture_versions_hint}"/>
-                                    </Grid>
-                                    <TextBlock Text="{loc:Tr repo_settings.auto_capture_versions_description}"
-                                               Classes="muted"
-                                               FontSize="11"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Border>
                         </StackPanel>
                     </Border>
 
@@ -393,6 +375,12 @@
                                 </StackPanel>
                             </Border>
 
+                            <Border Classes="metric-card" IsVisible="{Binding ShowGuestCloudHint}">
+                                <TextBlock Text="{Binding CloudGuestHint}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+
                             <Border Classes="metric-card">
                                 <StackPanel Spacing="8">
                                     <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6">
@@ -415,7 +403,7 @@
                             <WrapPanel Orientation="Horizontal" HorizontalAlignment="Left">
                                 <Button
                                         Command="{Binding SyncNowCommand}"
-                                        IsEnabled="{Binding IsSyncNowRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                        IsEnabled="{Binding CanRunSyncNow}"
                                         Classes="primary compact responsive-icon"
                                         Margin="0,0,8,8"
                                         ToolTip.Tip="{Binding SyncNowLabel}">
@@ -428,7 +416,7 @@
                                 </Button>
                                 <Button
                                         Command="{Binding RepairCloudDataCommand}"
-                                        IsEnabled="{Binding IsCloudRepairRunning, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                        IsEnabled="{Binding CanRunCloudRepair}"
                                         Classes="subtle compact responsive-icon"
                                         Margin="0,0,8,8"
                                         ToolTip.Tip="{Binding CloudRepairButtonLabel}">

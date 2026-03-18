@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using Avalonia.Markup.Xaml;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Veyra.Application.Abstractions.Auth;
@@ -15,6 +16,8 @@ using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Persistence;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Styling;
+using Veyra.Domain.Entities;
+using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Native;
 using AvaloniaApplication = Avalonia.Application;
@@ -43,14 +46,84 @@ public partial class App : AvaloniaApplication
 
         _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
 
-        var shouldOpenMain = false;
-        string? activeUsername = null;
-        int watchedDirectoryCount = 0;
-        int trackedExtensionCount = 0;
-
-        using (var scope = _serviceProvider.CreateScope())
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
         {
+            classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
+            classicDesktop.Exit += OnDesktopExit;
+
+            var nav = _serviceProvider.GetRequiredService<INavigationService>();
+            nav.ShowWelcome();
+
+            Log.Information(
+                "Initial shell displayed immediately using welcome window while deferred startup resolves user state.");
+        }
+
+        _startupBackgroundTask = Task.Run(RunDeferredStartupAsync);
+
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
+    {
+        try
+        {
+            if (_startupBackgroundTask is { IsCompleted: false })
+            {
+                Log.Information("Deferred startup task is still running during shutdown; skipping wait to keep shutdown responsive.");
+            }
+            else if (_startupBackgroundTask is { IsFaulted: true } startupTask)
+            {
+                startupTask.Exception?.Handle(ex =>
+                {
+                    Log.Debug(ex, "Deferred startup task fault surfaced during shutdown.");
+                    return true;
+                });
+            }
+
+            if (_snapshotScheduler is not null)
+                _ = StopSnapshotSchedulerSilentlyAsync(_snapshotScheduler);
+        }
+        catch
+        {
+        }
+
+        Log.Information("Application shutting down");
+        Log.CloseAndFlush();
+    }
+
+    private static async Task StopSnapshotSchedulerSilentlyAsync(ISnapshotScheduler snapshotScheduler)
+    {
+        try
+        {
+            await snapshotScheduler.StopAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    private static async Task RunDeferredStartupAsync()
+    {
+        if (_serviceProvider is null)
+            return;
+
+        Log.Information("Deferred startup pipeline started");
+
+        try
+        {
+            await using var scope = _serviceProvider.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+            var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
+            var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
+            var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
+            var syncOrchestrator = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
+            var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
+            string? activeUsername;
+            var watchedDirectoryCount = 0;
+            var trackedExtensionCount = 0;
+            var localRepositoryCount = 0;
+            var isMainShellActive = false;
+
             DatabaseStartupBootstrapper.Initialize(db);
 
             var nativeHealth = NativeRuntimeHealth.Probe();
@@ -69,84 +142,49 @@ public partial class App : AvaloniaApplication
                     string.Join(", ", nativeHealth.MissingEntrypoints));
             }
 
-            var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
-            var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
+            activeUsername = await db.Set<UserProfile>()
+                .AsNoTracking()
+                .Where(u => u.IsActive)
+                .OrderByDescending(u => u.LastLoginAt)
+                .Select(u => u.Username)
+                .FirstOrDefaultAsync();
+            watchedDirectoryCount = await db.Set<WatchedDirectory>()
+                .AsNoTracking()
+                .CountAsync(x => !x.IsDeleted && x.IsEnabled);
+            trackedExtensionCount = await db.Set<D_WatchedFormat>()
+                .AsNoTracking()
+                .CountAsync(x => !x.IsDeleted && x.IsEnabled);
+            localRepositoryCount = await db.Set<Repository>()
+                .AsNoTracking()
+                .CountAsync(x => !x.IsDeleted);
 
-            activeUsername = userProfiles.GetActiveUsernameAsync().GetAwaiter().GetResult();
-            if (!string.IsNullOrWhiteSpace(activeUsername))
+            var hasLocalBootstrap = localRepositoryCount > 0 || (watchedDirectoryCount > 0 && trackedExtensionCount > 0);
+
+            if (hasLocalBootstrap)
             {
-                var dirs = setup.GetWatchedDirectoriesAsync().GetAwaiter().GetResult();
-                var exts = setup.GetTrackedExtensionsAsync().GetAwaiter().GetResult();
-                watchedDirectoryCount = dirs.Count;
-                trackedExtensionCount = exts.Count;
-                shouldOpenMain = dirs.Count > 0 && exts.Count > 0;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        var nav = _serviceProvider.GetRequiredService<INavigationService>();
+                        nav.GoToMain();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Deferred startup failed to switch shell to main window after local bootstrap.");
+                    }
+                });
+
+                isMainShellActive = true;
             }
-        }
-
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
-        {
-            classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
-            classicDesktop.Exit += OnDesktopExit;
-
-            var nav = _serviceProvider.GetRequiredService<INavigationService>();
-
-            if (shouldOpenMain)
-                nav.GoToMain();
-            else
-                nav.ShowWelcome();
 
             Log.Information(
-                "Initial shell displayed. ActiveUser {Username}. WatchedDirectories {WatchedDirectories}. TrackedExtensions {TrackedExtensions}. Target {Target}",
+                "Deferred startup resolved local bootstrap state. ActiveUser {Username}. LocalRepositories {LocalRepositories}. WatchedDirectories {WatchedDirectories}. TrackedExtensions {TrackedExtensions}. Target {Target}",
                 activeUsername ?? "(none)",
+                localRepositoryCount,
                 watchedDirectoryCount,
                 trackedExtensionCount,
-                shouldOpenMain ? "main" : "welcome");
-        }
-
-        _startupBackgroundTask = Task.Run(() => RunDeferredStartupAsync(activeUsername, shouldOpenMain));
-
-        base.OnFrameworkInitializationCompleted();
-    }
-
-    private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)
-    {
-        try
-        {
-            if (_startupBackgroundTask is { IsCompleted: false })
-            {
-                if (!_startupBackgroundTask.Wait(TimeSpan.FromSeconds(2)))
-                    Log.Warning("Deferred startup task is still running during shutdown; continuing shutdown.");
-            }
-            else
-            {
-                _startupBackgroundTask?.GetAwaiter().GetResult();
-            }
-
-            _snapshotScheduler?.StopAsync().GetAwaiter().GetResult();
-        }
-        catch
-        {
-        }
-
-        Log.Information("Application shutting down");
-        Log.CloseAndFlush();
-    }
-
-    private static async Task RunDeferredStartupAsync(string? activeUsername, bool initialShouldOpenMain)
-    {
-        if (_serviceProvider is null)
-            return;
-
-        Log.Information("Deferred startup pipeline started");
-
-        try
-        {
-            await using var scope = _serviceProvider.CreateAsyncScope();
-            var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
-            var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
-            var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
-            var syncOrchestrator = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
-            var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
+                isMainShellActive ? "main" : "welcome");
 
             if (!string.IsNullOrWhiteSpace(activeUsername))
             {
@@ -180,7 +218,7 @@ public partial class App : AvaloniaApplication
                             dirs = await setup.GetWatchedDirectoriesAsync();
                             exts = await setup.GetTrackedExtensionsAsync();
 
-                            if (!initialShouldOpenMain && dirs.Count > 0 && exts.Count > 0)
+                            if (!isMainShellActive && dirs.Count > 0 && exts.Count > 0)
                             {
                                 await Dispatcher.UIThread.InvokeAsync(() =>
                                 {
@@ -198,6 +236,8 @@ public partial class App : AvaloniaApplication
                                         Log.Warning(ex, "Deferred startup failed to switch shell to main window");
                                     }
                                 });
+
+                                isMainShellActive = true;
                             }
                         }
                         catch (Exception ex)

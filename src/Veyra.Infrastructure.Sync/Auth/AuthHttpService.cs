@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.DTOs;
@@ -120,12 +121,18 @@ public sealed class AuthHttpService : IAuthService
 
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Conflict or HttpStatusCode.BadRequest)
         {
+            var responseBody = await ReadResponseBodySafeAsync(resp, ct);
             _log.LogWarning(
                 "Cloud auth request rejected. Endpoint {Endpoint}. Username {Username}. StatusCode {StatusCode}. ResponseBody {ResponseBody}",
                 endpoint,
                 username,
                 (int)resp.StatusCode,
-                await ReadResponseBodySafeAsync(resp, ct));
+                responseBody);
+
+            var userMessage = TryExtractUserMessage(responseBody);
+            if (!string.IsNullOrWhiteSpace(userMessage))
+                throw new InvalidOperationException(userMessage);
+
             return null;
         }
 
@@ -179,6 +186,31 @@ public sealed class AuthHttpService : IAuthService
         catch (Exception ex)
         {
             return $"(failed to read response body: {ex.Message})";
+        }
+    }
+
+    private static string? TryExtractUserMessage(string? responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody) ||
+            string.Equals(responseBody, "(empty)", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (!document.RootElement.TryGetProperty("message", out var messageElement))
+                return null;
+
+            var message = messageElement.GetString();
+            return string.IsNullOrWhiteSpace(message)
+                ? null
+                : message.Trim();
+        }
+        catch
+        {
+            return null;
         }
     }
 }

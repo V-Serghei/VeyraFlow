@@ -38,10 +38,15 @@ public sealed class RegisterCommandHandler(
             logger.LogInformation("User {Username} registered and saved locally", session.Username);
             return OperationResult.Ok();
         }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Registration rejected for user {Username}", request.Username);
+            return OperationResult.Fail(ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Registration failed for user {Username}", request.Username);
-            return OperationResult.Fail(ex.Message);
+            return OperationResult.Fail("Registration failed.");
         }
     }
 }

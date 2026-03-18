@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
@@ -24,6 +25,8 @@ namespace Veyra.Desktop.ViewModels.Pages.Dashboard;
 
 public sealed partial class RepositoryDashboardViewModel : ObservableObject
 {
+    private const int FilterDebounceMs = 120;
+
     private readonly IMediator _mediator;
     private readonly ILogger<RepositoryDashboardViewModel> _log;
     private readonly IWindowService _windows;
@@ -35,6 +38,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
     private bool _presetsLoaded;
     private bool _suppressFilterApply;
+    private CancellationTokenSource? _filterCts;
+    private long _filterRequestId;
 
     public event Func<int, Task>? OpenRepositoryRequested;
     public event Func<int, Task>? OpenRepositorySettingsRequested;
@@ -105,79 +110,44 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     {
         try
         {
+            CancelActiveFilter();
             IsLoading = true;
             ErrorMessage = null;
             _log.LogInformation("Loading repository dashboard");
+            await Task.Yield();
+
+            var savedFiltersTask = !_presetsLoaded
+                ? LoadSavedFiltersAsync()
+                : Task.CompletedTask;
+            var ensureRepositoriesTask = _mediator.Send(new EnsureRepositoriesCommand());
+
+            await Task.WhenAll(savedFiltersTask, ensureRepositoriesTask);
 
             if (!_presetsLoaded)
-            {
-                await LoadSavedFiltersAsync();
                 _presetsLoaded = true;
-            }
-
-            await _mediator.Send(new EnsureRepositoriesCommand());
 
             var repos = await _mediator.Send(new GetAllRepositoriesQuery());
             _allRepositories.Clear();
 
-            foreach (var r in repos)
-            {
-                var isAvailable = Directory.Exists(r.DirectoryPath);
-                var syncStateKey = NormalizeCloudSyncStateKey(r.CloudSync?.LastStatus);
-                var queuePending = r.CloudSync?.PendingQueueCount ?? 0;
-                var queueRunning = r.CloudSync?.RunningQueueCount ?? 0;
-                var queueRetry = r.CloudSync?.RetryQueueCount ?? 0;
-                var queueConflict = r.CloudSync?.ConflictQueueCount ?? 0;
-                var queueDeadLetter = r.CloudSync?.DeadLetterQueueCount ?? 0;
-                var queueFailed = r.CloudSync?.FailedQueueCount ?? 0;
-                var queueCompleted = r.CloudSync?.CompletedQueueCount ?? 0;
-                var statusBadge = BuildRepositoryStatusBadge(
-                    isAvailable,
-                    r.CloudSync?.LastStatus,
-                    queuePending,
-                    queueRunning,
-                    queueRetry,
-                    queueConflict,
-                    queueDeadLetter,
-                    queueFailed);
+            var cards = await Task.Run(() => repos
+                .Select(MapRepositoryCard)
+                .OrderBy(card => card.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList());
 
-                var card = new RepositoryCardViewModel
-                {
-                    Id = r.Id,
-                    Name = r.Name,
-                    Description = r.Description,
-                    DirectoryPath = r.DirectoryPath,
-                    LastActivityUtc = r.LastScannedAt,
-                    StatusText = statusBadge.Text,
-                    StatusColor = statusBadge.Color,
-                    LastActivity = FormatLastActivity(r.LastScannedAt),
-                    FileCount = r.FileCount,
-                    VersionCount = r.VersionCount,
-                    TotalSizeBytes = r.TotalSizeBytes,
-                    SizeDisplay = FormatSize(r.TotalSizeBytes),
-                    CloudSyncStateKey = syncStateKey,
-                    CloudSyncStatus = FormatCloudSyncStatus(r.CloudSync?.LastStatus),
-                    CloudQueueSummary = BuildQueueSummary(queuePending, queueRunning, queueRetry, queueConflict, queueDeadLetter),
-                    IsDirectoryAvailable = isAvailable,
-                    QueuePendingCount = queuePending,
-                    QueueRunningCount = queueRunning,
-                    QueueRetryCount = queueRetry,
-                    QueueConflictCount = queueConflict,
-                    QueueDeadLetterCount = queueDeadLetter,
-                    QueueFailedCount = queueFailed,
-                    QueueCompletedCount = queueCompleted
-                };
-
-                foreach (var f in r.LinkedFormats)
-                    card.LinkedFormats.Add(f);
-
-                card.RefreshFormatsDisplay();
-                _allRepositories.Add(card);
-            }
+            _allRepositories.AddRange(cards);
 
             RebuildFormatTagFilters();
-            ApplyFilter();
-            IsEmpty = Repositories.Count == 0;
+            if (!HasActiveFilters)
+            {
+                ReplaceVisibleRepositories(cards);
+                IsEmpty = Repositories.Count == 0;
+            }
+
+            IsLoading = false;
+
+            if (HasActiveFilters)
+                await ApplyFilterAsync(debounce: false);
+
             _log.LogInformation(
                 "Repository dashboard loaded. TotalRepositories {Total}. VisibleRepositories {Visible}",
                 _allRepositories.Count,
@@ -193,7 +163,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         }
         finally
         {
-            IsLoading = false;
+            if (IsLoading)
+                IsLoading = false;
         }
     }
 
@@ -308,7 +279,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             _suppressFilterApply = false;
         }
 
-        ApplyFilter();
+        ApplyFilterIfNeeded(debounce: false);
     }
 
     [RelayCommand]
@@ -370,23 +341,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     }
 
     private void ApplyFilterIfNeeded()
+        => ApplyFilterIfNeeded(true);
+
+    private void ApplyFilterIfNeeded(bool debounce)
     {
         if (_suppressFilterApply)
             return;
 
-        ApplyFilter();
+        _ = ApplyFilterAsync(debounce);
     }
 
-    private void ApplyFilter()
+    private async Task ApplyFilterAsync(bool debounce = true)
     {
-        _log.LogDebug(
-            "Applying dashboard filters. Query {Query}. Availability {Availability}. SyncState {SyncState}. Format {Format}. QueueIssuesOnly {QueueIssuesOnly}",
-            SearchQuery,
-            SelectedAvailabilityFilter,
-            SelectedSyncStateFilter,
-            SelectedFormatTagFilter,
-            OnlyQueueIssues);
-        var directives = ParseSearchDirectives(SearchQuery.Trim());
+        var searchQuery = (SearchQuery ?? string.Empty).Trim();
+        var directives = ParseSearchDirectives(searchQuery);
 
         var textQuery = directives.TextQuery;
         var availabilityFilter = NormalizeAvailabilityFilter(SelectedAvailabilityFilter);
@@ -403,59 +371,93 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
         var minSizeMb = ParseNullableDouble(MinSizeMb) ?? directives.MinSizeMb;
         var maxSizeMb = ParseNullableDouble(MaxSizeMb) ?? directives.MaxSizeMb;
+        var onlyQueueIssues = OnlyQueueIssues;
+        var source = _allRepositories.ToArray();
+        var (requestId, ct) = BeginFilterRequest();
 
-        if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
-            (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
-
-        IEnumerable<RepositoryCardViewModel> source = _allRepositories;
-
-        if (!string.IsNullOrWhiteSpace(textQuery))
+        try
         {
-            source = source.Where(r =>
-                r.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
-                r.DirectoryPath.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
-                r.LinkedFormats.Any(f => f.Contains(textQuery, StringComparison.OrdinalIgnoreCase)));
-        }
+            if (debounce)
+                await Task.Delay(FilterDebounceMs, ct);
 
-        if (availabilityFilter != "all")
-        {
-            source = availabilityFilter switch
+            var filtered = await Task.Run(() =>
             {
-                "available" => source.Where(r => r.IsDirectoryAvailable),
-                "unavailable" => source.Where(r => !r.IsDirectoryAvailable),
-                _ => source
-            };
+                _log.LogDebug(
+                    "Applying dashboard filters. Query {Query}. Availability {Availability}. SyncState {SyncState}. Format {Format}. QueueIssuesOnly {QueueIssuesOnly}",
+                    searchQuery,
+                    availabilityFilter,
+                    syncStateFilter,
+                    formatTagFilter,
+                    onlyQueueIssues);
+
+                if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
+                    (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
+
+                IEnumerable<RepositoryCardViewModel> filteredSource = source;
+
+                if (!string.IsNullOrWhiteSpace(textQuery))
+                {
+                    filteredSource = filteredSource.Where(r =>
+                        r.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                        r.DirectoryPath.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                        r.LinkedFormats.Any(f => f.Contains(textQuery, StringComparison.OrdinalIgnoreCase)));
+                }
+
+                if (availabilityFilter != "all")
+                {
+                    filteredSource = availabilityFilter switch
+                    {
+                        "available" => filteredSource.Where(r => r.IsDirectoryAvailable),
+                        "unavailable" => filteredSource.Where(r => !r.IsDirectoryAvailable),
+                        _ => filteredSource
+                    };
+                }
+
+                if (syncStateFilter != "all")
+                {
+                    filteredSource = filteredSource.Where(r =>
+                        string.Equals(r.CloudSyncStateKey, syncStateFilter, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (formatTagFilter != "all")
+                {
+                    filteredSource = filteredSource.Where(r => r.LinkedFormats.Any(f =>
+                        string.Equals(f.Trim().ToLowerInvariant(), formatTagFilter, StringComparison.OrdinalIgnoreCase)));
+                }
+
+                if (minSizeMb is > 0)
+                    filteredSource = filteredSource.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
+
+                if (maxSizeMb is > 0)
+                    filteredSource = filteredSource.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
+
+                if (onlyQueueIssues)
+                {
+                    filteredSource = filteredSource.Where(r =>
+                        r.QueueConflictCount > 0 ||
+                        r.QueueDeadLetterCount > 0 ||
+                        r.QueueFailedCount > 0);
+                }
+
+                return filteredSource
+                    .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }, ct);
+
+            if (!IsLatestFilterRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
+            ReplaceVisibleRepositories(filtered);
+            IsEmpty = Repositories.Count == 0;
+            NotifyDashboardChromeStateChanged();
         }
-
-        if (syncStateFilter != "all")
-            source = source.Where(r => string.Equals(r.CloudSyncStateKey, syncStateFilter, StringComparison.OrdinalIgnoreCase));
-
-        if (formatTagFilter != "all")
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            source = source.Where(r => r.LinkedFormats.Any(f =>
-                string.Equals(f.Trim().ToLowerInvariant(), formatTagFilter, StringComparison.OrdinalIgnoreCase)));
         }
-
-        if (minSizeMb is > 0)
-            source = source.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
-
-        if (maxSizeMb is > 0)
-            source = source.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
-
-        if (OnlyQueueIssues)
+        catch (Exception ex)
         {
-            source = source.Where(r =>
-                r.QueueConflictCount > 0 ||
-                r.QueueDeadLetterCount > 0 ||
-                r.QueueFailedCount > 0);
+            _log.LogWarning(ex, "Failed to apply dashboard filters");
         }
-
-        Repositories.Clear();
-        foreach (var repo in source.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
-            Repositories.Add(repo);
-
-        IsEmpty = Repositories.Count == 0;
-        NotifyDashboardChromeStateChanged();
     }
 
     private async Task LoadSavedFiltersAsync(CancellationToken ct = default)
@@ -479,6 +481,58 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         await _filterStore.SaveAsync(presets, ct);
     }
 
+    private (long RequestId, CancellationToken Token) BeginFilterRequest()
+    {
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _filterCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        var requestId = Interlocked.Increment(ref _filterRequestId);
+        return (requestId, cts.Token);
+    }
+
+    private bool IsLatestFilterRequest(long requestId)
+        => requestId == Interlocked.Read(ref _filterRequestId);
+
+    private void CancelActiveFilter()
+    {
+        var cts = Interlocked.Exchange(ref _filterCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+
+    private void ReplaceVisibleRepositories(IReadOnlyCollection<RepositoryCardViewModel> repositories)
+    {
+        if (AreVisibleRepositoriesEquivalent(repositories))
+        {
+            NotifyDashboardChromeStateChanged();
+            return;
+        }
+
+        Repositories.Clear();
+        foreach (var repository in repositories)
+            Repositories.Add(repository);
+
+        NotifyDashboardChromeStateChanged();
+    }
+
+    private bool AreVisibleRepositoriesEquivalent(IReadOnlyCollection<RepositoryCardViewModel> repositories)
+    {
+        if (Repositories.Count != repositories.Count)
+            return false;
+
+        using var currentEnumerator = Repositories.GetEnumerator();
+        using var nextEnumerator = repositories.GetEnumerator();
+
+        while (currentEnumerator.MoveNext() && nextEnumerator.MoveNext())
+        {
+            if (!ReferenceEquals(currentEnumerator.Current, nextEnumerator.Current))
+                return false;
+        }
+
+        return true;
+    }
+
     private void ApplyPreset(RepositoryDashboardFilterPreset preset)
     {
         _suppressFilterApply = true;
@@ -498,7 +552,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             _suppressFilterApply = false;
         }
 
-        ApplyFilter();
+        ApplyFilterIfNeeded(debounce: false);
     }
 
     private RepositoryDashboardFilterPreset BuildCurrentPreset(string name)
@@ -531,21 +585,28 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
     private void RebuildFormatTagFilters()
     {
-        var selected = NormalizeFormatFilter(SelectedFormatTagFilter);
-        var tags = _allRepositories
-            .SelectMany(r => r.LinkedFormats)
-            .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim().ToLowerInvariant())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        _suppressFilterApply = true;
+        try
+        {
+            var selected = NormalizeFormatFilter(SelectedFormatTagFilter);
+            var tags = _allRepositories
+                .SelectMany(r => r.LinkedFormats)
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => v.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(v => v, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        FormatTagFilters.Clear();
-        FormatTagFilters.Add("all");
-        foreach (var tag in tags)
-            FormatTagFilters.Add(tag);
+            ReplaceCollectionIfChanged(
+                FormatTagFilters,
+                ["all", .. tags]);
 
-        SelectedFormatTagFilter = EnsureFormatFilterOption(selected);
+            SelectedFormatTagFilter = EnsureFormatFilterOption(selected);
+        }
+        finally
+        {
+            _suppressFilterApply = false;
+        }
     }
 
     private string EnsureFormatFilterOption(string value)
@@ -554,6 +615,88 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             FormatTagFilters.Add(value);
 
         return value;
+    }
+
+    private static void ReplaceCollectionIfChanged<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items)
+    {
+        if (CollectionEquals(collection, items))
+            return;
+
+        collection.Clear();
+        foreach (var item in items)
+            collection.Add(item);
+    }
+
+    private static bool CollectionEquals<T>(IReadOnlyList<T> current, IReadOnlyList<T> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        var comparer = EqualityComparer<T>.Default;
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (!comparer.Equals(current[i], next[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static RepositoryCardViewModel MapRepositoryCard(RepositoryDto repository)
+    {
+        var isAvailable = Directory.Exists(repository.DirectoryPath);
+        var syncStateKey = NormalizeCloudSyncStateKey(repository.CloudSync?.LastStatus);
+        var queuePending = repository.CloudSync?.PendingQueueCount ?? 0;
+        var queueRunning = repository.CloudSync?.RunningQueueCount ?? 0;
+        var queueRetry = repository.CloudSync?.RetryQueueCount ?? 0;
+        var queueConflict = repository.CloudSync?.ConflictQueueCount ?? 0;
+        var queueDeadLetter = repository.CloudSync?.DeadLetterQueueCount ?? 0;
+        var queueFailed = repository.CloudSync?.FailedQueueCount ?? 0;
+        var queueCompleted = repository.CloudSync?.CompletedQueueCount ?? 0;
+        var statusBadge = BuildRepositoryStatusBadge(
+            isAvailable,
+            repository.CloudSync?.LastStatus,
+            queuePending,
+            queueRunning,
+            queueRetry,
+            queueConflict,
+            queueDeadLetter,
+            queueFailed);
+
+        var card = new RepositoryCardViewModel
+        {
+            Id = repository.Id,
+            Name = repository.Name,
+            Description = repository.Description,
+            DirectoryPath = repository.DirectoryPath,
+            LastActivityUtc = repository.LastScannedAt,
+            StatusText = statusBadge.Text,
+            StatusColor = statusBadge.Color,
+            LastActivity = FormatLastActivity(repository.LastScannedAt),
+            FileCount = repository.FileCount,
+            VersionCount = repository.VersionCount,
+            TotalSizeBytes = repository.TotalSizeBytes,
+            SizeDisplay = FormatSize(repository.TotalSizeBytes),
+            CloudSyncStateKey = syncStateKey,
+            CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus),
+            CloudQueueSummary = BuildQueueSummary(queuePending, queueRunning, queueRetry, queueConflict, queueDeadLetter),
+            IsDirectoryAvailable = isAvailable,
+            QueuePendingCount = queuePending,
+            QueueRunningCount = queueRunning,
+            QueueRetryCount = queueRetry,
+            QueueConflictCount = queueConflict,
+            QueueDeadLetterCount = queueDeadLetter,
+            QueueFailedCount = queueFailed,
+            QueueCompletedCount = queueCompleted
+        };
+
+        foreach (var format in repository.LinkedFormats)
+            card.LinkedFormats.Add(format);
+
+        card.RefreshFormatsDisplay();
+        return card;
     }
 
     private static SearchDirectives ParseSearchDirectives(string rawQuery)
@@ -970,6 +1113,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             IsTransientActionBusy = true;
             TransientActionTitle = Loc.T(titleKey);
             TransientActionDetail = Loc.T(detailKey);
+            await Task.Yield();
             await action();
         }
         catch (Exception ex)

@@ -42,7 +42,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             VersionCount = 0,
             TotalSizeBytes = 0,
             LastScannedAt = null,
-            AutoCaptureFileVersions = true,
+            AutoCaptureFileVersions = false,
             ProtectCloudMetadata = true,
             RetentionEnabled = false,
             RetentionRunIntervalMinutes = 60,
@@ -349,6 +349,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
     public async Task<RepositoryDto?> GetRepositoryByIdAsync(int id, CancellationToken ct = default)
     {
         var repo = await db.Set<Repository>()
+            .AsNoTracking()
             .Include(r => r.Directory)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
 
@@ -428,6 +429,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
     {
         var repos = await db.Set<Repository>()
+            .AsNoTracking()
             .Include(r => r.Directory)
             .Where(r => !r.IsDeleted && !r.Directory.IsDeleted)
             .OrderBy(r => r.Name)
@@ -592,7 +594,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     VersionCount = 0,
                     TotalSizeBytes = 0,
                     LastScannedAt = null,
-                    AutoCaptureFileVersions = true,
+                    AutoCaptureFileVersions = false,
                     ProtectCloudMetadata = true,
                     RetentionEnabled = false,
                     RetentionRunIntervalMinutes = 60,
@@ -737,4 +739,3 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         return normalized.Count == 0 ? null : string.Join(';', normalized);
     }
 }
-

@@ -520,6 +520,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         long? preferredRightVersionId,
         CancellationToken ct = default)
     {
+        var scheduleInitialPreviewLoad = false;
+        long initialLeftVersionId = 0;
+        long initialRightVersionId = 0;
+
         _repositoryId = repositoryId;
         _repositoryPath = repositoryPath ?? string.Empty;
         _relativePath = NormalizeRelativePath(relativePath);
@@ -543,6 +547,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         PreviewKind = PendingDiffPreviewKind.None;
+        PreviewSummary = Loc.T("compare.preview.pick_both");
         _isWordSemanticPreview = false;
         ResetFullPreviewState();
 
@@ -584,7 +589,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             RefreshSelectedPairSummary();
 
             if (_leftVersion is not null && _rightVersion is not null && _leftVersion.FileVersionId != _rightVersion.FileVersionId)
-                await LoadPreviewAsync(CancellationToken.None);
+            {
+                scheduleInitialPreviewLoad = true;
+                initialLeftVersionId = _leftVersion.FileVersionId;
+                initialRightVersionId = _rightVersion.FileVersionId;
+            }
         }
         catch (Exception ex)
         {
@@ -598,7 +607,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         finally
         {
             IsVersionListLoading = false;
-            ClearLoadingState();
+            if (!scheduleInitialPreviewLoad || ct.IsCancellationRequested)
+                ClearLoadingState();
             OnPropertyChanged(nameof(CanOpenSourceFileOnDisk));
             OnPropertyChanged(nameof(IsWordDocument));
             OnPropertyChanged(nameof(CanOpenNativeWordCompare));
@@ -606,6 +616,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(NativeWordCompareHint));
             OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
         }
+
+        if (scheduleInitialPreviewLoad && !ct.IsCancellationRequested)
+            _ = QueueInitialPreviewLoadAsync(initialLeftVersionId, initialRightVersionId, ct);
     }
 
     public void SelectVersion(FileVersionCompareListItemViewModel item, bool selectRightSide)
@@ -1109,6 +1122,18 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         ReleasePreviewResources();
     }
 
+    private async Task QueueInitialPreviewLoadAsync(long leftVersionId, long rightVersionId, CancellationToken ct)
+    {
+        await Task.Yield();
+        if (ct.IsCancellationRequested)
+            return;
+
+        if (_leftVersion?.FileVersionId != leftVersionId || _rightVersion?.FileVersionId != rightVersionId)
+            return;
+
+        await LoadPreviewAsync(ct);
+    }
+
     private async Task LoadPreviewAsync(CancellationToken externalCt)
     {
         _previewCts?.Cancel();
@@ -1165,13 +1190,6 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     WordPreviewRows.Clear();
                     _isWordSemanticPreview = false;
 
-                    if (IsNativeWordPreferredForPreview)
-                    {
-                        PreviewKind = PendingDiffPreviewKind.Text;
-                        PreviewSummary = Loc.T("compare.preview.use_word_native");
-                        break;
-                    }
-
                     if (WordSemanticDiffBuilder.LooksLikeSemanticWordDiff(preview.Lines))
                     {
                         foreach (var row in WordSemanticDiffBuilder.Build(preview.Lines, preview.Hunks))
@@ -1188,10 +1206,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     }
 
                     PreviewKind = PendingDiffPreviewKind.Text;
-                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                    var previewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? $"{preview.AddedLines} added / {preview.RemovedLines} removed"
                             + (preview.IsTruncated ? " (preview truncated)" : string.Empty)
                         : preview.Message;
+                    PreviewSummary = IsNativeWordPreferredForPreview
+                        ? $"{previewSummary} {Loc.T("compare.preview.use_word_native")}"
+                        : previewSummary;
                     break;
 
                 case PendingDiffPreviewKind.Binary:
@@ -1272,6 +1293,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (_leftVersion is null || _rightVersion is null)
             return;
 
+        _previewCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+
         IsFullFilePreviewMode = true;
         IsPreviewLoading = true;
         IsFullFilePreviewLoading = true;
@@ -1284,14 +1309,17 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
         try
         {
-            var beforeTask = _mediator.Send(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000));
-            var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000));
+            var beforeTask = _mediator.Send(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000), cts.Token);
+            var afterTask = _mediator.Send(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000), cts.Token);
 
             await Task.WhenAll(beforeTask, afterTask);
+            if (cts.IsCancellationRequested)
+                return;
+
             SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.finalize"), 88);
 
-            var before = beforeTask.Result;
-            var after = afterTask.Result;
+            var before = await beforeTask;
+            var after = await afterTask;
             var summaryParts = new List<string>(2);
 
             if (before.Success && before.Value is not null)
@@ -1326,6 +1354,9 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             PreviewKind = PendingDiffPreviewKind.Text;
             PreviewSummary = Loc.T("compare.full_preview.ready");
         }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
             _log.LogError(ex,
@@ -1340,9 +1371,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         }
         finally
         {
-            IsPreviewLoading = false;
-            IsFullFilePreviewLoading = false;
-            ClearLoadingState();
+            if (!cts.IsCancellationRequested)
+            {
+                IsPreviewLoading = false;
+                IsFullFilePreviewLoading = false;
+                ClearLoadingState();
+            }
+
             OnPropertyChanged(nameof(CanToggleFullFilePreview));
         }
     }
@@ -1397,19 +1432,22 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             return;
 
         if (!string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath) && File.Exists(imagePreview.BaselineImagePath))
-        {
-            LeftImagePreview = await Task.Run(() => new Bitmap(imagePreview.BaselineImagePath), ct);
             TrackTempFile(imagePreview.BaselineImagePath, imagePreview.IsBaselineTempFile);
-        }
 
         if (!string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath) && File.Exists(imagePreview.CurrentImagePath))
-        {
-            RightImagePreview = await Task.Run(() => new Bitmap(imagePreview.CurrentImagePath), ct);
             TrackTempFile(imagePreview.CurrentImagePath, imagePreview.IsCurrentTempFile);
-        }
 
         if (!string.IsNullOrWhiteSpace(imagePreview.OverlayImagePath) && File.Exists(imagePreview.OverlayImagePath))
             TrackTempFile(imagePreview.OverlayImagePath, imagePreview.IsOverlayTempFile);
+
+        var leftImageTask = LoadBitmapAsync(imagePreview.BaselineImagePath, ct);
+        var rightImageTask = LoadBitmapAsync(imagePreview.CurrentImagePath, ct);
+        await Task.WhenAll(leftImageTask, rightImageTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        LeftImagePreview = await leftImageTask;
+        RightImagePreview = await rightImageTask;
 
         LeftImageCaption = BuildImageCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
         RightImageCaption = BuildImageCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
@@ -1420,31 +1458,34 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         if (audioPreview is null)
             return;
 
+        var waveformTask = LoadBitmapAsync(audioPreview.WaveformImagePath, ct);
+        var spectrogramTask = LoadBitmapAsync(audioPreview.SpectrogramImagePath, ct);
+        var spectralDeltaTask = LoadBitmapAsync(audioPreview.SpectralDeltaImagePath, ct);
+
         if (!string.IsNullOrWhiteSpace(audioPreview.WaveformImagePath) && File.Exists(audioPreview.WaveformImagePath))
-        {
-            AudioWaveformPreview = await Task.Run(() => new Bitmap(audioPreview.WaveformImagePath), ct);
             TrackTempFile(audioPreview.WaveformImagePath, audioPreview.IsWaveformTempFile);
-        }
 
         TrackTempFile(audioPreview.DifferenceAudioPath, audioPreview.IsDifferenceTempFile);
 
         if (!string.IsNullOrWhiteSpace(audioPreview.SpectrogramImagePath) && File.Exists(audioPreview.SpectrogramImagePath))
-        {
-            AudioSpectrogramPreview = await Task.Run(() => new Bitmap(audioPreview.SpectrogramImagePath), ct);
             TrackTempFile(audioPreview.SpectrogramImagePath, audioPreview.IsSpectrogramTempFile);
-        }
 
         if (!string.IsNullOrWhiteSpace(audioPreview.SpectralDeltaImagePath) && File.Exists(audioPreview.SpectralDeltaImagePath))
-        {
-            AudioSpectralDeltaPreview = await Task.Run(() => new Bitmap(audioPreview.SpectralDeltaImagePath), ct);
             TrackTempFile(audioPreview.SpectralDeltaImagePath, audioPreview.IsSpectralDeltaTempFile);
-        }
 
         if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath))
             TrackTempFile(audioPreview.BaselineAudioPath, audioPreview.IsBaselineTempFile);
 
         if (!string.IsNullOrWhiteSpace(audioPreview.CurrentAudioPath) && File.Exists(audioPreview.CurrentAudioPath))
             TrackTempFile(audioPreview.CurrentAudioPath, audioPreview.IsCurrentTempFile);
+
+        await Task.WhenAll(waveformTask, spectrogramTask, spectralDeltaTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        AudioWaveformPreview = await waveformTask;
+        AudioSpectrogramPreview = await spectrogramTask;
+        AudioSpectralDeltaPreview = await spectralDeltaTask;
     }
 
     private async Task RenderInteractiveImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
@@ -1965,6 +2006,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             _tempPreviewFiles.Add(path);
     }
 
+    private static Task<Bitmap?> LoadBitmapAsync(string? imagePath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            return Task.FromResult<Bitmap?>(null);
+
+        return Task.Run(() => (Bitmap?)new Bitmap(imagePath), ct);
+    }
+
     private void ResetFullPreviewState()
     {
         IsFullFilePreviewMode = false;
@@ -2225,4 +2274,3 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(HasAudioChangedSegments));
     }
 }
-

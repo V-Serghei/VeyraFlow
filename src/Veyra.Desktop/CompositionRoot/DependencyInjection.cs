@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Monitoring;
+using Veyra.Desktop.Services.Observability;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Sync;
 using Veyra.Desktop.Services.State;
@@ -29,6 +31,7 @@ using Veyra.Desktop.Services.Storage;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
+using Veyra.Domain.Observability;
 using Veyra.Shared.Logging;
 
 namespace Veyra.Desktop.CompositionRoot;
@@ -47,10 +50,12 @@ public static class DependencyInjection
         var services = new ServiceCollection();
 
         var schedulerSettingsStore = new SnapshotSchedulerSettingsStore();
-        var schedulerOverrides = schedulerSettingsStore.LoadAsync().GetAwaiter().GetResult();
+        var schedulerOverrides = schedulerSettingsStore.Load();
+        var runtimeObservabilitySettingsStore = new RuntimeObservabilitySettingsStore();
+        var runtimeObservability = new RuntimeObservabilityControlService(runtimeObservabilitySettingsStore);
 
         services.AddSingleton<IConfiguration>(cfg);
-        services.AddVeyraLogging(cfg);
+        services.AddVeyraLogging(cfg, runtimeObservability: runtimeObservability);
 
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
@@ -79,6 +84,9 @@ public static class DependencyInjection
 
         services.AddSingleton(schedulerOptions);
         services.AddSingleton<ISnapshotSchedulerSettingsStore>(schedulerSettingsStore);
+        services.AddSingleton<IRuntimeObservabilitySettingsStore>(runtimeObservabilitySettingsStore);
+        services.AddSingleton<IRuntimeObservabilityControlService>(runtimeObservability);
+        services.AddSingleton<IRuntimeObservabilityState>(runtimeObservability);
         services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
         services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
         services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
@@ -86,6 +94,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
+        services.AddSingleton<IServiceScopeExecutor, ServiceScopeExecutor>();
         services.AddSingleton<IRetentionDefaultsStore, RetentionDefaultsStore>();
         services.AddSingleton<IAppTransientStateMaintenanceService, AppTransientStateMaintenanceService>();
         services.AddTransient<IRepositoryRetentionDefaultsApplier, RepositoryRetentionDefaultsApplier>();
@@ -171,4 +180,3 @@ public static class DependencyInjection
         return services.BuildServiceProvider();
     }
 }
-

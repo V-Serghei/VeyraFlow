@@ -16,7 +16,7 @@ public class Repository
     public int VersionCount { get; set; }
     public long TotalSizeBytes { get; set; }
     public DateTime? LastScannedAt { get; set; }
-    public bool AutoCaptureFileVersions { get; set; } = true;
+    public bool AutoCaptureFileVersions { get; set; }
     public bool ProtectCloudMetadata { get; set; } = true;
 
     public bool RetentionEnabled { get; set; }

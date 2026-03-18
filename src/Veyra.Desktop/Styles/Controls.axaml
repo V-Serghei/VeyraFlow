@@ -339,7 +339,6 @@
             <Transitions>
                 <BrushTransition Property="Background" Duration="0:0:0.12"/>
                 <BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
-                <BrushTransition Property="Foreground" Duration="0:0:0.12"/>
             </Transitions>
         </Setter>
     </Style>
@@ -382,7 +381,6 @@
     <Style Selector="Button.subtle:pointerover">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
-        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
     </Style>
 
     <Style Selector="Button.ghost">

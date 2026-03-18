@@ -15,5 +15,5 @@ public sealed record RepositoryDto(
     DateTime? LastScannedAt,
     RepositoryRetentionPolicyDto RetentionPolicy,
     RepositoryCloudSyncStatusDto? CloudSync = null,
-    bool AutoCaptureFileVersions = true,
+    bool AutoCaptureFileVersions = false,
     bool ProtectCloudMetadata = true);

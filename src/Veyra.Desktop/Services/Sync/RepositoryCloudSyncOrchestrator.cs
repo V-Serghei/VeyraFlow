@@ -714,7 +714,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 .OrderBy(h => h, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             log.LogInformation(
-                "Cloud queue item initial push completed. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. MissingBlocks {MissingBlocks}. IdempotencyKey {IdempotencyKey}. DurationMs {DurationMs}",
+                "Cloud queue item initial push completed. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. MissingBlocks {MissingBlocks}. IdempotencySeed {IdempotencySeed}. DurationMs {DurationMs}",
                 queueItem.Id,
                 repository.Id,
                 queueItem.SnapshotId,
@@ -890,7 +890,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         $"Cloud still reports {stillMissing.Count} missing block(s) after upload.");
                 }
                 log.LogInformation(
-                    "Cloud queue item follow-up push confirmed uploaded blocks. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. UploadedBlocks {UploadedBlocks}. IdempotencyKey {IdempotencyKey}. UploadDurationMs {UploadDurationMs}. ConfirmDurationMs {ConfirmDurationMs}",
+                    "Cloud queue item follow-up push confirmed uploaded blocks. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. UploadedBlocks {UploadedBlocks}. IdempotencySeed {IdempotencySeed}. UploadDurationMs {UploadDurationMs}. ConfirmDurationMs {ConfirmDurationMs}",
                     queueItem.Id,
                     repository.Id,
                     queueItem.SnapshotId,
@@ -1710,4 +1710,3 @@ public sealed class RepositoryCloudSyncOrchestrator(
         string SourcePath,
         long ContentLength);
 }
-

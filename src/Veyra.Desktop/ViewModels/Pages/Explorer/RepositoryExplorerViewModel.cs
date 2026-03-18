@@ -34,6 +34,11 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private const int LiveSyncDebounceMs = 800;
     private const int LiveSyncMinIntervalMs = 1500;
     private const int CollapsedVisibleFileVersions = 4;
+    private const int ExplorerFilterDebounceMs = 100;
+
+    private sealed record ExplorerTreeBuildResult(
+        ExplorerTreeNodeViewModel Root,
+        Dictionary<string, ExplorerTreeNodeViewModel> Nodes);
 
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
@@ -54,12 +59,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private FileSystemWatcher? _liveSyncWatcher;
     private Timer? _liveSyncTimer;
     private DateTime _lastLiveSyncUtc = DateTime.MinValue;
-    private bool _autoCaptureFileVersions = true;
+    private bool _autoCaptureFileVersions;
     private string _liveSyncRootPath = string.Empty;
     private readonly List<string> _liveSyncTrackedFormats = [];
     private RepositoryFsEventQueueStatus _liveSyncQueueStatus = RepositoryFsEventQueueStatus.Empty;
     private bool _isSyncingSelectionFromSnapshot;
     private bool _isClearingSnapshotFileSelection;
+    private bool _suppressSnapshotSelectionLoad;
     private long? _preferredSnapshotId;
     private string? _preferredSnapshotFileRelativePath;
     private long? _preferredSnapshotFileVersionId;
@@ -67,6 +73,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private long _snapshotFilesLoadRequestId;
     private CancellationTokenSource? _versionsLoadCts;
     private long _versionsLoadRequestId;
+    private CancellationTokenSource? _itemsLoadCts;
+    private long _itemsLoadRequestId;
     private long? _diffPreviewBeforeVersionId;
     private long? _diffPreviewAfterVersionId;
     private string? _diffPreviewRelativePath;
@@ -77,6 +85,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private int _pendingAddedCount;
     private int _pendingModifiedCount;
     private int _pendingDeletedCount;
+    private bool _suppressFileVersionsCollectionChanged;
+    private bool _suppressComparableVersionsCollectionChanged;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -470,6 +480,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsLoading = true;
             ErrorMessage = null;
             _log.LogInformation("Loading repository explorer. RepositoryId {RepositoryId}", repositoryId);
+            await Task.Yield();
 
             if (!_savedFiltersLoaded)
             {
@@ -534,6 +545,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             RepositoryName = repo.Name;
             RepositoryPath = repo.DirectoryPath;
             _autoCaptureFileVersions = repo.AutoCaptureFileVersions;
+            IsEmpty = false;
+            IsLoading = false;
+            await Task.Yield();
 
             await RefreshEntriesAndTreeAsync(clearSelection: true);
             _log.LogInformation(
@@ -650,6 +664,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             _preferredSnapshotFileRelativePath = null;
             _preferredSnapshotFileVersionId = null;
         }
+
+        if (_suppressSnapshotSelectionLoad)
+            return;
 
         _ = LoadSnapshotFilesForSelectedSnapshotAsync(value?.SnapshotId);
     }
@@ -1017,6 +1034,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private async Task ShowSnapshotHistoryAsync()
     {
         IsSnapshotHistoryMenuOpen = true;
+        await Task.Yield();
 
         if (RepositoryId == 0)
             return;
@@ -1226,6 +1244,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (node is null)
             return;
 
+        UpdateTreeSelectionState(node);
+
         _selectedDirectoryPath = string.IsNullOrWhiteSpace(node.RelativePath)
             ? null
             : node.RelativePath;
@@ -1387,14 +1407,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
-    public Task FocusEntryAsync(string relativePath, bool isDirectory)
+    public async Task FocusEntryAsync(string relativePath, bool isDirectory)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
-            return Task.CompletedTask;
+            return;
 
         var normalized = NormalizeRelativePath(relativePath);
         if (string.IsNullOrWhiteSpace(normalized))
-            return Task.CompletedTask;
+            return;
 
         _suppressExplorerFilterApply = true;
         try
@@ -1420,9 +1440,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(targetDirectory))
             ExpandAndSelectTreePath(targetDirectory);
         else
-            ShowItemsForPath(null);
+            await ShowItemsForPathAsync(null, debounce: false);
 
-        ShowItemsForPath(targetDirectory);
+        await ShowItemsForPathAsync(targetDirectory, debounce: false);
 
         if (!isDirectory)
         {
@@ -1437,8 +1457,6 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             SelectedItem = null;
             ExpandAndSelectTreePath(normalized);
         }
-
-        return Task.CompletedTask;
     }
 
     public async Task FocusSnapshotAsync(long snapshotId)
@@ -1597,10 +1615,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         try
         {
-            diffResult = await Task.Run(() => _mediator.Send(new GetTextDiffQuery(
+            diffResult = await _mediator.Send(new GetTextDiffQuery(
                 beforeVersion.FileVersionId,
                 afterVersion.FileVersionId,
-                4000)));
+                4000));
         }
         catch (Exception ex)
         {
@@ -1689,14 +1707,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     ScanMessage = p.Message;
             });
 
-            var result = await Task.Run(() => _mediator.Send(new ScanRepositoryCommand(
+            var result = await _mediator.Send(new ScanRepositoryCommand(
                 RepositoryId,
                 progress,
                 new RepositoryScanOptionsDto(
                     SaveFileVersions: saveFileVersions,
                     TriggerOverride: triggerOverride,
                     SnapshotTitle: snapshotTitle,
-                    SnapshotTags: snapshotTags))));
+                    SnapshotTags: snapshotTags)));
 
             if (!result.Success)
             {
@@ -1705,7 +1723,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 return false;
             }
 
-            await RefreshEntriesAndTreeAsync(clearSelection: false);
+            if (result.Value?.SnapshotCreated == true)
+                await RefreshEntriesAndTreeAsync(clearSelection: false);
 
             if (!string.IsNullOrWhiteSpace(successMessage))
                 VersionActionMessage = successMessage;
@@ -1770,6 +1789,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         try
         {
             IsVersionLoading = true;
+            await Task.Yield();
 
             var versions = await _mediator.Send(new GetFileVersionHistoryQuery(
                 RepositoryId,
@@ -1779,9 +1799,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (!IsLatestVersionsLoadRequest(requestId) || ct.IsCancellationRequested)
                 return;
 
-            foreach (var version in versions)
-            {
-                FileVersions.Add(new ExplorerFileVersionViewModel
+            var rows = versions
+                .Select(version => new ExplorerFileVersionViewModel
                 {
                     FileVersionId = version.FileVersionId,
                     CreatedAtUtc = version.CreatedAtUtc,
@@ -1790,8 +1809,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     HasContentBlocks = version.HasContentBlocks,
                     ContentHashSha256 = version.ContentHashSha256,
                     RelativePath = item.RelativePath
-                });
-            }
+                })
+                .ToList();
+
+            ReplaceFileVersions(rows);
 
             if (_preferredSnapshotFileVersionId is > 0)
             {
@@ -1863,7 +1884,6 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private void InitializeVersionComparePair()
     {
         RebuildVisibleFileVersions();
-        ComparableFileVersions.Clear();
 
         var comparable = FileVersions
             .Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
@@ -1871,8 +1891,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .ThenByDescending(v => v.FileVersionId)
             .ToList();
 
-        foreach (var version in comparable)
-            ComparableFileVersions.Add(version);
+        ReplaceComparableFileVersions(comparable);
 
         if (comparable.Count == 0)
         {
@@ -1992,27 +2011,43 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private async Task LoadPendingChangesAsync()
     {
-        var pending = await _mediator.Send(new GetRepositoryPendingChangesQuery(RepositoryId, 400));
-
-        PendingChanges.Clear();
-        foreach (var entry in pending.Entries)
+        try
         {
-            PendingChanges.Add(new RepositoryPendingChangeViewModel
-            {
-                RelativePath = entry.RelativePath,
-                Name = entry.Name,
-                ChangeKind = entry.ChangeKind,
-                CurrentSizeBytes = entry.CurrentSizeBytes,
-                BaselineSizeBytes = entry.BaselineSizeBytes
-            });
-        }
+            var pending = await _mediator.Send(new GetRepositoryPendingChangesQuery(RepositoryId, 400));
+            var rows = pending.Entries
+                .Select(entry => new RepositoryPendingChangeViewModel
+                {
+                    RelativePath = entry.RelativePath,
+                    Name = entry.Name,
+                    ChangeKind = entry.ChangeKind,
+                    CurrentSizeBytes = entry.CurrentSizeBytes,
+                    BaselineSizeBytes = entry.BaselineSizeBytes
+                })
+                .ToList();
 
-        HasPendingChanges = PendingChanges.Count > 0;
-        _pendingBaselineSnapshotAtUtc = pending.BaselineSnapshotAtUtc;
-        _pendingAddedCount = pending.AddedCount;
-        _pendingModifiedCount = pending.ModifiedCount;
-        _pendingDeletedCount = pending.DeletedCount;
-        RefreshPendingChangesSummary();
+            PendingChanges.Clear();
+            foreach (var row in rows)
+                PendingChanges.Add(row);
+
+            HasPendingChanges = PendingChanges.Count > 0;
+            _pendingBaselineSnapshotAtUtc = pending.BaselineSnapshotAtUtc;
+            _pendingAddedCount = pending.AddedCount;
+            _pendingModifiedCount = pending.ModifiedCount;
+            _pendingDeletedCount = pending.DeletedCount;
+            RefreshPendingChangesSummary();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to load pending changes for repository {RepositoryId}", RepositoryId);
+            PendingChanges.Clear();
+            HasPendingChanges = false;
+            _pendingBaselineSnapshotAtUtc = null;
+            _pendingAddedCount = 0;
+            _pendingModifiedCount = 0;
+            _pendingDeletedCount = 0;
+            PendingChangesSummary = Loc.T("explorer.pending.load_failed");
+            LastSnapshotLabel = Loc.T("explorer.snapshot.none_yet");
+        }
     }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
@@ -2135,21 +2170,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var compareLeftId = CompareLeftVersion?.FileVersionId;
         var compareRightId = CompareRightVersion?.FileVersionId;
 
-        var versions = FileVersions.ToList();
-        foreach (var version in versions)
+        foreach (var version in FileVersions)
             version.RefreshLocalization();
 
         SelectedVersion = selectedVersionId is > 0
             ? FileVersions.FirstOrDefault(x => x.FileVersionId == selectedVersionId.Value)
             : null;
 
-        ComparableFileVersions.Clear();
-        foreach (var version in FileVersions.Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
-                     .OrderByDescending(v => v.CreatedAtUtc)
-                     .ThenByDescending(v => v.FileVersionId))
-        {
-            ComparableFileVersions.Add(version);
-        }
+        ReplaceComparableFileVersions(
+            FileVersions.Where(v => v.HasContentBlocks && !v.IsDeletionMarker)
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .ThenByDescending(v => v.FileVersionId)
+                .ToList());
 
         CompareLeftVersion = compareLeftId is > 0
             ? ComparableFileVersions.FirstOrDefault(x => x.FileVersionId == compareLeftId.Value)
@@ -2162,12 +2194,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(CanCompareSelectedVersionPair));
     }
 
-    private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0)
+    private async Task LoadSnapshotHistoryAsync(long preferredSnapshotId = 0, bool forceSnapshotFilesReload = false)
     {
         if (RepositoryId == 0)
             return;
 
         IsSnapshotHistoryLoading = true;
+        await Task.Yield();
 
         try
         {
@@ -2192,7 +2225,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
             RebuildSnapshotTriggerFilters();
             RebuildSnapshotTagFilters();
-            ApplySnapshotHistoryFilters(targetSnapshotId);
+            ApplySnapshotHistoryFilters(targetSnapshotId, forceSnapshotFilesReload);
         }
         catch (Exception ex)
         {
@@ -2222,22 +2255,19 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var (requestId, ct) = BeginSnapshotFilesLoadRequest();
         var preferredFilePath = _preferredSnapshotFileRelativePath;
 
-        _snapshotFilesSource.Clear();
-        SnapshotFiles.Clear();
-        _isClearingSnapshotFileSelection = true;
-        SelectedSnapshotFile = null;
-        _isClearingSnapshotFileSelection = false;
-        HasSnapshotFiles = false;
-
         if (snapshotId is null || snapshotId <= 0 || RepositoryId == 0)
         {
             if (IsLatestSnapshotFilesLoadRequest(requestId))
+            {
+                ClearSnapshotFilesState();
                 IsSnapshotFilesLoading = false;
+            }
 
             return;
         }
 
         IsSnapshotFilesLoading = true;
+        await Task.Yield();
 
         try
         {
@@ -2249,9 +2279,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             if (!IsLatestSnapshotFilesLoadRequest(requestId) || ct.IsCancellationRequested)
                 return;
 
+            var rows = new List<RepositorySnapshotFileChangeViewModel>(files.Count);
             foreach (var file in files)
             {
-                _snapshotFilesSource.Add(new RepositorySnapshotFileChangeViewModel
+                rows.Add(new RepositorySnapshotFileChangeViewModel
                 {
                     SnapshotId = file.SnapshotId,
                     FileIdentityId = file.FileIdentityId,
@@ -2265,6 +2296,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 });
             }
 
+            _snapshotFilesSource.Clear();
+            _snapshotFilesSource.AddRange(rows);
             RebuildSnapshotFileExtensionFilters();
             ApplySnapshotFilesFilters(preferredFilePath);
         }
@@ -2283,12 +2316,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 RepositoryId,
                 snapshotId);
 
-            _snapshotFilesSource.Clear();
-            SnapshotFiles.Clear();
-            _isClearingSnapshotFileSelection = true;
-            SelectedSnapshotFile = null;
-            _isClearingSnapshotFileSelection = false;
-            HasSnapshotFiles = false;
+            ClearSnapshotFilesState();
             _preferredSnapshotFileRelativePath = null;
             _preferredSnapshotFileVersionId = null;
         }
@@ -2366,11 +2394,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         _entries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(RepositoryId));
         RebuildExtensionFilters();
-        await LoadPendingChangesAsync();
-        await LoadSnapshotHistoryAsync(previousSnapshotId);
-        if (SelectedSnapshot is not null)
-            await LoadSnapshotFilesForSelectedSnapshotAsync(SelectedSnapshot.SnapshotId);
-        BuildTree();
+        var buildTreeTask = BuildTreeAsync();
+        var pendingChangesTask = LoadPendingChangesAsync();
+        var shouldRefreshSnapshots = IsSnapshotHistoryMenuOpen
+            || previousSnapshotId > 0
+            || !string.IsNullOrWhiteSpace(previousSnapshotFilePath);
+        var snapshotHistoryTask = shouldRefreshSnapshots
+            ? LoadSnapshotHistoryAsync(previousSnapshotId, forceSnapshotFilesReload: true)
+            : Task.CompletedTask;
+
+        await buildTreeTask;
 
         if (!string.IsNullOrWhiteSpace(previousDirectoryPath)
             && _nodeByPath.TryGetValue(previousDirectoryPath, out var previousNode))
@@ -2378,12 +2411,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             previousNode.IsExpanded = true;
             SelectedTreeNode = previousNode;
             _selectedDirectoryPath = previousDirectoryPath;
-            ShowItemsForPath(previousDirectoryPath);
+            await ShowItemsForPathAsync(previousDirectoryPath, debounce: false);
         }
         else
         {
             _selectedDirectoryPath = null;
-            ShowItemsForPath(null);
+            await ShowItemsForPathAsync(null, debounce: false);
             SelectedTreeNode = TreeNodes.FirstOrDefault();
         }
 
@@ -2410,6 +2443,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             SelectedItem = null;
         }
+
+        await pendingChangesTask;
+        await snapshotHistoryTask;
     }
 
     private void PrepareScanUi(string fallbackMessage)
@@ -2436,6 +2472,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         CancelSnapshotFilesLoadRequest();
         CancelVersionsLoadRequest();
+        CancelItemsLoadRequest();
     }
 
     private (long RequestId, CancellationToken Token) BeginSnapshotFilesLoadRequest()
@@ -2497,6 +2534,37 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             _versionsLoadCts.Dispose();
             _versionsLoadCts = null;
+        }
+    }
+
+    private (long RequestId, CancellationToken Token) BeginItemsLoadRequest()
+    {
+        CancelItemsLoadRequest();
+
+        _itemsLoadCts = new CancellationTokenSource();
+        var requestId = Interlocked.Increment(ref _itemsLoadRequestId);
+        return (requestId, _itemsLoadCts.Token);
+    }
+
+    private bool IsLatestItemsLoadRequest(long requestId)
+        => requestId == Volatile.Read(ref _itemsLoadRequestId);
+
+    private void CancelItemsLoadRequest()
+    {
+        if (_itemsLoadCts is null)
+            return;
+
+        try
+        {
+            _itemsLoadCts.Cancel();
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _itemsLoadCts.Dispose();
+            _itemsLoadCts = null;
         }
     }
 
@@ -2820,25 +2888,42 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .ToList();
     }
 
-    private void BuildTree()
+    private async Task BuildTreeAsync()
     {
-        _nodeByPath.Clear();
-        TreeNodes.Clear();
-
-        var root = new ExplorerTreeNodeViewModel
-        {
-            RelativePath = string.Empty,
-            Name = RepositoryName,
-            IsExpanded = true,
-            IsSelected = true
-        };
-
-        _nodeByPath[string.Empty] = root;
+        var expandedPaths = _nodeByPath
+            .Where(x => x.Value.IsExpanded)
+            .Select(x => NormalizeRelativePath(x.Key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var directories = _entries
             .Where(e => e.IsDirectory)
             .OrderBy(e => e.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var tree = await Task.Run(() => CreateTreeBuildResult(RepositoryName, directories, expandedPaths));
+
+        _nodeByPath.Clear();
+        foreach (var (path, node) in tree.Nodes)
+            _nodeByPath[path] = node;
+
+        TreeNodes.Clear();
+        TreeNodes.Add(tree.Root);
+    }
+
+    private static ExplorerTreeBuildResult CreateTreeBuildResult(
+        string repositoryName,
+        IReadOnlyList<RepositoryScanEntryDto> directories,
+        IReadOnlyCollection<string> expandedPaths)
+    {
+        var nodeByPath = new Dictionary<string, ExplorerTreeNodeViewModel>(StringComparer.OrdinalIgnoreCase);
+        var root = new ExplorerTreeNodeViewModel
+        {
+            RelativePath = string.Empty,
+            Name = repositoryName,
+            IsExpanded = true
+        };
+
+        nodeByPath[string.Empty] = root;
 
         foreach (var dir in directories)
         {
@@ -2848,12 +2933,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 Name = dir.Name
             };
 
-            _nodeByPath[dir.RelativePath] = node;
+            nodeByPath[dir.RelativePath] = node;
         }
 
         foreach (var dir in directories)
         {
-            if (!_nodeByPath.TryGetValue(dir.RelativePath, out var node))
+            if (!nodeByPath.TryGetValue(dir.RelativePath, out var node))
                 continue;
 
             if (string.IsNullOrWhiteSpace(dir.ParentRelativePath))
@@ -2862,14 +2947,29 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 continue;
             }
 
-            if (_nodeByPath.TryGetValue(dir.ParentRelativePath, out var parent))
+            if (nodeByPath.TryGetValue(dir.ParentRelativePath, out var parent))
                 parent.Children.Add(node);
             else
                 root.Children.Add(node);
         }
 
         SortNodes(root);
-        TreeNodes.Add(root);
+
+        foreach (var path in expandedPaths)
+        {
+            if (nodeByPath.TryGetValue(path, out var expandedNode))
+                expandedNode.IsExpanded = true;
+        }
+
+        return new ExplorerTreeBuildResult(root, nodeByPath);
+    }
+
+    private void UpdateTreeSelectionState(ExplorerTreeNodeViewModel? selectedNode)
+    {
+        var selectedPath = NormalizeRelativePath(selectedNode?.RelativePath ?? string.Empty);
+
+        foreach (var (path, node) in _nodeByPath)
+            node.IsSelected = string.Equals(path, selectedPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private void ApplyExplorerFiltersIfNeeded()
@@ -2877,7 +2977,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (_suppressExplorerFilterApply)
             return;
 
-        ShowItemsForPath(_selectedDirectoryPath);
+        _ = ShowItemsForPathAsync(_selectedDirectoryPath);
     }
 
     private void ApplySnapshotHistoryFiltersIfNeeded()
@@ -2987,7 +3087,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return value;
     }
 
-    private void ApplySnapshotHistoryFilters(long preferredSnapshotId = 0)
+    private void ApplySnapshotHistoryFilters(long preferredSnapshotId = 0, bool forceSnapshotFilesReload = false)
     {
         var directives = ParseSnapshotHistoryDirectives(SnapshotHistorySearchQuery.Trim());
         var textQuery = directives.TextQuery;
@@ -3038,6 +3138,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var targetSnapshotId = preferredSnapshotId > 0
             ? preferredSnapshotId
             : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
+        var previousSelectedSnapshotId = SelectedSnapshot?.SnapshotId ?? 0;
 
         var selected = targetSnapshotId > 0
             ? SnapshotHistory.FirstOrDefault(x => x.SnapshotId == targetSnapshotId)
@@ -3046,19 +3147,27 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (selected is null && SnapshotHistory.Count > 0)
             selected = SnapshotHistory[0];
 
-        SelectedSnapshot = selected;
-        _preferredSnapshotId = selected?.SnapshotId;
+        _suppressSnapshotSelectionLoad = true;
+        try
+        {
+            SelectedSnapshot = selected;
+            _preferredSnapshotId = selected?.SnapshotId;
+        }
+        finally
+        {
+            _suppressSnapshotSelectionLoad = false;
+        }
 
         if (selected is null)
         {
-            _snapshotFilesSource.Clear();
-            SnapshotFiles.Clear();
-            _isClearingSnapshotFileSelection = true;
-            SelectedSnapshotFile = null;
-            _isClearingSnapshotFileSelection = false;
-            HasSnapshotFiles = false;
+            CancelSnapshotFilesLoadRequest();
+            ClearSnapshotFilesState();
             _preferredSnapshotFileRelativePath = null;
             _preferredSnapshotFileVersionId = null;
+        }
+        else if (forceSnapshotFilesReload || selected.SnapshotId != previousSelectedSnapshotId || _snapshotFilesSource.Count == 0)
+        {
+            _ = LoadSnapshotFilesForSelectedSnapshotAsync(selected.SnapshotId);
         }
     }
 
@@ -3140,6 +3249,16 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             _preferredSnapshotFileRelativePath = null;
             _preferredSnapshotFileVersionId = null;
         }
+    }
+
+    private void ClearSnapshotFilesState()
+    {
+        _snapshotFilesSource.Clear();
+        SnapshotFiles.Clear();
+        _isClearingSnapshotFileSelection = true;
+        SelectedSnapshotFile = null;
+        _isClearingSnapshotFileSelection = false;
+        HasSnapshotFiles = false;
     }
 
     private async Task LoadSavedExplorerFiltersAsync(CancellationToken ct = default)
@@ -3240,11 +3359,12 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     }
 
     private void ShowItemsForPath(string? directoryRelativePath)
-    {
-        IEnumerable<RepositoryScanEntryDto> visible = _entries.Where(e =>
-            string.Equals(NormalizeParent(e.ParentRelativePath), NormalizeParent(directoryRelativePath), StringComparison.OrdinalIgnoreCase));
+        => _ = ShowItemsForPathAsync(directoryRelativePath);
 
-        var directives = ParseSearchDirectives(SearchQuery.Trim());
+    private async Task ShowItemsForPathAsync(string? directoryRelativePath, bool debounce = true)
+    {
+        var normalizedDirectoryPath = NormalizeParent(directoryRelativePath);
+        var directives = ParseSearchDirectives((SearchQuery ?? string.Empty).Trim());
 
         var textQuery = directives.TextQuery;
         var entryTypeFilter = NormalizeEntryTypeFilter(SelectedEntryTypeFilter);
@@ -3261,74 +3381,96 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         var minSizeMb = ParseNullableDouble(MinSizeMb) ?? directives.MinSizeMb;
         var maxSizeMb = ParseNullableDouble(MaxSizeMb) ?? directives.MaxSizeMb;
+        var entries = _entries.ToArray();
+        var (requestId, ct) = BeginItemsLoadRequest();
 
-        if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
-            (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
-
-        if (!string.IsNullOrWhiteSpace(textQuery))
+        try
         {
-            visible = visible.Where(e =>
-                e.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
-                e.RelativePath.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
-        }
+            if (debounce)
+                await Task.Delay(ExplorerFilterDebounceMs, ct);
 
-        if (entryTypeFilter != "all")
-        {
-            visible = entryTypeFilter switch
+            var rows = await Task.Run(() =>
             {
-                "files" => visible.Where(e => !e.IsDirectory),
-                "folders" => visible.Where(e => e.IsDirectory),
-                _ => visible
-            };
-        }
+                IEnumerable<RepositoryScanEntryDto> visible = entries.Where(e =>
+                    string.Equals(NormalizeParent(e.ParentRelativePath), normalizedDirectoryPath, StringComparison.OrdinalIgnoreCase));
 
-        if (extensionFilter != "all")
+                if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
+                    (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
+
+                if (!string.IsNullOrWhiteSpace(textQuery))
+                {
+                    visible = visible.Where(e =>
+                        e.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                        e.RelativePath.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (entryTypeFilter != "all")
+                {
+                    visible = entryTypeFilter switch
+                    {
+                        "files" => visible.Where(e => !e.IsDirectory),
+                        "folders" => visible.Where(e => e.IsDirectory),
+                        _ => visible
+                    };
+                }
+
+                if (extensionFilter != "all")
+                {
+                    visible = visible.Where(e =>
+                        !e.IsDirectory &&
+                        string.Equals(NormalizeExtensionFilter(e.Extension ?? string.Empty), extensionFilter, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (modifiedWindowFilter != "all")
+                {
+                    var threshold = modifiedWindowFilter switch
+                    {
+                        "24h" => DateTime.UtcNow.AddHours(-24),
+                        "7d" => DateTime.UtcNow.AddDays(-7),
+                        "30d" => DateTime.UtcNow.AddDays(-30),
+                        _ => DateTime.MinValue
+                    };
+
+                    if (threshold > DateTime.MinValue)
+                        visible = visible.Where(e => e.LastWriteUtc >= threshold);
+                }
+
+                if (minSizeMb is > 0)
+                {
+                    visible = visible.Where(e =>
+                        !e.IsDirectory &&
+                        (e.SizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
+                }
+
+                if (maxSizeMb is > 0)
+                {
+                    visible = visible.Where(e =>
+                        !e.IsDirectory &&
+                        (e.SizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
+                }
+
+                return visible
+                    .OrderByDescending(e => e.IsDirectory)
+                    .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(MapToItem)
+                    .ToList();
+            }, ct);
+
+            if (!IsLatestItemsLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
+            ReplaceExplorerItems(rows);
+
+            IsEmpty = Items.Count == 0;
+            NotifyExplorerChromeStateChanged();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            visible = visible.Where(e =>
-                !e.IsDirectory &&
-                string.Equals(NormalizeExtensionFilter(e.Extension ?? string.Empty), extensionFilter, StringComparison.OrdinalIgnoreCase));
         }
-
-        if (modifiedWindowFilter != "all")
+        catch (Exception ex)
         {
-            var threshold = modifiedWindowFilter switch
-            {
-                "24h" => DateTime.UtcNow.AddHours(-24),
-                "7d" => DateTime.UtcNow.AddDays(-7),
-                "30d" => DateTime.UtcNow.AddDays(-30),
-                _ => DateTime.MinValue
-            };
-
-            if (threshold > DateTime.MinValue)
-                visible = visible.Where(e => e.LastWriteUtc >= threshold);
+            _log.LogWarning(ex, "Failed to refresh explorer items for repository {RepositoryId}", RepositoryId);
         }
-
-        if (minSizeMb is > 0)
-        {
-            visible = visible.Where(e =>
-                !e.IsDirectory &&
-                (e.SizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
-        }
-
-        if (maxSizeMb is > 0)
-        {
-            visible = visible.Where(e =>
-                !e.IsDirectory &&
-                (e.SizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
-        }
-
-        var rows = visible
-            .OrderByDescending(e => e.IsDirectory)
-            .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(MapToItem)
-            .ToList();
-
-        Items.Clear();
-        foreach (var row in rows)
-            Items.Add(row);
-
-        IsEmpty = Items.Count == 0;
-        NotifyExplorerChromeStateChanged();
     }
 
     private int GetActiveExplorerFilterCount()
@@ -3361,6 +3503,42 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(BlockingOverlayDetail));
     }
 
+    private void ReplaceExplorerItems(IReadOnlyList<ExplorerItemViewModel> rows)
+    {
+        if (AreExplorerItemsEquivalent(Items, rows))
+            return;
+
+        Items.Clear();
+        foreach (var row in rows)
+            Items.Add(row);
+    }
+
+    private static bool AreExplorerItemsEquivalent(
+        IReadOnlyList<ExplorerItemViewModel> current,
+        IReadOnlyList<ExplorerItemViewModel> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        for (var i = 0; i < current.Count; i++)
+        {
+            var left = current[i];
+            var right = next[i];
+            if (left.IsDirectory != right.IsDirectory
+                || !left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+                || !string.Equals(left.Type, right.Type, StringComparison.Ordinal)
+                || !string.Equals(left.SizeDisplay, right.SizeDisplay, StringComparison.Ordinal)
+                || !string.Equals(left.ModifiedDisplay, right.ModifiedDisplay, StringComparison.Ordinal)
+                || !string.Equals(left.HashSha256, right.HashSha256, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private async Task RunTransientPreparationAsync(
         string titleKey,
         string detailKey,
@@ -3375,6 +3553,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             IsTransientActionBusy = true;
             TransientActionTitle = Loc.T(titleKey);
             TransientActionDetail = Loc.T(detailKey);
+            await Task.Yield();
             await action();
         }
         catch (Exception ex)
@@ -3450,6 +3629,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void OnFileVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (_suppressFileVersionsCollectionChanged)
+            return;
+
         RebuildVisibleFileVersions();
         OnPropertyChanged(nameof(HasNoFileVersions));
         OnPropertyChanged(nameof(CanToggleFileVersionsView));
@@ -3458,6 +3640,46 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void OnComparableVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (_suppressComparableVersionsCollectionChanged)
+            return;
+
+        OnPropertyChanged(nameof(HasComparableVersions));
+    }
+
+    private void ReplaceFileVersions(IReadOnlyList<ExplorerFileVersionViewModel> versions)
+    {
+        _suppressFileVersionsCollectionChanged = true;
+        try
+        {
+            FileVersions.Clear();
+            foreach (var version in versions)
+                FileVersions.Add(version);
+        }
+        finally
+        {
+            _suppressFileVersionsCollectionChanged = false;
+        }
+
+        RebuildVisibleFileVersions();
+        OnPropertyChanged(nameof(HasNoFileVersions));
+        OnPropertyChanged(nameof(CanToggleFileVersionsView));
+        OnPropertyChanged(nameof(FileVersionsToggleLabel));
+    }
+
+    private void ReplaceComparableFileVersions(IReadOnlyList<ExplorerFileVersionViewModel> versions)
+    {
+        _suppressComparableVersionsCollectionChanged = true;
+        try
+        {
+            ComparableFileVersions.Clear();
+            foreach (var version in versions)
+                ComparableFileVersions.Add(version);
+        }
+        finally
+        {
+            _suppressComparableVersionsCollectionChanged = false;
+        }
+
         OnPropertyChanged(nameof(HasComparableVersions));
     }
 
@@ -3488,8 +3710,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             await Task.WhenAll(beforeTask, afterTask);
 
-            var before = beforeTask.Result;
-            var after = afterTask.Result;
+            var before = await beforeTask;
+            var after = await afterTask;
             var summaryParts = new List<string>(2);
 
             if (before.Success && before.Value is not null)
@@ -4279,4 +4501,3 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             : normalized;
     }
 }
-

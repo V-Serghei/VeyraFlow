@@ -213,6 +213,58 @@
                                 <TextBlock Text="{loc:Tr app_settings.monitoring_tools_title}" FontSize="16" FontWeight="SemiBold"/>
                                 <TextBlock Text="{loc:Tr app_settings.monitoring_tools_hint}" Classes="muted" TextWrapping="Wrap"/>
 
+                                <Border Classes="filter-sheet" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="{loc:Tr app_settings.runtime_observability_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.runtime_observability_hint}" Classes="muted" TextWrapping="Wrap"/>
+
+                                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                                            <Border Grid.Column="0" Classes="metric-card">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="{loc:Tr app_settings.runtime_diagnostics_title}" Classes="muted" FontSize="11"/>
+                                                    <TextBlock Text="{Binding RuntimeDiagnosticsStateText}" FontSize="20" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{loc:Tr app_settings.runtime_diagnostics_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                    <Button Command="{Binding ToggleRuntimeDiagnosticsCommand}"
+                                                            IsEnabled="{Binding CanToggleRuntimeObservability}"
+                                                            Classes="subtle compact responsive-icon"
+                                                            HorizontalAlignment="Left">
+                                                        <Button.Content>
+                                                            <StackPanel Classes="button-content">
+                                                                <TextBlock Classes="button-icon" Text="&#xE7C1;"/>
+                                                                <TextBlock Classes="button-label" Text="{Binding ToggleRuntimeDiagnosticsLabel}"/>
+                                                            </StackPanel>
+                                                        </Button.Content>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <Border Grid.Column="1" Classes="metric-card">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="{loc:Tr app_settings.runtime_logging_title}" Classes="muted" FontSize="11"/>
+                                                    <TextBlock Text="{Binding RuntimeLoggingStateText}" FontSize="20" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{loc:Tr app_settings.runtime_logging_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                    <Button Command="{Binding ToggleRuntimeLoggingCommand}"
+                                                            IsEnabled="{Binding CanToggleRuntimeObservability}"
+                                                            Classes="subtle compact responsive-icon"
+                                                            HorizontalAlignment="Left">
+                                                        <Button.Content>
+                                                            <StackPanel Classes="button-content">
+                                                                <TextBlock Classes="button-icon" Text="&#xE7BA;"/>
+                                                                <TextBlock Classes="button-label" Text="{Binding ToggleRuntimeLoggingLabel}"/>
+                                                            </StackPanel>
+                                                        </Button.Content>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+
+                                        <TextBlock Text="{Binding RuntimeObservabilityMessage}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding RuntimeObservabilityMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <WrapPanel Orientation="Horizontal">
                                     <Button Command="{Binding OpenOperationMonitorCommand}"
                                             Classes="primary compact responsive-icon"
@@ -824,6 +876,11 @@
                                                 <TextBlock Text="{Binding DisplayName}"/>
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
+                                        <ComboBox.SelectionBoxItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppThemeOptionItemViewModel">
+                                                <TextBlock Text="{Binding DisplayName}"/>
+                                            </DataTemplate>
+                                        </ComboBox.SelectionBoxItemTemplate>
                                     </ComboBox>
                                 </Grid>
 
@@ -839,6 +896,11 @@
                                                 <TextBlock Text="{Binding DisplayName}"/>
                                             </DataTemplate>
                                         </ComboBox.ItemTemplate>
+                                        <ComboBox.SelectionBoxItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppLanguageOptionItemViewModel">
+                                                <TextBlock Text="{Binding DisplayName}"/>
+                                            </DataTemplate>
+                                        </ComboBox.SelectionBoxItemTemplate>
                                     </ComboBox>
                                 </Grid>
 
@@ -1416,4 +1478,3 @@
         </Border>
     </Grid>
 </UserControl>
-

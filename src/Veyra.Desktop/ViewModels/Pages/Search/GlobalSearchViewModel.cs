@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -12,6 +15,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Execution;
 
 namespace Veyra.Desktop.ViewModels.Pages.Search;
 
@@ -59,11 +63,13 @@ public sealed record GlobalSearchSnapshotResultItemViewModel(
 public sealed partial class GlobalSearchViewModel : ObservableObject
 {
     private const int MaxVisibleFileResults = 500;
+    private const int MaxRepositoryLoadConcurrency = 6;
+    private const int FilterDebounceMs = 120;
 
     private sealed record IndexedEntry(RepositoryDto Repository, RepositoryScanEntryDto Entry);
     private sealed record IndexedSnapshot(RepositoryDto Repository, RepositorySnapshotHistoryItemDto Snapshot);
 
-    private readonly IMediator _mediator;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly ILogger<GlobalSearchViewModel> _log;
     private readonly LocalizationManager _localization;
     private readonly List<RepositoryDto> _repositorySource = [];
@@ -73,6 +79,11 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     private int _matchedFileCount;
     private int _matchedSnapshotCount;
     private bool _fileResultsLimited;
+    private CancellationTokenSource? _loadCts;
+    private long _loadRequestId;
+    private CancellationTokenSource? _filterCts;
+    private long _filterRequestId;
+    private bool _suppressFilterApply;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenRepositoryRequested;
@@ -164,10 +175,10 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
         : Loc.F("search.snapshots_summary", _matchedSnapshotCount, _snapshotSource.Count);
 
     public GlobalSearchViewModel(
-        IMediator mediator,
+        IServiceScopeExecutor scopeExecutor,
         ILogger<GlobalSearchViewModel> log)
     {
-        _mediator = mediator;
+        _scopeExecutor = scopeExecutor;
         _log = log;
         _localization = LocalizationManager.Instance;
         _localization.LanguageChanged += OnLanguageChanged;
@@ -175,26 +186,27 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
         LastUpdatedText = Loc.T("common.not_available_short");
     }
 
-    partial void OnSearchQueryChanged(string value) => ApplyFilters();
-    partial void OnSelectedRepositoryFilterChanged(GlobalSearchRepositoryFilterOptionViewModel? value) => ApplyFilters();
-    partial void OnSelectedTrackedFormatFilterChanged(string value) => ApplyFilters();
-    partial void OnSelectedEntryTypeFilterChanged(string value) => ApplyFilters();
-    partial void OnSelectedExtensionFilterChanged(string value) => ApplyFilters();
-    partial void OnSelectedModifiedWindowFilterChanged(string value) => ApplyFilters();
-    partial void OnSelectedSnapshotTagFilterChanged(string value) => ApplyFilters();
-    partial void OnMinSizeMbChanged(string value) => ApplyFilters();
-    partial void OnMaxSizeMbChanged(string value) => ApplyFilters();
+    partial void OnSearchQueryChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedRepositoryFilterChanged(GlobalSearchRepositoryFilterOptionViewModel? value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedTrackedFormatFilterChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedEntryTypeFilterChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedExtensionFilterChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedModifiedWindowFilterChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnSelectedSnapshotTagFilterChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnMinSizeMbChanged(string value) => ApplyFiltersIfNeeded();
+    partial void OnMaxSizeMbChanged(string value) => ApplyFiltersIfNeeded();
 
     public async Task LoadAsync(bool forceRefresh = false)
     {
         if (IsLoading || (!forceRefresh && (IsRefreshing || HasLoadedData)))
         {
             if (!forceRefresh)
-                ApplyFilters();
+                ApplyFiltersIfNeeded(debounce: false);
 
             return;
         }
 
+        var (requestId, ct) = BeginLoadRequest();
         var failedRepositories = new List<string>();
 
         try
@@ -203,35 +215,87 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             ErrorMessage = null;
             StatusMessage = string.Empty;
             LoadingStatusText = Loc.T("search.loading_prepare");
+            await Task.Yield();
 
-            var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var repositories = await SendIsolatedAsync(new GetAllRepositoriesQuery(), ct);
+            if (!IsLatestLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
             _repositorySource.Clear();
             _repositorySource.AddRange(repositories.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase));
 
             _entrySource.Clear();
             _snapshotSource.Clear();
-            for (var index = 0; index < _repositorySource.Count; index++)
-            {
-                var repository = _repositorySource[index];
-                LoadingStatusText = Loc.F("search.loading_progress_format", index + 1, _repositorySource.Count, repository.Name);
+            RebuildFilterOptions();
+            IsLoading = false;
+            await ApplyFiltersAsync(debounce: false);
 
+            var entryResults = new ConcurrentBag<IndexedEntry>();
+            var snapshotResults = new ConcurrentBag<IndexedSnapshot>();
+            var failedRepositoryNames = new ConcurrentBag<string>();
+            var concurrency = Math.Clamp(Environment.ProcessorCount, 2, MaxRepositoryLoadConcurrency);
+            var totalRepositories = _repositorySource.Count;
+            var completedRepositories = 0;
+            using var gate = new SemaphoreSlim(concurrency, concurrency);
+
+            var loadTasks = _repositorySource.Select(async repository =>
+            {
+                await gate.WaitAsync(ct);
                 try
                 {
-                    var entries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(repository.Id));
-                    _entrySource.AddRange(entries.Select(entry => new IndexedEntry(repository, entry)));
+                    var entriesTask = SendIsolatedAsync(new GetRepositoryLatestEntriesQuery(repository.Id), ct);
+                    var snapshotsTask = SendIsolatedAsync(new GetRepositorySnapshotHistoryQuery(repository.Id, 60), ct);
+                    await Task.WhenAll(entriesTask, snapshotsTask);
 
-                    var snapshots = await _mediator.Send(new GetRepositorySnapshotHistoryQuery(repository.Id, 60));
-                    _snapshotSource.AddRange(snapshots.Select(snapshot => new IndexedSnapshot(repository, snapshot)));
+                    foreach (var entry in await entriesTask)
+                        entryResults.Add(new IndexedEntry(repository, entry));
+
+                    foreach (var snapshot in await snapshotsTask)
+                        snapshotResults.Add(new IndexedSnapshot(repository, snapshot));
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
                 }
                 catch (Exception ex)
                 {
                     _log.LogWarning(ex, "Global search failed to load latest entries. RepositoryId {RepositoryId}", repository.Id);
-                    failedRepositories.Add(repository.Name);
+                    failedRepositoryNames.Add(repository.Name);
                 }
-            }
+                finally
+                {
+                    gate.Release();
+
+                    var completed = Interlocked.Increment(ref completedRepositories);
+                    if (IsLatestLoadRequest(requestId) && !ct.IsCancellationRequested)
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(() =>
+                        {
+                            LoadingStatusText = Loc.F(
+                                "search.loading_progress_format",
+                                Math.Min(completed, totalRepositories),
+                                totalRepositories,
+                                repository.Name);
+                        });
+                    }
+                }
+            }).ToList();
+
+            await Task.WhenAll(loadTasks);
+            if (!IsLatestLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
+            _entrySource.AddRange(entryResults
+                .OrderBy(row => row.Repository.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => row.Entry.RelativePath, StringComparer.OrdinalIgnoreCase));
+            _snapshotSource.AddRange(snapshotResults
+                .OrderBy(row => row.Repository.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(row => row.Snapshot.CreatedAtUtc));
+            failedRepositories.AddRange(failedRepositoryNames
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
 
             RebuildFilterOptions();
-            ApplyFilters();
+            await ApplyFiltersAsync(debounce: false);
             LastUpdatedText = Loc.F("search.last_updated_format", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             StatusMessage = Loc.F("search.refresh_done", _repositorySource.Count, _entrySource.Count);
 
@@ -243,23 +307,32 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                     string.Join(", ", failedRepositories.Take(3)));
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load global search index");
             ErrorMessage = Loc.T("search.load_failed");
-            RepositoryResults.Clear();
-            FileResults.Clear();
-            SnapshotResults.Clear();
-            _matchedRepositoryCount = 0;
-            _matchedFileCount = 0;
-            _matchedSnapshotCount = 0;
-            _fileResultsLimited = false;
-            NotifyResultStateChanged();
+            if (_repositorySource.Count == 0)
+            {
+                RepositoryResults.Clear();
+                FileResults.Clear();
+                SnapshotResults.Clear();
+                _matchedRepositoryCount = 0;
+                _matchedFileCount = 0;
+                _matchedSnapshotCount = 0;
+                _fileResultsLimited = false;
+                NotifyResultStateChanged();
+            }
         }
         finally
         {
-            LoadingStatusText = string.Empty;
-            IsLoading = false;
+            if (IsLatestLoadRequest(requestId))
+            {
+                LoadingStatusText = string.Empty;
+                IsLoading = false;
+            }
         }
     }
 
@@ -305,21 +378,35 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Back() => BackRequested?.Invoke();
+    private void Back()
+    {
+        CancelActiveLoad();
+        BackRequested?.Invoke();
+    }
 
     [RelayCommand]
     private void ClearFilters()
     {
-        SearchQuery = string.Empty;
-        SelectedRepositoryFilter = RepositoryFilters.FirstOrDefault();
-        SelectedTrackedFormatFilter = "all";
-        SelectedEntryTypeFilter = "all";
-        SelectedExtensionFilter = "all";
-        SelectedModifiedWindowFilter = "all";
-        SelectedSnapshotTagFilter = "all";
-        MinSizeMb = string.Empty;
-        MaxSizeMb = string.Empty;
+        _suppressFilterApply = true;
+        try
+        {
+            SearchQuery = string.Empty;
+            SelectedRepositoryFilter = RepositoryFilters.FirstOrDefault();
+            SelectedTrackedFormatFilter = "all";
+            SelectedEntryTypeFilter = "all";
+            SelectedExtensionFilter = "all";
+            SelectedModifiedWindowFilter = "all";
+            SelectedSnapshotTagFilter = "all";
+            MinSizeMb = string.Empty;
+            MaxSizeMb = string.Empty;
+        }
+        finally
+        {
+            _suppressFilterApply = false;
+        }
+
         StatusMessage = string.Empty;
+        ApplyFiltersIfNeeded(debounce: false);
     }
 
     [RelayCommand]
@@ -390,7 +477,18 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             });
     }
 
-    private void ApplyFilters()
+    private void ApplyFiltersIfNeeded(bool debounce = true)
+    {
+        if (_suppressFilterApply)
+            return;
+
+        ScheduleApplyFilters(debounce);
+    }
+
+    private void ScheduleApplyFilters(bool debounce = true)
+        => _ = ApplyFiltersAsync(debounce);
+
+    private async Task ApplyFiltersAsync(bool debounce = true)
     {
         var repositoryFilterId = SelectedRepositoryFilter?.RepositoryId;
         var trackedFormatFilter = NormalizeFilter(SelectedTrackedFormatFilter);
@@ -401,124 +499,194 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
         var textQuery = (SearchQuery ?? string.Empty).Trim();
         var minSizeMb = ParseNullableDouble(MinSizeMb);
         var maxSizeMb = ParseNullableDouble(MaxSizeMb);
+        var repositories = _repositorySource.ToArray();
+        var entries = _entrySource.ToArray();
+        var snapshots = _snapshotSource.ToArray();
+        var (requestId, ct) = BeginFilterRequest();
 
-        if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
-            (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
+        try
+        {
+            if (debounce)
+                await Task.Delay(FilterDebounceMs, ct);
 
-        var repositoryMatches = _repositorySource
-            .Where(repo => !repositoryFilterId.HasValue || repo.Id == repositoryFilterId.Value)
-            .Where(repo => trackedFormatFilter == "all" || repo.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
-            .Where(repo => MatchesRepositoryText(repo, textQuery))
-            .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            var result = await Task.Run(() =>
+            {
+                if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
+                    (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
 
-        RepositoryResults.Clear();
-        foreach (var repository in repositoryMatches)
-            RepositoryResults.Add(MapRepository(repository));
+                var repositoryMatches = repositories
+                    .Where(repo => !repositoryFilterId.HasValue || repo.Id == repositoryFilterId.Value)
+                    .Where(repo => trackedFormatFilter == "all" || repo.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
+                    .Where(repo => MatchesRepositoryText(repo, textQuery))
+                    .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
-        var snapshotMatches = _snapshotSource
-            .Where(row => !repositoryFilterId.HasValue || row.Repository.Id == repositoryFilterId.Value)
-            .Where(row => trackedFormatFilter == "all" || row.Repository.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
-            .Where(row => MatchesSnapshotText(row, textQuery))
-            .Where(row => MatchesSnapshotTag(row.Snapshot, snapshotTagFilter))
-            .Where(row => MatchesSnapshotWindow(row.Snapshot, modifiedWindowFilter))
-            .OrderByDescending(row => row.Snapshot.CreatedAtUtc)
-            .ToList();
+                var snapshotMatches = snapshots
+                    .Where(row => !repositoryFilterId.HasValue || row.Repository.Id == repositoryFilterId.Value)
+                    .Where(row => trackedFormatFilter == "all" || row.Repository.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
+                    .Where(row => MatchesSnapshotText(row, textQuery))
+                    .Where(row => MatchesSnapshotTag(row.Snapshot, snapshotTagFilter))
+                    .Where(row => MatchesSnapshotWindow(row.Snapshot, modifiedWindowFilter))
+                    .OrderByDescending(row => row.Snapshot.CreatedAtUtc)
+                    .ToList();
 
-        SnapshotResults.Clear();
-        foreach (var snapshot in snapshotMatches.Take(200))
-            SnapshotResults.Add(MapSnapshot(snapshot));
+                var fileMatches = entries
+                    .Where(row => !repositoryFilterId.HasValue || row.Repository.Id == repositoryFilterId.Value)
+                    .Where(row => trackedFormatFilter == "all" || row.Repository.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
+                    .Where(row => MatchesEntryText(row, textQuery))
+                    .Where(row => MatchesEntryType(row.Entry, entryTypeFilter))
+                    .Where(row => MatchesExtension(row.Entry, extensionFilter))
+                    .Where(row => MatchesModifiedWindow(row.Entry, modifiedWindowFilter))
+                    .Where(row => MatchesSize(row.Entry, minSizeMb, maxSizeMb))
+                    .OrderByDescending(row => row.Entry.LastWriteUtc)
+                    .ThenBy(row => row.Entry.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
-        var fileMatches = _entrySource
-            .Where(row => !repositoryFilterId.HasValue || row.Repository.Id == repositoryFilterId.Value)
-            .Where(row => trackedFormatFilter == "all" || row.Repository.LinkedFormats.Contains(trackedFormatFilter, StringComparer.OrdinalIgnoreCase))
-            .Where(row => MatchesEntryText(row, textQuery))
-            .Where(row => MatchesEntryType(row.Entry, entryTypeFilter))
-            .Where(row => MatchesExtension(row.Entry, extensionFilter))
-            .Where(row => MatchesModifiedWindow(row.Entry, modifiedWindowFilter))
-            .Where(row => MatchesSize(row.Entry, minSizeMb, maxSizeMb))
-            .OrderByDescending(row => row.Entry.LastWriteUtc)
-            .ThenBy(row => row.Entry.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+                return (RepositoryMatches: repositoryMatches, SnapshotMatches: snapshotMatches, FileMatches: fileMatches);
+            }, ct);
 
-        _matchedRepositoryCount = repositoryMatches.Count;
-        _matchedSnapshotCount = snapshotMatches.Count;
-        _matchedFileCount = fileMatches.Count;
-        _fileResultsLimited = fileMatches.Count > MaxVisibleFileResults;
+            if (!IsLatestFilterRequest(requestId) || ct.IsCancellationRequested)
+                return;
 
-        FileResults.Clear();
-        foreach (var row in fileMatches.Take(MaxVisibleFileResults))
-            FileResults.Add(MapEntry(row));
+            var repositoryResults = result.RepositoryMatches
+                .Select(MapRepository)
+                .ToList();
+            var snapshotResults = result.SnapshotMatches
+                .Take(200)
+                .Select(MapSnapshot)
+                .ToList();
+            var fileResults = result.FileMatches
+                .Take(MaxVisibleFileResults)
+                .Select(MapEntry)
+                .ToList();
 
-        NotifyResultStateChanged();
+            ReplaceCollectionIfChanged(RepositoryResults, repositoryResults);
+            ReplaceCollectionIfChanged(SnapshotResults, snapshotResults);
+
+            _matchedRepositoryCount = result.RepositoryMatches.Count;
+            _matchedSnapshotCount = result.SnapshotMatches.Count;
+            _matchedFileCount = result.FileMatches.Count;
+            _fileResultsLimited = result.FileMatches.Count > MaxVisibleFileResults;
+
+            ReplaceCollectionIfChanged(FileResults, fileResults);
+
+            NotifyResultStateChanged();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to apply global search filters");
+        }
     }
 
     private void RebuildFilterOptions()
     {
-        RebuildRepositoryFilterOptions();
+        _suppressFilterApply = true;
+        try
+        {
+            RebuildRepositoryFilterOptions();
 
-        var selectedTrackedFormat = NormalizeFilter(SelectedTrackedFormatFilter);
-        var trackedFormats = _repositorySource
-            .SelectMany(repo => repo.LinkedFormats)
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            var selectedTrackedFormat = NormalizeFilter(SelectedTrackedFormatFilter);
+            var trackedFormats = _repositorySource
+                .SelectMany(repo => repo.LinkedFormats)
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        TrackedFormatFilters.Clear();
-        TrackedFormatFilters.Add("all");
-        foreach (var trackedFormat in trackedFormats)
-            TrackedFormatFilters.Add(trackedFormat);
-        SelectedTrackedFormatFilter = TrackedFormatFilters.Contains(selectedTrackedFormat, StringComparer.OrdinalIgnoreCase)
-            ? selectedTrackedFormat
-            : "all";
+            ReplaceCollectionIfChanged(
+                TrackedFormatFilters,
+                ["all", .. trackedFormats]);
+            SelectedTrackedFormatFilter = TrackedFormatFilters.Contains(selectedTrackedFormat, StringComparer.OrdinalIgnoreCase)
+                ? selectedTrackedFormat
+                : "all";
 
-        var selectedExtension = NormalizeExtensionFilter(SelectedExtensionFilter);
-        var extensions = _entrySource
-            .Where(row => !row.Entry.IsDirectory)
-            .Select(row => NormalizeExtensionFilter(row.Entry.Extension ?? string.Empty))
-            .Where(value => value != "all")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            var selectedExtension = NormalizeExtensionFilter(SelectedExtensionFilter);
+            var extensions = _entrySource
+                .Where(row => !row.Entry.IsDirectory)
+                .Select(row => NormalizeExtensionFilter(row.Entry.Extension ?? string.Empty))
+                .Where(value => value != "all")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        ExtensionFilters.Clear();
-        ExtensionFilters.Add("all");
-        foreach (var extension in extensions)
-            ExtensionFilters.Add(extension);
-        SelectedExtensionFilter = ExtensionFilters.Contains(selectedExtension, StringComparer.OrdinalIgnoreCase)
-            ? selectedExtension
-            : "all";
+            ReplaceCollectionIfChanged(
+                ExtensionFilters,
+                ["all", .. extensions]);
+            SelectedExtensionFilter = ExtensionFilters.Contains(selectedExtension, StringComparer.OrdinalIgnoreCase)
+                ? selectedExtension
+                : "all";
 
-        var selectedSnapshotTag = NormalizeTagFilter(SelectedSnapshotTagFilter);
-        var snapshotTags = _snapshotSource
-            .SelectMany(row => row.Snapshot.Tags ?? Array.Empty<string>())
-            .Select(NormalizeTagFilter)
-            .Where(value => value != "all")
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            var selectedSnapshotTag = NormalizeTagFilter(SelectedSnapshotTagFilter);
+            var snapshotTags = _snapshotSource
+                .SelectMany(row => row.Snapshot.Tags ?? Array.Empty<string>())
+                .Select(NormalizeTagFilter)
+                .Where(value => value != "all")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-        SnapshotTagFilters.Clear();
-        SnapshotTagFilters.Add("all");
-        foreach (var tag in snapshotTags)
-            SnapshotTagFilters.Add(tag);
-        SelectedSnapshotTagFilter = SnapshotTagFilters.Contains(selectedSnapshotTag, StringComparer.OrdinalIgnoreCase)
-            ? selectedSnapshotTag
-            : "all";
+            ReplaceCollectionIfChanged(
+                SnapshotTagFilters,
+                ["all", .. snapshotTags]);
+            SelectedSnapshotTagFilter = SnapshotTagFilters.Contains(selectedSnapshotTag, StringComparer.OrdinalIgnoreCase)
+                ? selectedSnapshotTag
+                : "all";
+        }
+        finally
+        {
+            _suppressFilterApply = false;
+        }
     }
 
     private void RebuildRepositoryFilterOptions()
     {
         var selectedRepositoryId = SelectedRepositoryFilter?.RepositoryId;
-        RepositoryFilters.Clear();
-        RepositoryFilters.Add(new GlobalSearchRepositoryFilterOptionViewModel(null, Loc.T("filter.option.all")));
-        foreach (var repository in _repositorySource.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
-            RepositoryFilters.Add(new GlobalSearchRepositoryFilterOptionViewModel(repository.Id, repository.Name));
+        var options = new List<GlobalSearchRepositoryFilterOptionViewModel>(_repositorySource.Count + 1)
+        {
+            new(null, Loc.T("filter.option.all"))
+        };
+
+        options.AddRange(_repositorySource
+            .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(repository => new GlobalSearchRepositoryFilterOptionViewModel(repository.Id, repository.Name)));
+
+        ReplaceCollectionIfChanged(RepositoryFilters, options);
 
         SelectedRepositoryFilter = RepositoryFilters.FirstOrDefault(option => option.RepositoryId == selectedRepositoryId)
             ?? RepositoryFilters.FirstOrDefault();
+    }
+
+    private static void ReplaceCollectionIfChanged<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items)
+    {
+        if (CollectionEquals(collection, items))
+            return;
+
+        collection.Clear();
+        foreach (var item in items)
+            collection.Add(item);
+    }
+
+    private static bool CollectionEquals<T>(
+        IReadOnlyList<T> current,
+        IReadOnlyList<T> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        var comparer = EqualityComparer<T>.Default;
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (!comparer.Equals(current[i], next[i]))
+                return false;
+        }
+
+        return true;
     }
 
     private void NotifyResultStateChanged()
@@ -534,7 +702,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RebuildRepositoryFilterOptions();
-        ApplyFilters();
+        ApplyFiltersIfNeeded(debounce: false);
         if (string.IsNullOrWhiteSpace(LoadingStatusText))
             LastUpdatedText = HasLoadedData
                 ? Loc.F("search.last_updated_format", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
@@ -578,6 +746,51 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             TransientActionDetail = string.Empty;
         }
     }
+
+    private (long RequestId, CancellationToken Token) BeginLoadRequest()
+    {
+        CancelActiveFilter();
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _loadCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        var requestId = Interlocked.Increment(ref _loadRequestId);
+        return (requestId, cts.Token);
+    }
+
+    private (long RequestId, CancellationToken Token) BeginFilterRequest()
+    {
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _filterCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        var requestId = Interlocked.Increment(ref _filterRequestId);
+        return (requestId, cts.Token);
+    }
+
+    private void CancelActiveLoad()
+    {
+        var cts = Interlocked.Exchange(ref _loadCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
+        CancelActiveFilter();
+    }
+
+    private bool IsLatestLoadRequest(long requestId)
+        => requestId == Interlocked.Read(ref _loadRequestId);
+
+    private bool IsLatestFilterRequest(long requestId)
+        => requestId == Interlocked.Read(ref _filterRequestId);
+
+    private void CancelActiveFilter()
+    {
+        var cts = Interlocked.Exchange(ref _filterCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+
+    private Task<TResponse> SendIsolatedAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
+        => _scopeExecutor.ExecuteAsync<IMediator, TResponse>((mediator, token) => mediator.Send(request, token), ct);
 
     private GlobalSearchRepositoryResultItemViewModel MapRepository(RepositoryDto repository)
     {

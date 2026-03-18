@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -322,6 +323,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         var serializationTimer = Stopwatch.StartNew();
         var requestPayloadBytes = JsonSerializer.SerializeToUtf8Bytes(requestPayload, JsonOptions);
         serializationTimer.Stop();
+        var effectiveIdempotencyKey = BuildEffectiveIdempotencyKey(idempotencyKey, requestPayloadBytes);
 
         _log.LogInformation(
             "Cloud snapshot push started. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Entries {Entries}. FileVersions {FileVersions}. Blocks {Blocks}. IdempotencyKey {IdempotencyKey}. PayloadSha {PayloadSha}. BuildMs {BuildMs}. SerializeMs {SerializeMs}. PayloadBytes {PayloadBytes}",
@@ -330,13 +332,13 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             package.Entries.Count,
             package.FileVersions.Count,
             blockCount,
-            idempotencyKey ?? "(none)",
+            effectiveIdempotencyKey ?? "(none)",
             package.Snapshot.PayloadSha256 ?? "(none)",
             requestBuildTimer.ElapsedMilliseconds,
             serializationTimer.ElapsedMilliseconds,
             requestPayloadBytes.Length);
 
-        var first = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, idempotencyKey, ct);
+        var first = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, effectiveIdempotencyKey, ct);
         if (first is null)
             return null;
 
@@ -346,9 +348,9 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             package.Snapshot.Id,
             first.MissingBlockHashes.Count);
 
-        if (_fault.DuplicateAckOnPush && !string.IsNullOrWhiteSpace(idempotencyKey))
+        if (_fault.DuplicateAckOnPush && !string.IsNullOrWhiteSpace(effectiveIdempotencyKey))
         {
-            var replay = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, idempotencyKey, ct);
+            var replay = await SendPushSnapshotRequestAsync(accessToken, repositoryId, requestPayload, requestPayloadBytes, effectiveIdempotencyKey, ct);
             if (replay is not null && !first.MissingBlockHashes.SequenceEqual(replay.MissingBlockHashes, StringComparer.OrdinalIgnoreCase))
             {
                 _log.LogWarning(
@@ -360,6 +362,22 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         }
 
         return first;
+    }
+
+    private static string? BuildEffectiveIdempotencyKey(string? baseIdempotencyKey, byte[] requestPayloadBytes)
+    {
+        if (string.IsNullOrWhiteSpace(baseIdempotencyKey))
+            return null;
+
+        var normalizedBaseKey = baseIdempotencyKey.Trim();
+        var payloadDigest = Convert.ToHexString(SHA256.HashData(requestPayloadBytes)).ToLowerInvariant();
+        var suffix = payloadDigest[..16];
+        var maxBaseLength = Math.Max(16, 120 - suffix.Length - 2);
+
+        if (normalizedBaseKey.Length > maxBaseLength)
+            normalizedBaseKey = normalizedBaseKey[..maxBaseLength];
+
+        return $"{normalizedBaseKey}-b{suffix}";
     }
 
     public async Task<bool> BlockExistsAsync(string accessToken, string blockHash, CancellationToken ct = default)
@@ -1134,5 +1152,4 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         }
     }
 }
-
 

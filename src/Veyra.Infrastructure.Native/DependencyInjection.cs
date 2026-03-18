@@ -7,6 +7,7 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Services;
 using Veyra.Infrastructure.Native.Diagnostics;
 using Veyra.Infrastructure.Native.Diffing;
+using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Scanning;
 using Veyra.Infrastructure.Native.Security;
 using Veyra.Infrastructure.Native.Setup;
@@ -21,6 +22,7 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddSingleton<INativeSetupApplier, NativeSetupApplier>();
+        services.AddSingleton<INativeExecutionScheduler, NativeExecutionScheduler>();
 
         services.AddSingleton<ArtifactMasterKeyStore>();
         services.AddSingleton<ArtifactKeyManagementService>();
@@ -33,11 +35,13 @@ public static class DependencyInjection
         services.AddScoped<ITextDiffEngine>(sp =>
             new RustTextDiffEngine(
                 sp.GetRequiredService<ManagedTextDiffEngine>(),
+                sp.GetRequiredService<INativeExecutionScheduler>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RustTextDiffEngine>>()));
 
         services.AddScoped<ISnapshotComparisonEngine>(sp =>
             new RustSnapshotComparisonEngine(
                 sp.GetRequiredService<ManagedSnapshotComparisonEngine>(),
+                sp.GetRequiredService<INativeExecutionScheduler>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RustSnapshotComparisonEngine>>()));
 
         services.AddScoped<IRepositoryScanner, RustRepositoryScanner>();

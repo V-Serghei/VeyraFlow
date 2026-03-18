@@ -41,6 +41,11 @@ public sealed class LoginCommandHandler(
             logger.LogInformation("User profile saved locally for {Username}", session.Username);
             return OperationResult.Ok();
         }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogWarning(ex, "Login rejected for user {Username}", request.Username);
+            return OperationResult.Fail(ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Login failed for user {Username} due to an exception", request.Username);

@@ -19,15 +19,15 @@ public sealed class RetentionDefaultsStore : IRetentionDefaultsStore
         _settingsPath = Path.Combine(root, "retention-defaults.json");
     }
 
-    public async Task<RetentionDefaultsUserSettings?> LoadAsync(CancellationToken ct = default)
+    public RetentionDefaultsUserSettings? Load()
     {
         try
         {
             if (!File.Exists(_settingsPath))
                 return null;
 
-            await using var stream = File.OpenRead(_settingsPath);
-            var model = await JsonSerializer.DeserializeAsync<RetentionDefaultsUserSettings>(stream, cancellationToken: ct);
+            var json = File.ReadAllText(_settingsPath);
+            var model = JsonSerializer.Deserialize<RetentionDefaultsUserSettings>(json);
             if (model is null)
                 return null;
 
@@ -44,6 +44,9 @@ public sealed class RetentionDefaultsStore : IRetentionDefaultsStore
             return null;
         }
     }
+
+    public Task<RetentionDefaultsUserSettings?> LoadAsync(CancellationToken ct = default)
+        => Task.FromResult(Load());
 
     public async Task SaveAsync(RetentionDefaultsUserSettings settings, CancellationToken ct = default)
     {

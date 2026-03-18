@@ -30,11 +30,13 @@ public sealed class RepairRepositoryDataHandler(
         }
         catch (Exception ex)
         {
+            var failureMessage = ex.InnerException is not null
+                ? $"{ex.Message} Inner: {ex.InnerException.Message}"
+                : ex.Message;
             log.LogError(ex,
                 "Repair repository command failed. RepositoryId {RepositoryId}",
                 request.RepositoryId);
-            return OperationResult<RepositoryRecoveryResultDto>.Fail(ex.Message);
+            return OperationResult<RepositoryRecoveryResultDto>.Fail(failureMessage);
         }
     }
 }
-

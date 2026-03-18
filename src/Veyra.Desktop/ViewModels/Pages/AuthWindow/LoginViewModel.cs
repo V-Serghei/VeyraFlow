@@ -13,6 +13,7 @@ public partial class LoginViewModel : ObservableObject
     private readonly IMediator _mediator;
 
     public event System.Action<bool>? AuthCompleted;
+    public event System.Action? GuestModeRequested;
 
     [ObservableProperty] private string _username = string.Empty;
     [ObservableProperty] private string _email = string.Empty;
@@ -25,6 +26,7 @@ public partial class LoginViewModel : ObservableObject
     public IAsyncRelayCommand LoginCommand { get; }
     public IAsyncRelayCommand RegisterCommand { get; }
     public IRelayCommand ToggleModeCommand { get; }
+    public IRelayCommand ContinueAsGuestCommand { get; }
 
     public string ActionTitle => IsRegisterMode ? Loc.T("login.action_title_register") : Loc.T("login.action_title_sign_in");
     public string SubmitLabel => IsRegisterMode ? Loc.T("auth.register") : Loc.T("auth.sign_in");
@@ -33,6 +35,8 @@ public partial class LoginViewModel : ObservableObject
     public string ToggleLabel => IsRegisterMode
         ? Loc.T("login.toggle_to_sign_in")
         : Loc.T("login.toggle_to_register");
+    public string GuestModeLabel => Loc.T("login.continue_as_guest");
+    public string GuestModeHint => Loc.T("login.guest_mode_hint");
 
     public LoginViewModel(IMediator mediator)
     {
@@ -40,6 +44,7 @@ public partial class LoginViewModel : ObservableObject
         LoginCommand = new AsyncRelayCommand(DoLoginAsync);
         RegisterCommand = new AsyncRelayCommand(DoRegisterAsync);
         ToggleModeCommand = new RelayCommand(ToggleMode);
+        ContinueAsGuestCommand = new RelayCommand(ContinueAsGuest);
 
         LocalizationManager.Instance.LanguageChanged += (_, _) =>
         {
@@ -48,6 +53,8 @@ public partial class LoginViewModel : ObservableObject
             OnPropertyChanged(nameof(BusyTitle));
             OnPropertyChanged(nameof(BusyDetail));
             OnPropertyChanged(nameof(ToggleLabel));
+            OnPropertyChanged(nameof(GuestModeLabel));
+            OnPropertyChanged(nameof(GuestModeHint));
         };
     }
 
@@ -64,6 +71,15 @@ public partial class LoginViewModel : ObservableObject
     private void ToggleMode()
     {
         IsRegisterMode = !IsRegisterMode;
+    }
+
+    private void ContinueAsGuest()
+    {
+        if (IsBusy)
+            return;
+
+        Error = string.Empty;
+        GuestModeRequested?.Invoke();
     }
 
     private async Task DoLoginAsync()

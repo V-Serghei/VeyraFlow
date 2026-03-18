@@ -438,7 +438,7 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<bool>("AutoCaptureFileVersions")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(true);
+                        .HasDefaultValue(false);
 
                     b.Property<long?>("CloudLastLocalSnapshotId")
                         .HasColumnType("INTEGER");

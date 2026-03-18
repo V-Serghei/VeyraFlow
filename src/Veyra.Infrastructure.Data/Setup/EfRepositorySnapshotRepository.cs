@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
 using Veyra.Application.Services.Diff;
@@ -28,6 +29,10 @@ public sealed class EfRepositorySnapshotRepository(
     private const int ManagedPreviewChunkSize = 64 * 1024;
     private const int SnapshotEntryInsertBatchSize = 64;
     private const int SnapshotFileLinkInsertBatchSize = 128;
+    private const int SnapshotComparisonMaxConcurrency = 8;
+    private static readonly SemaphoreSlim[] TextDiffSaveStripes = Enumerable.Range(0, 64)
+        .Select(_ => new SemaphoreSlim(1, 1))
+        .ToArray();
 
     private static readonly JsonSerializerOptions DiffJsonOptions = new();
 
@@ -108,18 +113,55 @@ public sealed class EfRepositorySnapshotRepository(
             .Select(s => s.Id)
             .FirstOrDefaultAsync(ct);
 
-        var previousFilesByPath = previousSnapshotId == 0
-            ? new Dictionary<string, (string? Hash, long SizeBytes, string Name, DateTime LastWriteUtc)>(StringComparer.OrdinalIgnoreCase)
+        var previousEntriesByPath = previousSnapshotId == 0
+            ? new Dictionary<string, RepositoryScanEntryDto>(StringComparer.OrdinalIgnoreCase)
             : await db.Set<RepositorySnapshotEntry>()
-                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == previousSnapshotId && !e.IsDirectory && !e.IsDeleted)
+                .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == previousSnapshotId && !e.IsDeleted)
                 .ToDictionaryAsync(
                     e => e.RelativePath,
-                    e => (Hash: e.ContentHashSha256, SizeBytes: e.SizeBytes, Name: e.Name, LastWriteUtc: e.LastWriteUtc),
+                    e => new RepositoryScanEntryDto(
+                        e.RelativePath,
+                        e.ParentRelativePath,
+                        e.Name,
+                        e.IsDirectory,
+                        e.Extension,
+                        e.SizeBytes,
+                        e.LastWriteUtc,
+                        e.ContentHashSha256),
                     StringComparer.OrdinalIgnoreCase,
                     ct);
+        var previousFilesByPath = previousEntriesByPath.Values
+            .Where(e => !e.IsDirectory)
+            .ToDictionary(
+                e => e.RelativePath,
+                e => (Hash: e.ContentHashSha256, SizeBytes: e.SizeBytes, Name: e.Name, LastWriteUtc: e.LastWriteUtc),
+                StringComparer.OrdinalIgnoreCase);
         var currentFilesByPath = entries
             .Where(e => !e.IsDirectory)
             .ToDictionary(e => e.RelativePath, e => e, StringComparer.OrdinalIgnoreCase);
+        if (!saveFileVersions && previousSnapshotId > 0)
+        {
+            var currentEntriesByPath = entries.ToDictionary(e => e.RelativePath, e => e, StringComparer.OrdinalIgnoreCase);
+            if (!HasEntryChanges(currentEntriesByPath, previousEntriesByPath))
+            {
+                preparationMs = stageTimer.ElapsedMilliseconds;
+                repo.FileCount = fileEntries;
+                repo.TotalSizeBytes = totalFileBytes;
+                repo.LastScannedAt = scannedAtUtc;
+                repo.UpdatedAt = scannedAtUtc;
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                log.LogInformation(
+                    "Working snapshot skipped (no changes). RepositoryId {RepositoryId}. Entries {Entries}. Files {Files}. Trigger {Trigger}. PreparationMs {PreparationMs}. TotalMs {TotalMs}",
+                    repositoryId,
+                    totalEntries,
+                    fileEntries,
+                    safeTrigger,
+                    preparationMs,
+                    overallTimer.ElapsedMilliseconds);
+                return SnapshotSaveResultDto.NoChanges();
+            }
+        }
         if (saveFileVersions && previousSnapshotId > 0)
         {
             var currentStates = currentFilesByPath.Values
@@ -159,6 +201,9 @@ public sealed class EfRepositorySnapshotRepository(
             }
         }
         preparationMs = stageTimer.ElapsedMilliseconds;
+
+        if (!saveFileVersions)
+            await DeleteWorkingSnapshotsAsync(repositoryId, ct);
 
         var snapshot = new RepositorySnapshot
         {
@@ -669,10 +714,52 @@ public sealed class EfRepositorySnapshotRepository(
         return name;
     }
 
+    private async Task DeleteWorkingSnapshotsAsync(int repositoryId, CancellationToken ct)
+    {
+        var workingSnapshotIds = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => !db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        if (workingSnapshotIds.Count == 0)
+            return;
+
+        await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repositoryId && workingSnapshotIds.Contains(e.SnapshotId) && !e.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+
+        await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && workingSnapshotIds.Contains(s.Id) && !s.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+    }
+
+    private static bool HasEntryChanges(
+        IReadOnlyDictionary<string, RepositoryScanEntryDto> currentEntriesByPath,
+        IReadOnlyDictionary<string, RepositoryScanEntryDto> previousEntriesByPath)
+    {
+        if (currentEntriesByPath.Count != previousEntriesByPath.Count)
+            return true;
+
+        foreach (var entry in currentEntriesByPath)
+        {
+            if (!previousEntriesByPath.TryGetValue(entry.Key, out var previousEntry))
+                return true;
+
+            if (previousEntry != entry.Value)
+                return true;
+        }
+
+        return false;
+    }
+
     public async Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
         int repositoryId,
         CancellationToken ct = default)
     {
+        if (repositoryId <= 0)
+            return Array.Empty<RepositoryScanEntryDto>();
+
         var snapshotId = await db.Set<RepositorySnapshot>()
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .OrderByDescending(s => s.CreatedAt)
@@ -711,19 +798,53 @@ public sealed class EfRepositorySnapshotRepository(
 
         var identity = await db.Set<FileIdentity>()
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath && !i.Repository.IsDeleted, ct);
+            .AsNoTracking()
+            .Where(i => i.RepositoryId == repositoryId && i.RelativePath == normalizedPath && !i.Repository.IsDeleted)
+            .Select(i => new { i.Id, i.RelativePath, i.Extension })
+            .FirstOrDefaultAsync(ct);
 
         if (identity is null)
             return Array.Empty<FileVersionInfoDto>();
 
         var limit = Math.Clamp(take, 1, 500);
 
-        return await db.Set<FileVersion>()
+        var versions = await db.Set<FileVersion>()
             .IgnoreQueryFilters()
+            .AsNoTracking()
             .Where(v => v.FileIdentityId == identity.Id && !v.IsDeleted)
             .OrderByDescending(v => v.CreatedAt)
             .ThenByDescending(v => v.Id)
             .Take(limit)
+            .Select(v => new
+            {
+                v.Id,
+                v.CreatedAt,
+                v.SizeBytes,
+                v.IsDeletionMarker,
+                v.ContentHashSha256
+            })
+            .ToListAsync(ct);
+
+        if (versions.Count == 0)
+            return Array.Empty<FileVersionInfoDto>();
+
+        var nonEmptyVersionIds = versions
+            .Where(v => v.SizeBytes > 0)
+            .Select(v => v.Id)
+            .ToList();
+
+        var versionIdsWithBlocks = nonEmptyVersionIds.Count == 0
+            ? []
+            : await db.Set<FileVersionBlock>()
+                .AsNoTracking()
+                .Where(b => !b.IsDeleted && nonEmptyVersionIds.Contains(b.FileVersionId))
+                .Select(b => b.FileVersionId)
+                .Distinct()
+                .ToListAsync(ct);
+
+        var blockLookup = versionIdsWithBlocks.ToHashSet();
+
+        return versions
             .Select(v => new FileVersionInfoDto(
                 v.Id,
                 identity.RelativePath,
@@ -732,8 +853,8 @@ public sealed class EfRepositorySnapshotRepository(
                 v.SizeBytes,
                 v.IsDeletionMarker,
                 v.ContentHashSha256,
-                v.SizeBytes == 0 || v.Blocks.Any()))
-            .ToListAsync(ct);
+                v.SizeBytes == 0 || blockLookup.Contains(v.Id)))
+            .ToList();
     }
 
     public async Task<RepositoryPendingChangesDto> GetPendingChangesAsync(
@@ -754,7 +875,25 @@ public sealed class EfRepositorySnapshotRepository(
         if (latestSnapshot is null)
             return RepositoryPendingChangesDto.Empty;
 
-        var currentFiles = await db.Set<RepositorySnapshotEntry>()
+        var baselineSnapshot = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new { s.Id, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+
+        if (baselineSnapshot?.Id == latestSnapshot.Id)
+        {
+            return new RepositoryPendingChangesDto(
+                baselineSnapshot.CreatedAt,
+                0,
+                0,
+                0,
+                Array.Empty<RepositoryPendingChangeEntryDto>());
+        }
+
+        var currentFilesTask = db.Set<RepositorySnapshotEntry>()
             .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == latestSnapshot.Id && !e.IsDirectory && !e.IsDeleted)
             .Select(e => new SnapshotEntryLight(
                 e.RelativePath,
@@ -764,17 +903,9 @@ public sealed class EfRepositorySnapshotRepository(
                 e.ContentHashSha256))
             .ToListAsync(ct);
 
-        var baselineSnapshot = await db.Set<RepositorySnapshot>()
-            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
-            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
-            .OrderByDescending(s => s.CreatedAt)
-            .ThenByDescending(s => s.Id)
-            .Select(s => new { s.Id, s.CreatedAt })
-            .FirstOrDefaultAsync(ct);
-
-        var baselineFiles = baselineSnapshot is null
-            ? []
-            : await db.Set<RepositorySnapshotEntry>()
+        Task<List<SnapshotEntryLight>> baselineFilesTask = baselineSnapshot is null
+            ? Task.FromResult(new List<SnapshotEntryLight>())
+            : db.Set<RepositorySnapshotEntry>()
                 .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == baselineSnapshot.Id && !e.IsDirectory && !e.IsDeleted)
                 .Select(e => new SnapshotEntryLight(
                     e.RelativePath,
@@ -783,6 +914,10 @@ public sealed class EfRepositorySnapshotRepository(
                     e.LastWriteUtc,
                     e.ContentHashSha256))
                 .ToListAsync(ct);
+
+        await Task.WhenAll(currentFilesTask, baselineFilesTask);
+        var currentFiles = await currentFilesTask;
+        var baselineFiles = await baselineFilesTask;
 
         var currentStates = currentFiles
             .Select(ToRepositoryPathStateDto)
@@ -849,30 +984,51 @@ public sealed class EfRepositorySnapshotRepository(
                 g => g.Key,
                 g => (IReadOnlyList<SnapshotLinkStateDto>)g.Select(ToSnapshotLinkStateDto).ToList());
 
-        var result = new List<RepositorySnapshotHistoryItemDto>(Math.Min(limit, snapshots.Count));
+        var pairs = snapshots
+            .Take(limit)
+            .Select((current, index) => new
+            {
+                current,
+                previous = index + 1 < snapshots.Count ? snapshots[index + 1] : null,
+                index
+            })
+            .ToList();
 
-        for (var i = 0; i < snapshots.Count && result.Count < limit; i++)
+        var result = new RepositorySnapshotHistoryItemDto?[pairs.Count];
+        var concurrency = Math.Clamp(Environment.ProcessorCount, 2, SnapshotComparisonMaxConcurrency);
+        using var gate = new SemaphoreSlim(concurrency, concurrency);
+
+        var comparisonTasks = pairs.Select(async pair =>
         {
-            var current = snapshots[i];
-            var previous = i + 1 < snapshots.Count ? snapshots[i + 1] : null;
+            await gate.WaitAsync(ct);
+            try
+            {
+                var currentStates = statesBySnapshot.GetValueOrDefault(pair.current.SnapshotId, EmptySnapshotLinkStates);
+                var previousStates = pair.previous is null
+                    ? EmptySnapshotLinkStates
+                    : statesBySnapshot.GetValueOrDefault(pair.previous.SnapshotId, EmptySnapshotLinkStates);
 
-            var currentStates = statesBySnapshot.GetValueOrDefault(current.SnapshotId, EmptySnapshotLinkStates);
-            var previousStates = previous is null
-                ? EmptySnapshotLinkStates
-                : statesBySnapshot.GetValueOrDefault(previous.SnapshotId, EmptySnapshotLinkStates);
+                var comparison = await snapshotComparison.CompareSnapshotLinksAsync(currentStates, previousStates, ct);
+                result[pair.index] = new RepositorySnapshotHistoryItemDto(
+                    pair.current.SnapshotId,
+                    pair.current.Title,
+                    pair.current.CreatedAtUtc,
+                    pair.current.Trigger,
+                    comparison.ChangedFilesCount,
+                    ParseSnapshotTags(pair.current.TagsCsv));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
 
-            var comparison = await snapshotComparison.CompareSnapshotLinksAsync(currentStates, previousStates, ct);
+        await Task.WhenAll(comparisonTasks);
 
-            result.Add(new RepositorySnapshotHistoryItemDto(
-                current.SnapshotId,
-                current.Title,
-                current.CreatedAtUtc,
-                current.Trigger,
-                comparison.ChangedFilesCount,
-                ParseSnapshotTags(current.TagsCsv)));
-        }
-
-        return result;
+        return result
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<RepositorySnapshotFileChangeDto>> GetSnapshotChangedFilesAsync(
@@ -886,21 +1042,24 @@ public sealed class EfRepositorySnapshotRepository(
 
         var limit = Math.Clamp(take, 1, 5000);
 
-        var versionedSnapshotIds = await db.Set<RepositorySnapshot>()
+        var currentSnapshot = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && s.Id == snapshotId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .Select(s => new { s.Id, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+
+        if (currentSnapshot is null)
+            return Array.Empty<RepositorySnapshotFileChangeDto>();
+
+        var previousSnapshotId = await db.Set<RepositorySnapshot>()
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .Where(s => s.CreatedAt < currentSnapshot.CreatedAt
+                        || (s.CreatedAt == currentSnapshot.CreatedAt && s.Id < currentSnapshot.Id))
             .OrderByDescending(s => s.CreatedAt)
             .ThenByDescending(s => s.Id)
             .Select(s => s.Id)
-            .ToListAsync(ct);
-
-        var index = versionedSnapshotIds.FindIndex(id => id == snapshotId);
-        if (index < 0)
-            return Array.Empty<RepositorySnapshotFileChangeDto>();
-
-        var previousSnapshotId = index + 1 < versionedSnapshotIds.Count
-            ? versionedSnapshotIds[index + 1]
-            : 0;
+            .FirstOrDefaultAsync(ct);
 
         var currentRows = await db.Set<SnapshotFileLink>()
             .IgnoreQueryFilters()
@@ -1023,14 +1182,6 @@ public sealed class EfRepositorySnapshotRepository(
 
         try
         {
-
-            var currentDigest = await ComputeCurrentFileDigestAsync(absolutePath, ManagedPreviewChunkSize, ct);
-            var binarySummary = BuildPendingBinarySummary(
-                baselineVersion.SizeBytes,
-                baselineVersion.ContentHashSha256,
-                baselineBlocks,
-                currentDigest);
-
             if (CanBuildTextDiff(extension))
             {
                 var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-diff-preview");
@@ -1073,6 +1224,13 @@ public sealed class EfRepositorySnapshotRepository(
                     TryDelete(baselineTemp);
                 }
             }
+
+            var currentDigest = await ComputeCurrentFileDigestAsync(absolutePath, ManagedPreviewChunkSize, ct);
+            var binarySummary = BuildPendingBinarySummary(
+                baselineVersion.SizeBytes,
+                baselineVersion.ContentHashSha256,
+                baselineBlocks,
+                currentDigest);
 
             if (IsImageExtension(extension))
             {
@@ -1250,13 +1408,9 @@ public sealed class EfRepositorySnapshotRepository(
 
         try
         {
-            await RestoreVersionToTempAsync(left, leftTemp, ct);
-            await RestoreVersionToTempAsync(right, rightTemp, ct);
-
-            var byteSimilarity = await ComputeByteSimilarityAsync(leftTemp, rightTemp, ct);
-
-            var binarySummary = BuildVersionBinarySummary(left, right)
-                with { ByteSimilarityRatio = byteSimilarity };
+            await Task.WhenAll(
+                RestoreVersionToTempAsync(left, leftTemp, ct),
+                RestoreVersionToTempAsync(right, rightTemp, ct));
 
             if (CanBuildTextDiff(extension))
             {
@@ -1304,8 +1458,13 @@ public sealed class EfRepositorySnapshotRepository(
                     removedLines: diff.RemovedLines,
                     isTruncated: diff.IsTruncated,
                     lines: diff.Lines,
-                    hunks: diff.Hunks);
+                        hunks: diff.Hunks);
             }
+
+            var byteSimilarity = await ComputeByteSimilarityAsync(leftTemp, rightTemp, ct);
+
+            var binarySummary = BuildVersionBinarySummary(left, right)
+                with { ByteSimilarityRatio = byteSimilarity };
 
             if (IsImageExtension(extension))
             {
@@ -1444,16 +1603,32 @@ public sealed class EfRepositorySnapshotRepository(
             return null;
         }
 
-        var lineRows = await db.Set<FileVersionTextDiffLine>()
-            .AsNoTracking()
-            .Where(l => l.DiffId == row.Id && !l.IsDeleted)
-            .OrderBy(l => l.Sequence)
-            .Select(l => new TextDiffLineDto(
-                l.Kind,
-                l.LeftLineNumber,
-                l.RightLineNumber,
-                l.TextLineAtom.Text))
-            .ToListAsync(ct);
+        List<TextDiffLineDto>? lineRows = null;
+        if (!string.IsNullOrWhiteSpace(row.LinesJson))
+        {
+            try
+            {
+                lineRows = JsonSerializer.Deserialize<List<TextDiffLineDto>>(row.LinesJson, DiffJsonOptions);
+            }
+            catch (JsonException)
+            {
+                lineRows = null;
+            }
+        }
+
+        if (lineRows is null)
+        {
+            lineRows = await db.Set<FileVersionTextDiffLine>()
+                .AsNoTracking()
+                .Where(l => l.DiffId == row.Id && !l.IsDeleted)
+                .OrderBy(l => l.Sequence)
+                .Select(l => new TextDiffLineDto(
+                    l.Kind,
+                    l.LeftLineNumber,
+                    l.RightLineNumber,
+                    l.TextLineAtom.Text))
+                .ToListAsync(ct);
+        }
 
         if (lineRows.Count == 0)
         {
@@ -1537,176 +1712,187 @@ public sealed class EfRepositorySnapshotRepository(
             return;
 
         var normalizedMaxLines = NormalizeMaxLines(maxLines);
-        var normalizedLines = (diff.Lines ?? Array.Empty<TextDiffLineDto>())
-            .Select(line => new TextDiffLineDto(
-                NormalizeDiffKind(line.Kind),
-                line.LeftLineNumber,
-                line.RightLineNumber,
-                line.Text ?? string.Empty))
-            .ToList();
+        var saveLock = GetTextDiffSaveStripe(diff.LeftFileVersionId, diff.RightFileVersionId, normalizedMaxLines);
+        await saveLock.WaitAsync(ct);
 
-        var normalizedHunks = NormalizeHunks(
-            diff.Hunks ?? Array.Empty<TextDiffHunkDto>(),
-            normalizedLines,
-            3);
-
-        var linesJson = JsonSerializer.Serialize(normalizedLines, DiffJsonOptions);
-        var diffKey = ComputeDiffKeySha256(diff.LeftFileVersionId, diff.RightFileVersionId, normalizedMaxLines);
-
-        var existing = await db.Set<FileVersionTextDiff>()
-            .Include(d => d.Hunks)
-            .Include(d => d.Lines)
-            .FirstOrDefaultAsync(d => !d.IsDeleted && d.LeftFileVersionId == diff.LeftFileVersionId
-                                      && d.RightFileVersionId == diff.RightFileVersionId
-                                      && d.MaxLines == normalizedMaxLines,
-                ct);
-
-        if (existing is null)
+        try
         {
-            existing = new FileVersionTextDiff
+            var normalizedLines = (diff.Lines ?? Array.Empty<TextDiffLineDto>())
+                .Select(line => new TextDiffLineDto(
+                    NormalizeDiffKind(line.Kind),
+                    line.LeftLineNumber,
+                    line.RightLineNumber,
+                    line.Text ?? string.Empty))
+                .ToList();
+
+            var normalizedHunks = NormalizeHunks(
+                diff.Hunks ?? Array.Empty<TextDiffHunkDto>(),
+                normalizedLines,
+                3);
+
+            var linesJson = JsonSerializer.Serialize(normalizedLines, DiffJsonOptions);
+            var diffKey = ComputeDiffKeySha256(diff.LeftFileVersionId, diff.RightFileVersionId, normalizedMaxLines);
+
+            var existing = await db.Set<FileVersionTextDiff>()
+                .Include(d => d.Hunks)
+                .Include(d => d.Lines)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(d => !d.IsDeleted && d.LeftFileVersionId == diff.LeftFileVersionId
+                                          && d.RightFileVersionId == diff.RightFileVersionId
+                                          && d.MaxLines == normalizedMaxLines,
+                    ct);
+
+            if (existing is null)
             {
-                LeftFileVersionId = diff.LeftFileVersionId,
-                RightFileVersionId = diff.RightFileVersionId,
-                MaxLines = normalizedMaxLines,
-                CreatedAt = nowUtc,
-                IsDeleted = false,
-                DeletedAt = null
-            };
-
-            db.Add(existing);
-        }
-
-        existing.DiffKeySha256 = diffKey;
-        existing.RelativePath = TruncateForColumn(diff.RelativePath, 2048);
-        existing.AddedLines = diff.AddedLines;
-        existing.RemovedLines = diff.RemovedLines;
-        existing.IsTruncated = diff.IsTruncated;
-        existing.LinesJson = linesJson;
-        existing.StorageFormatVersion = CurrentTextDiffStorageFormatVersion;
-        existing.IsDeleted = false;
-        existing.DeletedAt = null;
-        existing.UpdatedAt = nowUtc;
-
-        if (existing.Lines.Count > 0)
-            db.RemoveRange(existing.Lines);
-
-        if (existing.Hunks.Count > 0)
-            db.RemoveRange(existing.Hunks);
-
-        var createdHunks = new List<FileVersionTextDiffHunk>(normalizedHunks.Count);
-        var hunkBySequence = new Dictionary<int, FileVersionTextDiffHunk>();
-
-        if (normalizedHunks.Count > 0)
-        {
-            foreach (var h in normalizedHunks)
-            {
-                var entity = new FileVersionTextDiffHunk
+                existing = new FileVersionTextDiff
                 {
-                    Diff = existing,
-                    Sequence = h.Sequence,
-                    StartLineSequence = h.StartLineSequence,
-                    EndLineSequence = h.EndLineSequence,
-                    OldStartLine = h.OldStartLine,
-                    OldLineCount = h.OldLineCount,
-                    NewStartLine = h.NewStartLine,
-                    NewLineCount = h.NewLineCount,
-                    ChangeKind = NormalizeHunkChangeKind(h.ChangeKind),
+                    LeftFileVersionId = diff.LeftFileVersionId,
+                    RightFileVersionId = diff.RightFileVersionId,
+                    MaxLines = normalizedMaxLines,
                     CreatedAt = nowUtc,
                     IsDeleted = false,
                     DeletedAt = null
                 };
 
-                createdHunks.Add(entity);
-                hunkBySequence[h.Sequence] = entity;
+                db.Add(existing);
             }
 
-            db.AddRange(createdHunks);
-        }
+            existing.DiffKeySha256 = diffKey;
+            existing.RelativePath = TruncateForColumn(diff.RelativePath, 2048);
+            existing.AddedLines = diff.AddedLines;
+            existing.RemovedLines = diff.RemovedLines;
+            existing.IsTruncated = diff.IsTruncated;
+            existing.LinesJson = linesJson;
+            existing.StorageFormatVersion = CurrentTextDiffStorageFormatVersion;
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.UpdatedAt = nowUtc;
 
-        if (normalizedLines.Count > 0)
-        {
-            var uniqueTexts = normalizedLines
-                .Select(l => l.Text)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            if (existing.Lines.Count > 0)
+                db.RemoveRange(existing.Lines);
 
-            var textByHash = uniqueTexts
-                .Select(text => new { Text = text, Hash = ComputeLineHashSha256(text) })
-                .ToList();
+            if (existing.Hunks.Count > 0)
+                db.RemoveRange(existing.Hunks);
 
-            var hashes = textByHash.Select(x => x.Hash).Distinct(StringComparer.Ordinal).ToList();
+            var createdHunks = new List<FileVersionTextDiffHunk>(normalizedHunks.Count);
+            var hunkBySequence = new Dictionary<int, FileVersionTextDiffHunk>();
 
-            var existingAtoms = hashes.Count == 0
-                ? []
-                : await db.Set<TextLineAtom>()
-                    .Where(a => hashes.Contains(a.HashSha256))
-                    .ToListAsync(ct);
-
-            var atomsByKey = existingAtoms.ToDictionary(
-                a => (a.HashSha256, a.Text),
-                a => a);
-
-            var atomsByText = new Dictionary<string, TextLineAtom>(StringComparer.Ordinal);
-
-            foreach (var item in textByHash)
+            if (normalizedHunks.Count > 0)
             {
-                if (!atomsByKey.TryGetValue((item.Hash, item.Text), out var atom))
+                foreach (var h in normalizedHunks)
                 {
-                    atom = new TextLineAtom
+                    var entity = new FileVersionTextDiffHunk
                     {
-                        HashSha256 = item.Hash,
-                        Text = item.Text,
-                        CreatedAt = nowUtc
+                        Diff = existing,
+                        Sequence = h.Sequence,
+                        StartLineSequence = h.StartLineSequence,
+                        EndLineSequence = h.EndLineSequence,
+                        OldStartLine = h.OldStartLine,
+                        OldLineCount = h.OldLineCount,
+                        NewStartLine = h.NewStartLine,
+                        NewLineCount = h.NewLineCount,
+                        ChangeKind = NormalizeHunkChangeKind(h.ChangeKind),
+                        CreatedAt = nowUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
                     };
 
-                    db.Add(atom);
-                    atomsByKey[(item.Hash, item.Text)] = atom;
+                    createdHunks.Add(entity);
+                    hunkBySequence[h.Sequence] = entity;
                 }
 
-                atomsByText[item.Text] = atom;
+                db.AddRange(createdHunks);
             }
 
-            var lineToHunk = new Dictionary<int, (FileVersionTextDiffHunk Hunk, int InHunkSequence)>();
-            foreach (var h in normalizedHunks)
+            if (normalizedLines.Count > 0)
             {
-                if (!hunkBySequence.TryGetValue(h.Sequence, out var hunkEntity))
-                    continue;
+                var uniqueTexts = normalizedLines
+                    .Select(l => l.Text)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
 
-                var inSeq = 0;
-                for (var seq = h.StartLineSequence; seq <= h.EndLineSequence; seq++)
+                var textByHash = uniqueTexts
+                    .Select(text => new { Text = text, Hash = ComputeLineHashSha256(text) })
+                    .ToList();
+
+                var hashes = textByHash.Select(x => x.Hash).Distinct(StringComparer.Ordinal).ToList();
+
+                var existingAtoms = hashes.Count == 0
+                    ? []
+                    : await db.Set<TextLineAtom>()
+                        .Where(a => hashes.Contains(a.HashSha256))
+                        .ToListAsync(ct);
+
+                var atomsByKey = existingAtoms.ToDictionary(
+                    a => (a.HashSha256, a.Text),
+                    a => a);
+
+                var atomsByText = new Dictionary<string, TextLineAtom>(StringComparer.Ordinal);
+
+                foreach (var item in textByHash)
                 {
-                    lineToHunk[seq] = (hunkEntity, inSeq);
-                    inSeq++;
+                    if (!atomsByKey.TryGetValue((item.Hash, item.Text), out var atom))
+                    {
+                        atom = new TextLineAtom
+                        {
+                            HashSha256 = item.Hash,
+                            Text = item.Text,
+                            CreatedAt = nowUtc
+                        };
+
+                        db.Add(atom);
+                        atomsByKey[(item.Hash, item.Text)] = atom;
+                    }
+
+                    atomsByText[item.Text] = atom;
                 }
-            }
 
-            var diffLines = new List<FileVersionTextDiffLine>(normalizedLines.Count);
-
-            for (var i = 0; i < normalizedLines.Count; i++)
-            {
-                var line = normalizedLines[i];
-                var hasHunk = lineToHunk.TryGetValue(i, out var hunkRef);
-
-                diffLines.Add(new FileVersionTextDiffLine
+                var lineToHunk = new Dictionary<int, (FileVersionTextDiffHunk Hunk, int InHunkSequence)>();
+                foreach (var h in normalizedHunks)
                 {
-                    Diff = existing,
-                    Sequence = i,
-                    Kind = line.Kind,
-                    LeftLineNumber = line.LeftLineNumber,
-                    RightLineNumber = line.RightLineNumber,
-                    Hunk = hasHunk ? hunkRef.Hunk : null,
-                    InHunkSequence = hasHunk ? hunkRef.InHunkSequence : null,
-                    TextLineAtom = atomsByText[line.Text],
-                    CreatedAt = nowUtc,
-                    IsDeleted = false,
-                    DeletedAt = null
-                });
+                    if (!hunkBySequence.TryGetValue(h.Sequence, out var hunkEntity))
+                        continue;
+
+                    var inSeq = 0;
+                    for (var seq = h.StartLineSequence; seq <= h.EndLineSequence; seq++)
+                    {
+                        lineToHunk[seq] = (hunkEntity, inSeq);
+                        inSeq++;
+                    }
+                }
+
+                var diffLines = new List<FileVersionTextDiffLine>(normalizedLines.Count);
+
+                for (var i = 0; i < normalizedLines.Count; i++)
+                {
+                    var line = normalizedLines[i];
+                    var hasHunk = lineToHunk.TryGetValue(i, out var hunkRef);
+
+                    diffLines.Add(new FileVersionTextDiffLine
+                    {
+                        Diff = existing,
+                        Sequence = i,
+                        Kind = line.Kind,
+                        LeftLineNumber = line.LeftLineNumber,
+                        RightLineNumber = line.RightLineNumber,
+                        Hunk = hasHunk ? hunkRef.Hunk : null,
+                        InHunkSequence = hasHunk ? hunkRef.InHunkSequence : null,
+                        TextLineAtom = atomsByText[line.Text],
+                        CreatedAt = nowUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
+                    });
+                }
+
+                db.AddRange(diffLines);
             }
 
-            db.AddRange(diffLines);
+            await db.SaveChangesAsync(ct);
         }
-
-        await db.SaveChangesAsync(ct);
+        finally
+        {
+            saveLock.Release();
+        }
     }
 
     public async Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
@@ -1862,6 +2048,13 @@ public sealed class EfRepositorySnapshotRepository(
             normalized = "." + normalized;
 
         return normalized;
+    }
+
+    private static SemaphoreSlim GetTextDiffSaveStripe(long leftFileVersionId, long rightFileVersionId, int maxLines)
+    {
+        var hash = HashCode.Combine(leftFileVersionId, rightFileVersionId, maxLines);
+        var index = (hash & int.MaxValue) % TextDiffSaveStripes.Length;
+        return TextDiffSaveStripes[index];
     }
 
     private static string GetSafeTempExtension(string? extension)

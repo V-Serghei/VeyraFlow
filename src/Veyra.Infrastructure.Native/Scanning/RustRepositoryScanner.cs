@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
 
 namespace Veyra.Infrastructure.Native.Scanning;
@@ -13,6 +14,7 @@ namespace Veyra.Infrastructure.Native.Scanning;
 public sealed class RustRepositoryScanner(
     IRepositoryRepository repositories,
     IRepositorySnapshotRepository snapshots,
+    INativeExecutionScheduler scheduler,
     ILogger<RustRepositoryScanner> log)
     : IRepositoryScanner
 {
@@ -20,6 +22,11 @@ public sealed class RustRepositoryScanner(
     {
         PropertyNameCaseInsensitive = true
     };
+
+    private sealed record NativeScanExecutionResult(
+        List<RepositoryScanEntryDto> Entries,
+        long NativeScanMs,
+        long EntryProjectionMs);
 
     public async Task<RepositoryScanResultDto> ScanRepositoryAsync(
         int repositoryId,
@@ -76,26 +83,33 @@ public sealed class RustRepositoryScanner(
                 "Scanning directory"));
 
             var nativeScanTimer = Stopwatch.StartNew();
-            var json = await Task.Run(() =>
-                    VeyraCoreNative.ScanDirectoryJson(
-                        repo.DirectoryPath,
-                        repo.LinkedFormats,
-                        scanOptions.MaxReadBytesPerSecond,
-                        scanOptions.MaxIoOperationsPerSecond),
-                ct);
-            nativeScanTimer.Stop();
+            var nativeResult = await scheduler.RunAsync(() =>
+            {
+                var json = VeyraCoreNative.ScanDirectoryJson(
+                    repo.DirectoryPath,
+                    repo.LinkedFormats,
+                    scanOptions.MaxReadBytesPerSecond,
+                    scanOptions.MaxIoOperationsPerSecond);
+                nativeScanTimer.Stop();
 
-            var projectionTimer = Stopwatch.StartNew();
-            var nativeEntries = JsonSerializer.Deserialize<List<NativeScanEntry>>(json, JsonOptions) ?? [];
+                var projectionTimer = Stopwatch.StartNew();
+                var nativeEntries = JsonSerializer.Deserialize<List<NativeScanEntry>>(json, JsonOptions) ?? [];
+                var projectedEntries = nativeEntries
+                    .Select(ToEntry)
+                    .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
+                    .Where(e => !RepositoryScanExclusionMatcher.IsExcluded(e.RelativePath, repo.ExcludedPatterns))
+                    .ToList();
+                projectionTimer.Stop();
 
-            entries = nativeEntries
-                .Select(ToEntry)
-                .Where(e => !string.IsNullOrWhiteSpace(e.RelativePath))
-                .Where(e => !RepositoryScanExclusionMatcher.IsExcluded(e.RelativePath, repo.ExcludedPatterns))
-                .ToList();
-            projectionTimer.Stop();
-            scanStageMs = nativeScanTimer.ElapsedMilliseconds;
-            entryProjectionMs = projectionTimer.ElapsedMilliseconds;
+                return new NativeScanExecutionResult(
+                    projectedEntries,
+                    nativeScanTimer.ElapsedMilliseconds,
+                    projectionTimer.ElapsedMilliseconds);
+            }, ct);
+
+            entries = nativeResult.Entries;
+            scanStageMs = nativeResult.NativeScanMs;
+            entryProjectionMs = nativeResult.EntryProjectionMs;
 
             var scannedFiles = entries.Count(e => !e.IsDirectory);
             progress?.Report(new RepositoryScanProgressDto(

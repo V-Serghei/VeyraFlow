@@ -958,7 +958,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath)
             && File.Exists(imagePreview.BaselineImagePath))
         {
-            LeftImagePreview = await Task.Run(() => new Bitmap(imagePreview.BaselineImagePath), ct);
             if (imagePreview.IsBaselineTempFile)
                 _tempPreviewFiles.Add(imagePreview.BaselineImagePath);
         }
@@ -966,7 +965,6 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath)
             && File.Exists(imagePreview.CurrentImagePath))
         {
-            RightImagePreview = await Task.Run(() => new Bitmap(imagePreview.CurrentImagePath), ct);
             if (imagePreview.IsCurrentTempFile)
                 _tempPreviewFiles.Add(imagePreview.CurrentImagePath);
         }
@@ -978,6 +976,15 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
             _tempPreviewFiles.Add(imagePreview.OverlayImagePath);
         }
 
+        var leftImageTask = LoadBitmapAsync(imagePreview.BaselineImagePath, ct);
+        var rightImageTask = LoadBitmapAsync(imagePreview.CurrentImagePath, ct);
+        await Task.WhenAll(leftImageTask, rightImageTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        LeftImagePreview = await leftImageTask;
+        RightImagePreview = await rightImageTask;
+
         LeftImageCaption = BuildImageSideCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
         RightImageCaption = BuildImageSideCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
     }
@@ -987,9 +994,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         if (audioPreview is null)
             return;
 
+        var waveformTask = LoadBitmapAsync(audioPreview.WaveformImagePath, ct);
+        var spectrogramTask = LoadBitmapAsync(audioPreview.SpectrogramImagePath, ct);
+        var spectralDeltaTask = LoadBitmapAsync(audioPreview.SpectralDeltaImagePath, ct);
+
         if (!string.IsNullOrWhiteSpace(audioPreview.WaveformImagePath) && File.Exists(audioPreview.WaveformImagePath))
         {
-            AudioWaveformPreview = await Task.Run(() => new Bitmap(audioPreview.WaveformImagePath), ct);
             if (audioPreview.IsWaveformTempFile)
                 _tempPreviewFiles.Add(audioPreview.WaveformImagePath);
         }
@@ -999,14 +1009,12 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(audioPreview.SpectrogramImagePath) && File.Exists(audioPreview.SpectrogramImagePath))
         {
-            AudioSpectrogramPreview = await Task.Run(() => new Bitmap(audioPreview.SpectrogramImagePath), ct);
             if (audioPreview.IsSpectrogramTempFile)
                 _tempPreviewFiles.Add(audioPreview.SpectrogramImagePath);
         }
 
         if (!string.IsNullOrWhiteSpace(audioPreview.SpectralDeltaImagePath) && File.Exists(audioPreview.SpectralDeltaImagePath))
         {
-            AudioSpectralDeltaPreview = await Task.Run(() => new Bitmap(audioPreview.SpectralDeltaImagePath), ct);
             if (audioPreview.IsSpectralDeltaTempFile)
                 _tempPreviewFiles.Add(audioPreview.SpectralDeltaImagePath);
         }
@@ -1016,6 +1024,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(audioPreview.CurrentAudioPath) && File.Exists(audioPreview.CurrentAudioPath) && audioPreview.IsCurrentTempFile)
             _tempPreviewFiles.Add(audioPreview.CurrentAudioPath);
+
+        await Task.WhenAll(waveformTask, spectrogramTask, spectralDeltaTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        AudioWaveformPreview = await waveformTask;
+        AudioSpectrogramPreview = await spectrogramTask;
+        AudioSpectralDeltaPreview = await spectralDeltaTask;
     }
 
     private async Task ReRenderImageDiffPreviewAsync()
@@ -1499,6 +1515,14 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         LoadingDetail = detail;
         LoadingProgressValue = Math.Clamp(progress, 0, 100);
         IsLoadingProgressIndeterminate = indeterminate;
+    }
+
+    private static Task<Bitmap?> LoadBitmapAsync(string? imagePath, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            return Task.FromResult<Bitmap?>(null);
+
+        return Task.Run(() => (Bitmap?)new Bitmap(imagePath), ct);
     }
 
     private void ClearLoadingState()
@@ -2079,6 +2103,4 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
         return tags;
     }
 }
-
-
 

@@ -1,6 +1,7 @@
 using System;
-using System.Linq;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -17,6 +18,7 @@ public partial class RepositoryExplorerView : UserControl
     private const double NarrowWidth = 980;
     private const double SnapshotCompactWidth = 1440;
     private const double SnapshotNarrowWidth = 1120;
+    private readonly HashSet<TreeViewItem> _observedTreeItems = [];
     private INotifyPropertyChanged? _observedViewModel;
 
     public RepositoryExplorerView()
@@ -50,6 +52,24 @@ public partial class RepositoryExplorerView : UserControl
 
         if (vm.SelectItemCommand.CanExecute(item))
             vm.SelectItemCommand.Execute(item);
+    }
+
+    private void OnTreeNodePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: ExplorerTreeNodeViewModel node }
+            || DataContext is not RepositoryExplorerViewModel vm
+            || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            || e.ClickCount < 2)
+        {
+            return;
+        }
+
+        if (node.Children.Count > 0)
+            node.IsExpanded = !node.IsExpanded;
+
+        vm.SelectedTreeNode = node;
+        Dispatcher.UIThread.Post(RefreshTreeState, DispatcherPriority.Background);
+        e.Handled = true;
     }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -240,11 +260,49 @@ public partial class RepositoryExplorerView : UserControl
     {
         foreach (var item in ExplorerTreeView.GetVisualDescendants().OfType<TreeViewItem>())
         {
+            ObserveTreeItem(item);
+
             if (item.DataContext is not ExplorerTreeNodeViewModel node)
                 continue;
 
             item.IsExpanded = node.IsExpanded;
             item.IsSelected = node.IsSelected;
         }
+    }
+
+    private void ObserveTreeItem(TreeViewItem item)
+    {
+        if (!_observedTreeItems.Add(item))
+            return;
+
+        item.PropertyChanged += OnTreeViewItemPropertyChanged;
+        item.DetachedFromVisualTree += OnObservedTreeItemDetached;
+    }
+
+    private void OnTreeViewItemPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (sender is not TreeViewItem item
+            || item.DataContext is not ExplorerTreeNodeViewModel node)
+        {
+            return;
+        }
+
+        if (e.Property == TreeViewItem.IsExpandedProperty)
+        {
+            node.IsExpanded = item.IsExpanded;
+
+            if (item.IsExpanded)
+                Dispatcher.UIThread.Post(RefreshTreeState, DispatcherPriority.Background);
+        }
+    }
+
+    private void OnObservedTreeItemDetached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is not TreeViewItem item)
+            return;
+
+        item.PropertyChanged -= OnTreeViewItemPropertyChanged;
+        item.DetachedFromVisualTree -= OnObservedTreeItemDetached;
+        _observedTreeItems.Remove(item);
     }
 }

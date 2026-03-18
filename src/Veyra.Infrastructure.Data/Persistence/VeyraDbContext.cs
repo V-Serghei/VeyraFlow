@@ -273,7 +273,7 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.FileCount).HasDefaultValue(0);
             entity.Property(e => e.VersionCount).HasDefaultValue(0);
             entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
-            entity.Property(e => e.AutoCaptureFileVersions).HasDefaultValue(true);
+            entity.Property(e => e.AutoCaptureFileVersions).HasDefaultValue(false);
             entity.Property(e => e.ProtectCloudMetadata).HasDefaultValue(true);
             entity.Property(e => e.RetentionEnabled).HasDefaultValue(false);
             entity.Property(e => e.RetentionMaxAgeDays).IsRequired(false);

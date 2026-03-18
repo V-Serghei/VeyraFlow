@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
 using Veyra.Application.Services;
+using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
 
 namespace Veyra.Infrastructure.Native.Diffing;
@@ -16,6 +17,7 @@ public sealed class RustTextDiffEngine : ITextDiffEngine
     };
 
     private readonly ManagedTextDiffEngine _managed;
+    private readonly INativeExecutionScheduler _scheduler;
     private readonly ILogger<RustTextDiffEngine> _log;
     private readonly object _gate = new();
 
@@ -23,9 +25,11 @@ public sealed class RustTextDiffEngine : ITextDiffEngine
 
     public RustTextDiffEngine(
         ManagedTextDiffEngine managed,
+        INativeExecutionScheduler scheduler,
         ILogger<RustTextDiffEngine> log)
     {
         _managed = managed;
+        _scheduler = scheduler;
         _log = log;
         _nativeDiffAvailable = NativeRuntimeHealth.Probe().SupportsTextDiff;
     }
@@ -43,36 +47,39 @@ public sealed class RustTextDiffEngine : ITextDiffEngine
 
         try
         {
-            var json = VeyraCoreNative.BuildTextDiffJson(leftFilePath, rightFilePath, maxLines);
-            var payload = JsonSerializer.Deserialize<NativeTextDiffPayload>(json, JsonOptions)
-                          ?? throw new InvalidOperationException("Native text diff payload is empty.");
+            return await _scheduler.RunAsync(() =>
+            {
+                var json = VeyraCoreNative.BuildTextDiffJson(leftFilePath, rightFilePath, maxLines);
+                var payload = JsonSerializer.Deserialize<NativeTextDiffPayload>(json, JsonOptions)
+                              ?? throw new InvalidOperationException("Native text diff payload is empty.");
 
-            var lines = payload.Lines
-                .Select(l => new TextDiffLineDto(
-                    l.Kind,
-                    l.LeftLineNumber,
-                    l.RightLineNumber,
-                    l.Text ?? string.Empty))
-                .ToList();
+                var lines = payload.Lines
+                    .Select(l => new TextDiffLineDto(
+                        l.Kind,
+                        l.LeftLineNumber,
+                        l.RightLineNumber,
+                        l.Text ?? string.Empty))
+                    .ToList();
 
-            var hunks = payload.Hunks
-                .Select(h => new TextDiffHunkDto(
-                    h.Sequence,
-                    h.StartLineSequence,
-                    h.EndLineSequence,
-                    h.OldStartLine,
-                    h.OldLineCount,
-                    h.NewStartLine,
-                    h.NewLineCount,
-                    h.ChangeKind ?? "modified"))
-                .ToList();
+                var hunks = payload.Hunks
+                    .Select(h => new TextDiffHunkDto(
+                        h.Sequence,
+                        h.StartLineSequence,
+                        h.EndLineSequence,
+                        h.OldStartLine,
+                        h.OldLineCount,
+                        h.NewStartLine,
+                        h.NewLineCount,
+                        h.ChangeKind ?? "modified"))
+                    .ToList();
 
-            return new TextDiffComputationDto(
-                payload.AddedLines,
-                payload.RemovedLines,
-                payload.IsTruncated,
-                lines,
-                hunks);
+                return new TextDiffComputationDto(
+                    payload.AddedLines,
+                    payload.RemovedLines,
+                    payload.IsTruncated,
+                    lines,
+                    hunks);
+            }, ct);
         }
         catch (Exception ex) when (IsNativeUnavailable(ex))
         {

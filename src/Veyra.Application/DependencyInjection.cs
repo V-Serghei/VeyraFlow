@@ -3,7 +3,9 @@ using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Behaviors;
+using Veyra.Application.Common.Observability;
 using Veyra.Application.Services;
+using Veyra.Domain.Observability;
 
 namespace Veyra.Application;
 
@@ -14,6 +16,7 @@ public static class DependencyInjection
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
         services.AddAutoMapper(cfg => cfg.AddMaps(typeof(DependencyInjection).Assembly));
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+        services.AddSingleton<IRuntimeObservabilityState, AlwaysOnRuntimeObservabilityState>();
 
         services.AddScoped<ManagedTextDiffEngine>();
         services.AddScoped<ITextDiffEngine>(sp => sp.GetRequiredService<ManagedTextDiffEngine>());

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
 using Veyra.Application.Services;
+using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
 
 namespace Veyra.Infrastructure.Native.Diffing;
@@ -16,6 +17,7 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
     };
 
     private readonly ManagedSnapshotComparisonEngine _managed;
+    private readonly INativeExecutionScheduler _scheduler;
     private readonly ILogger<RustSnapshotComparisonEngine> _log;
     private readonly object _gate = new();
 
@@ -25,9 +27,11 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
 
     public RustSnapshotComparisonEngine(
         ManagedSnapshotComparisonEngine managed,
+        INativeExecutionScheduler scheduler,
         ILogger<RustSnapshotComparisonEngine> log)
     {
         _managed = managed;
+        _scheduler = scheduler;
         _log = log;
 
         var native = NativeRuntimeHealth.Probe();
@@ -47,33 +51,36 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
         {
             try
             {
-                var currentPayload = current.Select(ToLinkPayload).ToList();
-                var previousPayload = previous.Select(ToLinkPayload).ToList();
+                return await _scheduler.RunAsync(() =>
+                {
+                    var currentPayload = current.Select(ToLinkPayload).ToList();
+                    var previousPayload = previous.Select(ToLinkPayload).ToList();
 
-                var currentJson = JsonSerializer.Serialize(currentPayload, JsonOptions);
-                var previousJson = JsonSerializer.Serialize(previousPayload, JsonOptions);
+                    var currentJson = JsonSerializer.Serialize(currentPayload, JsonOptions);
+                    var previousJson = JsonSerializer.Serialize(previousPayload, JsonOptions);
 
-                var json = VeyraCoreNative.CompareSnapshotLinksJson(currentJson, previousJson);
-                var payload = JsonSerializer.Deserialize<NativeLinkComparisonPayload>(json, JsonOptions)
-                              ?? throw new InvalidOperationException("Native snapshot comparison payload is empty.");
+                    var json = VeyraCoreNative.CompareSnapshotLinksJson(currentJson, previousJson);
+                    var payload = JsonSerializer.Deserialize<NativeLinkComparisonPayload>(json, JsonOptions)
+                                  ?? throw new InvalidOperationException("Native snapshot comparison payload is empty.");
 
-                var changes = payload.Changes
-                    .Select(c => new SnapshotLinkChangeDto(
-                        c.FileIdentityId,
-                        c.FileVersionId,
-                        c.RelativePath ?? string.Empty,
-                        c.Name ?? string.Empty,
-                        c.ChangeKind ?? "modified",
-                        c.CurrentSizeBytes,
-                        c.PreviousSizeBytes,
-                        DateTimeOffset.FromUnixTimeSeconds(c.VersionCreatedUnixSeconds).UtcDateTime))
-                    .ToList();
+                    var changes = payload.Changes
+                        .Select(c => new SnapshotLinkChangeDto(
+                            c.FileIdentityId,
+                            c.FileVersionId,
+                            c.RelativePath ?? string.Empty,
+                            c.Name ?? string.Empty,
+                            c.ChangeKind ?? "modified",
+                            c.CurrentSizeBytes,
+                            c.PreviousSizeBytes,
+                            DateTimeOffset.FromUnixTimeSeconds(c.VersionCreatedUnixSeconds).UtcDateTime))
+                        .ToList();
 
-                var changedCount = payload.ChangedFilesCount > 0
-                    ? payload.ChangedFilesCount
-                    : changes.Count;
+                    var changedCount = payload.ChangedFilesCount > 0
+                        ? payload.ChangedFilesCount
+                        : changes.Count;
 
-                return new SnapshotLinkComparisonResultDto(changedCount, changes);
+                    return new SnapshotLinkComparisonResultDto(changedCount, changes);
+                }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {
@@ -102,39 +109,42 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
         {
             try
             {
-                var currentPayload = current.Select(ToPathPayload).ToList();
-                var baselinePayload = baseline.Select(ToPathPayload).ToList();
+                return await _scheduler.RunAsync(() =>
+                {
+                    var currentPayload = current.Select(ToPathPayload).ToList();
+                    var baselinePayload = baseline.Select(ToPathPayload).ToList();
 
-                var currentJson = JsonSerializer.Serialize(currentPayload, JsonOptions);
-                var baselineJson = JsonSerializer.Serialize(baselinePayload, JsonOptions);
+                    var currentJson = JsonSerializer.Serialize(currentPayload, JsonOptions);
+                    var baselineJson = JsonSerializer.Serialize(baselinePayload, JsonOptions);
 
-                var json = VeyraCoreNative.CompareRepositoryPathsJson(currentJson, baselineJson, safeTake);
-                var payload = JsonSerializer.Deserialize<NativePathComparisonPayload>(json, JsonOptions)
-                              ?? throw new InvalidOperationException("Native repository path comparison payload is empty.");
+                    var json = VeyraCoreNative.CompareRepositoryPathsJson(currentJson, baselineJson, safeTake);
+                    var payload = JsonSerializer.Deserialize<NativePathComparisonPayload>(json, JsonOptions)
+                                  ?? throw new InvalidOperationException("Native repository path comparison payload is empty.");
 
-                var entries = payload.Changes
-                    .Select(c => new RepositoryPendingChangeEntryDto(
-                        c.RelativePath ?? string.Empty,
-                        c.Name ?? string.Empty,
-                        c.ChangeKind ?? "modified",
-                        c.CurrentSizeBytes,
-                        c.BaselineSizeBytes,
-                        DateTimeOffset.FromUnixTimeSeconds(c.CurrentLastWriteUnixSeconds).UtcDateTime,
-                        c.BaselineLastWriteUnixSeconds.HasValue
-                            ? DateTimeOffset.FromUnixTimeSeconds(c.BaselineLastWriteUnixSeconds.Value).UtcDateTime
-                            : null))
-                    .ToList();
+                    var entries = payload.Changes
+                        .Select(c => new RepositoryPendingChangeEntryDto(
+                            c.RelativePath ?? string.Empty,
+                            c.Name ?? string.Empty,
+                            c.ChangeKind ?? "modified",
+                            c.CurrentSizeBytes,
+                            c.BaselineSizeBytes,
+                            DateTimeOffset.FromUnixTimeSeconds(c.CurrentLastWriteUnixSeconds).UtcDateTime,
+                            c.BaselineLastWriteUnixSeconds.HasValue
+                                ? DateTimeOffset.FromUnixTimeSeconds(c.BaselineLastWriteUnixSeconds.Value).UtcDateTime
+                                : null))
+                        .ToList();
 
-                var changedCount = payload.ChangedFilesCount > 0
-                    ? payload.ChangedFilesCount
-                    : payload.AddedCount + payload.ModifiedCount + payload.DeletedCount;
+                    var changedCount = payload.ChangedFilesCount > 0
+                        ? payload.ChangedFilesCount
+                        : payload.AddedCount + payload.ModifiedCount + payload.DeletedCount;
 
-                return new RepositoryPathComparisonResultDto(
-                    payload.AddedCount,
-                    payload.ModifiedCount,
-                    payload.DeletedCount,
-                    changedCount,
-                    entries);
+                    return new RepositoryPathComparisonResultDto(
+                        payload.AddedCount,
+                        payload.ModifiedCount,
+                        payload.DeletedCount,
+                        changedCount,
+                        entries);
+                }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {
@@ -159,46 +169,49 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
         {
             try
             {
-                var payload = states.Select(s => new NativeVersionPlanningStatePayload
+                return await _scheduler.RunAsync(() =>
                 {
-                    RelativePath = s.RelativePath,
-                    HasCurrent = s.HasCurrent,
-                    CurrentSizeBytes = s.CurrentSizeBytes,
-                    CurrentContentHashSha256 = s.CurrentContentHashSha256,
-                    HasPrevious = s.HasPrevious,
-                    PreviousSizeBytes = s.PreviousSizeBytes,
-                    PreviousContentHashSha256 = s.PreviousContentHashSha256,
-                    HasLatestVersion = s.HasLatestVersion,
-                    LatestIsDeletionMarker = s.LatestIsDeletionMarker,
-                    LatestSizeBytes = s.LatestSizeBytes,
-                    LatestHasBlocks = s.LatestHasBlocks
-                }).ToList();
+                    var payload = states.Select(s => new NativeVersionPlanningStatePayload
+                    {
+                        RelativePath = s.RelativePath,
+                        HasCurrent = s.HasCurrent,
+                        CurrentSizeBytes = s.CurrentSizeBytes,
+                        CurrentContentHashSha256 = s.CurrentContentHashSha256,
+                        HasPrevious = s.HasPrevious,
+                        PreviousSizeBytes = s.PreviousSizeBytes,
+                        PreviousContentHashSha256 = s.PreviousContentHashSha256,
+                        HasLatestVersion = s.HasLatestVersion,
+                        LatestIsDeletionMarker = s.LatestIsDeletionMarker,
+                        LatestSizeBytes = s.LatestSizeBytes,
+                        LatestHasBlocks = s.LatestHasBlocks
+                    }).ToList();
 
-                var statesJson = JsonSerializer.Serialize(payload, JsonOptions);
-                var json = VeyraCoreNative.PlanRepositoryVersionsJson(statesJson);
-                var planned = JsonSerializer.Deserialize<NativeVersionPlanningPayload>(json, JsonOptions)
-                              ?? throw new InvalidOperationException("Native repository version planner payload is empty.");
+                    var statesJson = JsonSerializer.Serialize(payload, JsonOptions);
+                    var json = VeyraCoreNative.PlanRepositoryVersionsJson(statesJson);
+                    var planned = JsonSerializer.Deserialize<NativeVersionPlanningPayload>(json, JsonOptions)
+                                  ?? throw new InvalidOperationException("Native repository version planner payload is empty.");
 
-                var entries = planned.Entries
-                    .Select(e => new RepositoryVersionPlanEntryDto(
-                        e.RelativePath ?? string.Empty,
-                        e.ChangeKind ?? "unchanged",
-                        e.ShouldCreateNewVersion,
-                        e.ShouldMarkIdentityDeleted))
-                    .ToList();
+                    var entries = planned.Entries
+                        .Select(e => new RepositoryVersionPlanEntryDto(
+                            e.RelativePath ?? string.Empty,
+                            e.ChangeKind ?? "unchanged",
+                            e.ShouldCreateNewVersion,
+                            e.ShouldMarkIdentityDeleted))
+                        .ToList();
 
-                var changedFilesCount = planned.ChangedFilesCount > 0
-                    ? planned.ChangedFilesCount
-                    : entries.Count(e => !string.Equals(e.ChangeKind, "unchanged", StringComparison.OrdinalIgnoreCase));
+                    var changedFilesCount = planned.ChangedFilesCount > 0
+                        ? planned.ChangedFilesCount
+                        : entries.Count(e => !string.Equals(e.ChangeKind, "unchanged", StringComparison.OrdinalIgnoreCase));
 
-                var newVersionsCount = planned.NewVersionsCount > 0
-                    ? planned.NewVersionsCount
-                    : entries.Count(e => e.ShouldCreateNewVersion);
+                    var newVersionsCount = planned.NewVersionsCount > 0
+                        ? planned.NewVersionsCount
+                        : entries.Count(e => e.ShouldCreateNewVersion);
 
-                return new RepositoryVersionPlanningResultDto(
-                    changedFilesCount,
-                    newVersionsCount,
-                    entries);
+                    return new RepositoryVersionPlanningResultDto(
+                        changedFilesCount,
+                        newVersionsCount,
+                        entries);
+                }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {

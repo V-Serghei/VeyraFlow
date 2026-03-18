@@ -439,25 +439,20 @@ public sealed class EfRepositoryRetentionService(
                 .ToListAsync(ct);
         }
 
-        var activeVersionIds = await db.Set<SnapshotFileLink>()
-            .IgnoreQueryFilters()
-            .Where(l => !l.IsDeleted && retainedSnapshotIds.Contains(l.SnapshotId))
-            .Select(l => l.FileVersionId)
+        var retainedSnapshotIdList = retainedSnapshotIds
             .Distinct()
-            .ToListAsync(ct);
+            .ToList();
 
-        if (activeVersionIds.Count == 0)
-        {
-            return await db.Set<FileVersion>()
-                .IgnoreQueryFilters()
-                .Where(v => !v.IsDeleted && v.FileIdentity.RepositoryId == repositoryId)
-                .Select(v => v.Id)
-                .ToListAsync(ct);
-        }
+        var activeVersionIdsQuery = db.Set<SnapshotFileLink>()
+            .IgnoreQueryFilters()
+            .Where(l => !l.IsDeleted && retainedSnapshotIdList.Contains(l.SnapshotId))
+            .Select(l => l.FileVersionId)
+            .Distinct();
 
         return await db.Set<FileVersion>()
             .IgnoreQueryFilters()
-            .Where(v => !v.IsDeleted && v.FileIdentity.RepositoryId == repositoryId && !activeVersionIds.Contains(v.Id))
+            .Where(v => !v.IsDeleted && v.FileIdentity.RepositoryId == repositoryId)
+            .Where(v => !activeVersionIdsQuery.Contains(v.Id))
             .Select(v => v.Id)
             .ToListAsync(ct);
     }

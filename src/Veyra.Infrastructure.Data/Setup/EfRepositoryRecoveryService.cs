@@ -195,6 +195,7 @@ public sealed class EfRepositoryRecoveryService(
                     .ThenByDescending(v => v.FileVersionId)
                     .ToList());
 
+        db.ChangeTracker.Clear();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
         var removed = await db.Set<SnapshotFileLink>()
@@ -250,8 +251,14 @@ public sealed class EfRepositoryRecoveryService(
             }
         }
 
-        if (links.Count > 0)
-            db.AddRange(links);
+        var distinctLinks = links
+            .GroupBy(x => new { x.SnapshotId, x.FileIdentityId })
+            .Select(g => g.First())
+            .ToList();
+        var suppressedDuplicateLinks = links.Count - distinctLinks.Count;
+
+        if (distinctLinks.Count > 0)
+            db.AddRange(distinctLinks);
 
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -259,7 +266,7 @@ public sealed class EfRepositoryRecoveryService(
         var messages = new List<string>
         {
             $"Removed stale links: {removed}.",
-            $"Inserted links: {links.Count}."
+            $"Inserted links: {distinctLinks.Count}."
         };
 
         if (missingIdentities > 0)
@@ -268,10 +275,13 @@ public sealed class EfRepositoryRecoveryService(
         if (missingVersions > 0)
             messages.Add($"Skipped entries without version: {missingVersions}.");
 
+        if (suppressedDuplicateLinks > 0)
+            messages.Add($"Suppressed duplicate links: {suppressedDuplicateLinks}.");
+
         var success = missingIdentities == 0 && missingVersions == 0;
         var summary = success
-            ? $"Relink completed. Removed={removed}, Inserted={links.Count}."
-            : $"Relink completed with warnings. Removed={removed}, Inserted={links.Count}, MissingIdentities={missingIdentities}, MissingVersions={missingVersions}.";
+            ? $"Relink completed. Removed={removed}, Inserted={distinctLinks.Count}."
+            : $"Relink completed with warnings. Removed={removed}, Inserted={distinctLinks.Count}, MissingIdentities={missingIdentities}, MissingVersions={missingVersions}.";
 
         var result = new RepositoryRecoveryResultDto(
             RepositoryId: repositoryId,
@@ -279,7 +289,7 @@ public sealed class EfRepositoryRecoveryService(
             Success: success,
             StartedAtUtc: startedAt,
             FinishedAtUtc: DateTime.UtcNow,
-            AffectedRows: removed + links.Count,
+            AffectedRows: removed + distinctLinks.Count,
             Messages: messages,
             Summary: summary);
 
@@ -453,4 +463,3 @@ public sealed class EfRepositoryRecoveryService(
         DateTime CreatedAtUtc,
         bool IsDeletionMarker);
 }
-

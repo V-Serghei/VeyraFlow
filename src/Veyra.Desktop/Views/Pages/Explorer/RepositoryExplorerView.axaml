@@ -126,7 +126,10 @@
                                       SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
                                 <TreeView.DataTemplates>
                                     <TreeDataTemplate DataType="explorer:ExplorerTreeNodeViewModel" ItemsSource="{Binding Children}">
-                                        <TextBlock Text="{Binding Name}"/>
+                                        <Border Padding="0"
+                                                PointerPressed="OnTreeNodePointerPressed">
+                                            <TextBlock Text="{Binding Name}"/>
+                                        </Border>
                                     </TreeDataTemplate>
                                 </TreeView.DataTemplates>
                             </TreeView>

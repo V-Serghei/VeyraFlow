@@ -82,6 +82,23 @@
 
         <ContentControl x:Name="MainPageHost" Grid.Row="1" Content="{Binding CurrentPage}"/>
 
+        <Border Grid.RowSpan="2"
+                Classes="loading-overlay"
+                IsVisible="{Binding IsShellBusy}"
+                ZIndex="40">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding ShellBusyTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding ShellBusyDetail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+
         <Grid x:Name="GuidedTourOverlayRoot"
               Grid.RowSpan="2"
               IsVisible="{Binding IsGuidedTourVisible}"
@@ -159,4 +176,3 @@
         </Grid>
     </Grid>
 </Window>
-

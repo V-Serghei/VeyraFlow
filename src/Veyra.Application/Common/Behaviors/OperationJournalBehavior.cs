@@ -4,12 +4,14 @@ using System.Reflection;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Observability;
+using Veyra.Domain.Observability;
 
 namespace Veyra.Application.Common.Behaviors;
 
 public sealed class OperationJournalBehavior<TRequest, TResponse>(
     IEnumerable<IOperationJournalService> journals,
-    ILogger<OperationJournalBehavior<TRequest, TResponse>> log)
+    ILogger<OperationJournalBehavior<TRequest, TResponse>> log,
+    IRuntimeObservabilityState observability)
     : IPipelineBehavior<TRequest, TResponse>
     where TRequest : notnull
 {
@@ -18,7 +20,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
         RequestHandlerDelegate<TResponse> next,
         CancellationToken cancellationToken)
     {
-        if (!ShouldJournal(request.GetType()))
+        if (!observability.IsDiagnosticsEnabled || !ShouldJournal(request.GetType()))
             return await next();
 
         var requestType = request.GetType();

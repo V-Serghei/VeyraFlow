@@ -352,12 +352,12 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
             });
 
-            var result = await Task.Run(() => _mediator.Send(new CreateRepositoryWithFormatsCommand(
+            var result = await _mediator.Send(new CreateRepositoryWithFormatsCommand(
                 RepositoryName,
                 Description,
                 DirectoryPath,
                 SelectedFormats.ToList(),
-                progress)));
+                progress));
 
             if (!result.Success)
             {

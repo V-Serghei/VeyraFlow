@@ -75,6 +75,7 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
     {
         var vm = _sp.GetRequiredService<LoginViewModel>();
         vm.AuthCompleted += isNewUser => _ = ContinueAfterAuthAsync(isNewUser);
+        vm.GuestModeRequested += () => _ = ContinueAsGuestAsync();
         CurrentPage = vm;
     }
 
@@ -96,6 +97,18 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
         await _cloudSync.RestoreRepositoriesFromCloudAsync();
 
         repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+        if (repositories.Count > 0)
+        {
+            _nav.GoToMain();
+            return;
+        }
+
+        await RunSetupThenMainAsync();
+    }
+
+    private async Task ContinueAsGuestAsync()
+    {
+        var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
         if (repositories.Count > 0)
         {
             _nav.GoToMain();

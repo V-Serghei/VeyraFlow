@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
 using Veyra.Infrastructure.Native.Security;
 
@@ -29,6 +30,7 @@ internal sealed class RustFileContentStore : IFileContentStore
     private readonly ILogger<RustFileContentStore> _log;
     private readonly string _storeRoot;
     private readonly object _nativeCapabilityLock = new();
+    private readonly INativeExecutionScheduler _scheduler;
 
     private bool _nativeStoreAvailable;
     private bool _nativeRestoreAvailable;
@@ -37,9 +39,11 @@ internal sealed class RustFileContentStore : IFileContentStore
     public RustFileContentStore(
         IConfiguration configuration,
         ILogger<RustFileContentStore> log,
+        INativeExecutionScheduler scheduler,
         ArtifactBlockCryptor artifactCryptor)
     {
         _log = log;
+        _scheduler = scheduler;
         _storeRoot = ResolveStoreRoot(configuration);
         _artifactCryptor = artifactCryptor;
 
@@ -89,34 +93,39 @@ internal sealed class RustFileContentStore : IFileContentStore
 
         try
         {
-            var json = VeyraCoreNative.StoreFileBlocksJson(fullPath, _storeRoot, DefaultChunkSize);
+            var result = await _scheduler.RunAsync(() =>
+            {
+                var json = VeyraCoreNative.StoreFileBlocksJson(fullPath, _storeRoot, DefaultChunkSize);
 
-            var payload = JsonSerializer.Deserialize<StorePayload>(json, JsonOptions)
-                          ?? throw new InvalidOperationException("Native block-store returned empty payload.");
+                var payload = JsonSerializer.Deserialize<StorePayload>(json, JsonOptions)
+                              ?? throw new InvalidOperationException("Native block-store returned empty payload.");
 
-            var blocks = payload.Blocks
-                .OrderBy(b => b.Sequence)
-                .Select(b => new StoredFileBlockDto(
-                    b.Sequence,
-                    b.BlockHashBlake3,
-                    b.LengthBytes,
-                    b.StoredSizeBytes))
-                .ToList();
+                var blocks = payload.Blocks
+                    .OrderBy(b => b.Sequence)
+                    .Select(b => new StoredFileBlockDto(
+                        b.Sequence,
+                        b.BlockHashBlake3,
+                        b.LengthBytes,
+                        b.StoredSizeBytes))
+                    .ToList();
+
+                return new StoredFileContentDto(
+                    payload.FileSizeBytes,
+                    payload.StoredSizeBytes,
+                    payload.BlockCount,
+                    payload.DedupedBlocks,
+                    payload.NewBlocks,
+                    blocks);
+            }, ct);
 
             _log.LogInformation(
                 "Stored file in native block-store. Path {Path}. Blocks {Blocks}. Deduped {Deduped}. New {New}",
                 fullPath,
-                payload.BlockCount,
-                payload.DedupedBlocks,
-                payload.NewBlocks);
+                result.BlockCount,
+                result.DedupedBlocks,
+                result.NewBlocks);
 
-            return new StoredFileContentDto(
-                payload.FileSizeBytes,
-                payload.StoredSizeBytes,
-                payload.BlockCount,
-                payload.DedupedBlocks,
-                payload.NewBlocks,
-                blocks);
+            return result;
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
@@ -145,17 +154,20 @@ internal sealed class RustFileContentStore : IFileContentStore
 
         try
         {
-            var payload = blocks
-                .OrderBy(b => b.Sequence)
-                .Select(b => new RestoreBlockPayload
-                {
-                    BlockHashBlake3 = b.BlockHashBlake3,
-                    LengthBytes = b.LengthBytes
-                })
-                .ToList();
+            var written = await _scheduler.RunAsync(() =>
+            {
+                var payload = blocks
+                    .OrderBy(b => b.Sequence)
+                    .Select(b => new RestoreBlockPayload
+                    {
+                        BlockHashBlake3 = b.BlockHashBlake3,
+                        LengthBytes = b.LengthBytes
+                    })
+                    .ToList();
 
-            var json = JsonSerializer.Serialize(payload);
-            var written = VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
+                var json = JsonSerializer.Serialize(payload);
+                return VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
+            }, ct);
 
             _log.LogInformation(
                 "Restored file from native block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
@@ -641,4 +653,3 @@ internal sealed class RustFileContentStore : IFileContentStore
         public int LengthBytes { get; init; }
     }
 }
-

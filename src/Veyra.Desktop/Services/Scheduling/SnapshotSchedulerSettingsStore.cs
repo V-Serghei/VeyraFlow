@@ -19,15 +19,15 @@ public sealed class SnapshotSchedulerSettingsStore : ISnapshotSchedulerSettingsS
         _settingsPath = Path.Combine(root, "scheduler-settings.json");
     }
 
-    public async Task<SnapshotSchedulerUserSettings?> LoadAsync(CancellationToken ct = default)
+    public SnapshotSchedulerUserSettings? Load()
     {
         try
         {
             if (!File.Exists(_settingsPath))
                 return null;
 
-            await using var stream = File.OpenRead(_settingsPath);
-            var model = await JsonSerializer.DeserializeAsync<SnapshotSchedulerUserSettings>(stream, cancellationToken: ct);
+            var json = File.ReadAllText(_settingsPath);
+            var model = JsonSerializer.Deserialize<SnapshotSchedulerUserSettings>(json);
             if (model is null)
                 return null;
 
@@ -42,6 +42,9 @@ public sealed class SnapshotSchedulerSettingsStore : ISnapshotSchedulerSettingsS
             return null;
         }
     }
+
+    public Task<SnapshotSchedulerUserSettings?> LoadAsync(CancellationToken ct = default)
+        => Task.FromResult(Load());
 
     public async Task SaveAsync(SnapshotSchedulerUserSettings settings, CancellationToken ct = default)
     {

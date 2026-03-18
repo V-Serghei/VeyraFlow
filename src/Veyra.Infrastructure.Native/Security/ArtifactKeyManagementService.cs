@@ -35,7 +35,20 @@ internal sealed class ArtifactKeyManagementService(
         defaultValue: true);
 
     public void EnsureInitialized()
-        => EnsureInitializedAsync().GetAwaiter().GetResult();
+    {
+        if (!EncryptionEnabled || _initialized)
+            return;
+
+        _initGate.Wait();
+        try
+        {
+            InitializeCore();
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
 
     public async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
@@ -45,18 +58,7 @@ internal sealed class ArtifactKeyManagementService(
         await _initGate.WaitAsync(ct);
         try
         {
-            if (_initialized)
-                return;
-
-            _masterKey = masterKeyStore.LoadOrCreateMasterKey();
-            _ring = LoadOrCreateRingDocument();
-            _initialized = true;
-
-            log.LogInformation(
-                "Artifact key-management initialized. ActiveKey {ActiveKeyId}. Keys {Count}. MasterProtection {Protection}",
-                _ring.ActiveKeyId,
-                _ring.Keys.Count,
-                masterKeyStore.ProtectionMechanism);
+            InitializeCore();
         }
         finally
         {
@@ -196,6 +198,22 @@ internal sealed class ArtifactKeyManagementService(
             material = new ArtifactEncryptionKeyMaterial(record.KeyId, DeriveKeyMaterial(record).ToArray());
             return true;
         }
+    }
+
+    private void InitializeCore()
+    {
+        if (_initialized)
+            return;
+
+        _masterKey = masterKeyStore.LoadOrCreateMasterKey();
+        _ring = LoadOrCreateRingDocument();
+        _initialized = true;
+
+        log.LogInformation(
+            "Artifact key-management initialized. ActiveKey {ActiveKeyId}. Keys {Count}. MasterProtection {Protection}",
+            _ring.ActiveKeyId,
+            _ring.Keys.Count,
+            masterKeyStore.ProtectionMechanism);
     }
 
     private ArtifactKeyRingDocument LoadOrCreateRingDocument()

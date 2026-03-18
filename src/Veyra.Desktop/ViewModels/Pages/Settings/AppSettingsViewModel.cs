@@ -26,8 +26,10 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Observability;
 using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.Onboarding;
 using Veyra.Desktop.Services.Security;
@@ -37,6 +39,7 @@ using Veyra.Desktop.Services.System;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
+using Veyra.Domain.Observability;
 
 namespace Veyra.Desktop.ViewModels.Pages.Settings;
 
@@ -148,7 +151,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly IWindowsAutostartService _autostart;
     private readonly ISnapshotScheduler _snapshotScheduler;
     private readonly ISnapshotSchedulerSettingsStore _snapshotSchedulerSettingsStore;
+    private readonly IRuntimeObservabilityControlService _runtimeObservability;
     private readonly SnapshotSchedulerOptions _snapshotSchedulerOptions;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly IMediator _mediator;
     private readonly ILogger<AppSettingsViewModel> _log;
     private readonly OnboardingStateService _onboardingState;
@@ -161,6 +166,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private bool _suppressThemeSelectionChanged;
     private bool _suppressExperienceSelectionChanged;
     private bool _suppressSensitiveActionToggleChanged;
+    private bool _isLanguageRefreshInProgress;
     [ObservableProperty] private bool _isExperienceModeChangeInProgress;
     private bool _hasActiveSyncWork;
     private readonly Dictionary<int, bool> _stallStateByRepositoryId = [];
@@ -168,6 +174,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private Task? _syncStatusAutoRefreshTask;
     private LocalBlockStorageMetricsDto? _lastLocalStorageMetrics;
     private AppDiagnosticsReportDto? _lastDiagnosticsReport;
+    private CancellationTokenSource? _loadCts;
+    private long _loadRequestId;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralTabSelected))]
@@ -260,6 +268,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [ObservableProperty] private string _systemDiagnosticsDedupStatusText = string.Empty;
     [ObservableProperty] private string _systemDiagnosticsNativeRuntimeText = string.Empty;
     [ObservableProperty] private string _systemDiagnosticsMessage = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RuntimeDiagnosticsStateText))]
+    [NotifyPropertyChangedFor(nameof(ToggleRuntimeDiagnosticsLabel))]
+    private bool _isRuntimeDiagnosticsEnabled;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RuntimeLoggingStateText))]
+    [NotifyPropertyChangedFor(nameof(ToggleRuntimeLoggingLabel))]
+    private bool _isRuntimeLoggingEnabled;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ToggleRuntimeDiagnosticsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ToggleRuntimeLoggingCommand))]
+    private bool _isRuntimeObservabilityBusy;
+    [ObservableProperty] private string _runtimeObservabilityMessage = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRepositorySyncIssues))]
     private int _repositorySyncIssueCount;
@@ -363,6 +384,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public event Action? BackRequested;
     public event Func<int, Task>? OpenRepositorySettingsRequested;
     public event Func<string, Task>? ExperienceModeRefreshRequested;
+    public event Func<string, Task>? LanguageRefreshRequested;
 
     public ObservableCollection<AppSettingsTabViewModel> Tabs { get; } =
     [
@@ -400,7 +422,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         IWindowsAutostartService autostart,
         ISnapshotScheduler snapshotScheduler,
         ISnapshotSchedulerSettingsStore snapshotSchedulerSettingsStore,
+        IRuntimeObservabilityControlService runtimeObservability,
         SnapshotSchedulerOptions snapshotSchedulerOptions,
+        IServiceScopeExecutor scopeExecutor,
         IMediator mediator,
         IConfiguration config,
         ILogger<AppSettingsViewModel> log)
@@ -422,7 +446,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _autostart = autostart;
         _snapshotScheduler = snapshotScheduler;
         _snapshotSchedulerSettingsStore = snapshotSchedulerSettingsStore;
+        _runtimeObservability = runtimeObservability;
         _snapshotSchedulerOptions = snapshotSchedulerOptions;
+        _scopeExecutor = scopeExecutor;
         _mediator = mediator;
         _log = log;
         _localization = LocalizationManager.Instance;
@@ -440,12 +466,13 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         ClearSystemDiagnostics();
         WindowsAutostartCommandText = Loc.T("common.not_available_short");
         LoadAutomaticSnapshotSettings();
-        LoadGlobalRetentionDefaultsAsync().GetAwaiter().GetResult();
+        ApplyGlobalRetentionDefaults(_retentionDefaultsStore.Load());
         ArtifactEncryptionStatusText = IsArtifactEncryptionEnabled
             ? Loc.T("app_settings.artifact_encryption_enabled")
             : Loc.T("app_settings.artifact_encryption_disabled");
         ArtifactEncryptionActiveKeyText = Loc.T("common.not_available_short");
         ArtifactEncryptionUpdatedText = Loc.T("common.not_available_short");
+        ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
         SelectedTab = Tabs.FirstOrDefault();
 
         _localization.LanguageChanged += OnLanguageChanged;
@@ -520,6 +547,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public string SystemDiagnosticsHelpText => IsBasicMode
         ? Loc.T("app_settings.system_diagnostics_help_basic")
         : Loc.T("app_settings.system_diagnostics_help_professional");
+    public bool CanToggleRuntimeObservability => !IsRuntimeObservabilityBusy;
+    public string RuntimeDiagnosticsStateText => IsRuntimeDiagnosticsEnabled
+        ? Loc.T("app_settings.runtime_observability_state_enabled")
+        : Loc.T("app_settings.runtime_observability_state_disabled");
+    public string RuntimeLoggingStateText => IsRuntimeLoggingEnabled
+        ? Loc.T("app_settings.runtime_observability_state_enabled")
+        : Loc.T("app_settings.runtime_observability_state_disabled");
+    public string ToggleRuntimeDiagnosticsLabel => IsRuntimeDiagnosticsEnabled
+        ? Loc.T("app_settings.runtime_diagnostics_disable_button")
+        : Loc.T("app_settings.runtime_diagnostics_enable_button");
+    public string ToggleRuntimeLoggingLabel => IsRuntimeLoggingEnabled
+        ? Loc.T("app_settings.runtime_logging_disable_button")
+        : Loc.T("app_settings.runtime_logging_enable_button");
     public string RepositorySyncHealthHelpText => IsBasicMode
         ? Loc.T("app_settings.repository_sync_health_help_basic")
         : Loc.T("app_settings.repository_sync_health_help_professional");
@@ -564,8 +604,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         if (_suppressLanguageSelectionChanged || value is null)
             return;
 
-        _localization.SetLanguage(value.Code);
-
+        _ = ApplyLanguageChangeAsync(value);
     }
 
     partial void OnSelectedThemeChanged(AppThemeOptionItemViewModel? value)
@@ -592,8 +631,80 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _ = SaveSensitiveActionVerificationSettingAsync(value);
     }
 
+    [RelayCommand(CanExecute = nameof(CanToggleRuntimeObservability))]
+    private Task ToggleRuntimeDiagnosticsAsync()
+        => SetRuntimeDiagnosticsAsync(!IsRuntimeDiagnosticsEnabled);
+
+    [RelayCommand(CanExecute = nameof(CanToggleRuntimeObservability))]
+    private Task ToggleRuntimeLoggingAsync()
+        => SetRuntimeLoggingAsync(!IsRuntimeLoggingEnabled);
+
+    private void ApplyRuntimeObservabilitySnapshot(RuntimeObservabilitySnapshot snapshot)
+    {
+        IsRuntimeDiagnosticsEnabled = snapshot.IsDiagnosticsEnabled;
+        IsRuntimeLoggingEnabled = snapshot.IsLoggingEnabled;
+    }
+
+    private async Task SetRuntimeDiagnosticsAsync(bool enabled)
+    {
+        if (IsRuntimeObservabilityBusy)
+            return;
+
+        try
+        {
+            IsRuntimeObservabilityBusy = true;
+            RuntimeObservabilityMessage = string.Empty;
+
+            await _runtimeObservability.SetDiagnosticsEnabledAsync(enabled);
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+            RuntimeObservabilityMessage = Loc.T(enabled
+                ? "app_settings.runtime_diagnostics_enabled_message"
+                : "app_settings.runtime_diagnostics_disabled_message");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to change runtime diagnostics state. Enabled {Enabled}", enabled);
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+            RuntimeObservabilityMessage = Loc.T("app_settings.runtime_observability_save_failed");
+        }
+        finally
+        {
+            IsRuntimeObservabilityBusy = false;
+        }
+    }
+
+    private async Task SetRuntimeLoggingAsync(bool enabled)
+    {
+        if (IsRuntimeObservabilityBusy)
+            return;
+
+        try
+        {
+            IsRuntimeObservabilityBusy = true;
+            RuntimeObservabilityMessage = string.Empty;
+
+            await _runtimeObservability.SetLoggingEnabledAsync(enabled);
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+            RuntimeObservabilityMessage = Loc.T(enabled
+                ? "app_settings.runtime_logging_enabled_message"
+                : "app_settings.runtime_logging_disabled_message");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to change runtime logging state. Enabled {Enabled}", enabled);
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+            RuntimeObservabilityMessage = Loc.T("app_settings.runtime_observability_save_failed");
+        }
+        finally
+        {
+            IsRuntimeObservabilityBusy = false;
+        }
+    }
+
     public async Task LoadAsync()
     {
+        var (requestId, ct) = BeginLoadRequest();
+
         try
         {
             IsLoading = true;
@@ -602,9 +713,24 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             GeneralMessage = string.Empty;
             LocalStorageMessage = string.Empty;
             SystemDiagnosticsMessage = string.Empty;
+            RuntimeObservabilityMessage = string.Empty;
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
             _log.LogInformation("Loading app settings");
+            await Task.Yield();
 
-            var active = await _userProfiles.GetActiveProfileAsync();
+            var activeTask = ExecuteIsolatedAsync<IUserProfileRepository, UserProfileSessionDto?>(
+                (profiles, token) => profiles.GetActiveProfileAsync(token),
+                ct);
+            var profilesTask = ExecuteIsolatedAsync<IUserProfileRepository, IReadOnlyList<UserProfileSessionDto>>(
+                (profiles, token) => profiles.GetProfilesAsync(token),
+                ct);
+            var repositoriesTask = SendIsolatedAsync(new GetAllRepositoriesQuery(), ct);
+
+            await Task.WhenAll(activeTask, profilesTask, repositoriesTask);
+            if (!IsLatestLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
+            var active = await activeTask;
             var activeTokenState = _tokenPolicy.Evaluate(active?.AccessToken);
             HasActiveProfile = active is not null;
             OnPropertyChanged(nameof(IsGuestMode));
@@ -626,7 +752,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 _suppressSensitiveActionToggleChanged = false;
             }
 
-            var profiles = await _userProfiles.GetProfilesAsync();
+            var profiles = await profilesTask;
             Profiles.Clear();
             foreach (var p in profiles)
             {
@@ -646,22 +772,20 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     LocalizeUserFacingMessage(tokenState.Description, "app_settings.no_token")));
             }
 
-            var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var repositories = await repositoriesTask;
             LocalRepositoryCount = repositories.Count;
             _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
             UpdateSyncStatusAutoRefreshState();
+            _ = RunDeferredSettingsLoadAsync(requestId, active, ct);
 
-            await LoadWindowsAutostartStateAsync();
-            await LoadArtifactEncryptionStateAsync();
-            await LoadLocalStorageMetricsAsync(silent: true);
-            await LoadCloudStorageMetricsAsync(active, silent: true);
-
-            await LoadOperationJournalAsync();
             _log.LogInformation(
-                "App settings loaded. Profiles {Profiles}. Repositories {Repositories}. SyncIssues {SyncIssues}",
+                "App settings primary state loaded. Profiles {Profiles}. Repositories {Repositories}. SyncIssues {SyncIssues}",
                 Profiles.Count,
                 LocalRepositoryCount,
                 RepositorySyncIssueCount);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -670,7 +794,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
         finally
         {
-            IsLoading = false;
+            if (IsLatestLoadRequest(requestId))
+                IsLoading = false;
         }
     }
 
@@ -1224,6 +1349,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             IsTransientActionBusy = true;
             TransientActionTitle = Loc.T(titleKey);
             TransientActionDetail = Loc.T(detailKey);
+            await Task.Yield();
             await action();
         }
         catch (Exception ex)
@@ -1788,8 +1914,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
     }
 
-    private async Task LoadWindowsAutostartStateAsync()
+    private async Task LoadWindowsAutostartStateAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (!_autostart.IsSupported)
         {
             IsWindowsAutostartEnabled = false;
@@ -1797,8 +1925,13 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             return;
         }
 
-        IsWindowsAutostartEnabled = await _autostart.IsEnabledAsync();
-        WindowsAutostartCommandText = await _autostart.GetRegisteredCommandAsync() ?? Loc.T("common.not_available_short");
+        var isEnabledTask = _autostart.IsEnabledAsync();
+        var commandTask = _autostart.GetRegisteredCommandAsync();
+        await Task.WhenAll(isEnabledTask, commandTask);
+        ct.ThrowIfCancellationRequested();
+
+        IsWindowsAutostartEnabled = await isEnabledTask;
+        WindowsAutostartCommandText = await commandTask ?? Loc.T("common.not_available_short");
     }
 
     private void LoadAutomaticSnapshotSettings()
@@ -1812,14 +1945,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private async Task LoadGlobalRetentionDefaultsAsync(CancellationToken ct = default)
     {
-        var settings = await _retentionDefaultsStore.LoadAsync(ct)
-                       ?? new RetentionDefaultsUserSettings(
-                           Enabled: false,
-                           MaxAgeDays: 30,
-                           MaxSnapshots: 200,
-                           MaxTotalSizeBytes: 2L * 1024 * 1024 * 1024,
-                           TriggerFilter: null,
-                           RunIntervalMinutes: 60);
+        ApplyGlobalRetentionDefaults(await _retentionDefaultsStore.LoadAsync(ct));
+    }
+
+    private void ApplyGlobalRetentionDefaults(RetentionDefaultsUserSettings? settings)
+    {
+        settings ??= new RetentionDefaultsUserSettings(
+            Enabled: false,
+            MaxAgeDays: 30,
+            MaxSnapshots: 200,
+            MaxTotalSizeBytes: 2L * 1024 * 1024 * 1024,
+            TriggerFilter: null,
+            RunIntervalMinutes: 60);
 
         GlobalRetentionEnabled = settings.Enabled;
         GlobalRetentionMaxAgeDays = settings.MaxAgeDays?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
@@ -1847,7 +1984,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             RunIntervalMinutes: Math.Clamp(GlobalRetentionRunIntervalMinutes, 5, 7 * 24 * 60));
     }
 
-    private async Task LoadArtifactEncryptionStateAsync()
+    private async Task LoadArtifactEncryptionStateAsync(CancellationToken ct = default)
     {
         ArtifactEncryptionStatusText = IsArtifactEncryptionEnabled
             ? Loc.T("app_settings.artifact_encryption_enabled")
@@ -1867,7 +2004,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         try
         {
-            var ring = await _mediator.Send(new GetArtifactKeyRingQuery());
+            var ring = await SendIsolatedAsync(new GetArtifactKeyRingQuery(), ct);
             ArtifactKeys.Clear();
 
             foreach (var key in ring.Keys
@@ -1900,6 +2037,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
             OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to load artifact encryption state");
@@ -1917,6 +2057,35 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLocalizationState();
+    }
+
+    private async Task ApplyLanguageChangeAsync(AppLanguageOptionItemViewModel value)
+    {
+        if (_isLanguageRefreshInProgress
+            || string.Equals(value.Code, _localization.CurrentLanguageCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _isLanguageRefreshInProgress = true;
+        try
+        {
+            GeneralMessage = string.Empty;
+            _localization.SetLanguage(value.Code);
+
+            if (LanguageRefreshRequested is not null)
+                await LanguageRefreshRequested.Invoke(value.Code);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to apply language change. Language {Language}", value.Code);
+            GeneralMessage = Loc.T("common.error_generic");
+            RebuildLanguageOptions();
+        }
+        finally
+        {
+            _isLanguageRefreshInProgress = false;
+        }
     }
 
     private void OnThemeChanged(object? sender, EventArgs e)
@@ -2062,6 +2231,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(PushAllRepositoriesLabel));
         OnPropertyChanged(nameof(ProcessQueueLabel));
         OnPropertyChanged(nameof(ArtifactEncryptionCoverageSummary));
+        OnPropertyChanged(nameof(RuntimeDiagnosticsStateText));
+        OnPropertyChanged(nameof(RuntimeLoggingStateText));
+        OnPropertyChanged(nameof(ToggleRuntimeDiagnosticsLabel));
+        OnPropertyChanged(nameof(ToggleRuntimeLoggingLabel));
         OnPropertyChanged(nameof(CanConfigureWindowsAutostart));
         OnPropertyChanged(nameof(HasArtifactKeys));
         OnPropertyChanged(nameof(ArtifactActiveKeyCount));
@@ -2094,16 +2267,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         try
         {
-            var active = await _userProfiles.GetActiveProfileAsync(ct);
-            var repositories = await _mediator.Send(new GetAllRepositoriesQuery(), ct);
+            var active = await ExecuteIsolatedAsync<IUserProfileRepository, UserProfileSessionDto?>(
+                (profiles, token) => profiles.GetActiveProfileAsync(token),
+                ct);
+            var repositories = await SendIsolatedAsync(new GetAllRepositoriesQuery(), ct);
 
             LocalRepositoryCount = repositories.Count;
             _hasActiveSyncWork = RefreshRepositorySyncIssues(repositories);
 
             if (refreshStorageMetrics)
             {
-                await LoadLocalStorageMetricsAsync(silentMetrics);
-                await LoadCloudStorageMetricsAsync(active, silent: silentMetrics);
+                await LoadLocalStorageMetricsAsync(silentMetrics, ct);
+                await LoadCloudStorageMetricsAsync(active, silent: silentMetrics, ct);
             }
 
             UpdateSyncStatusAutoRefreshState();
@@ -2114,7 +2289,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
     }
 
-    private async Task LoadCloudStorageMetricsAsync(UserProfileSessionDto? activeProfile, bool silent)
+    private async Task LoadCloudStorageMetricsAsync(
+        UserProfileSessionDto? activeProfile,
+        bool silent,
+        CancellationToken ct = default)
     {
         if (!TryResolveCloudAccessToken(activeProfile, silent, out var accessToken))
             return;
@@ -2122,7 +2300,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         CloudStorageMetricsDto? metrics;
         try
         {
-            metrics = await _cloudSyncService.GetStorageMetricsAsync(accessToken);
+            metrics = await _cloudSyncService.GetStorageMetricsAsync(accessToken, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -2168,14 +2350,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             CloudStorageMessage = Loc.T("app_settings.cloud_storage_metrics_loaded");
     }
 
-    private async Task LoadLocalStorageMetricsAsync(bool silent)
+    private async Task LoadLocalStorageMetricsAsync(bool silent, CancellationToken ct = default)
     {
         try
         {
-            var metrics = await _localStorageMetrics.GetMetricsAsync();
+            var metrics = await ExecuteIsolatedAsync<ILocalBlockStorageMetricsService, LocalBlockStorageMetricsDto>(
+                (service, token) => service.GetMetricsAsync(token),
+                ct);
             ApplyLocalStorageMetrics(metrics);
             if (!silent)
                 LocalStorageMessage = Loc.T("app_settings.local_storage_metrics_loaded");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -2996,11 +3183,77 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         }
     }
 
-    private async Task LoadOperationJournalAsync()
+    private (long RequestId, CancellationToken Token) BeginLoadRequest()
+    {
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _loadCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        var requestId = Interlocked.Increment(ref _loadRequestId);
+        return (requestId, cts.Token);
+    }
+
+    private bool IsLatestLoadRequest(long requestId)
+        => requestId == Interlocked.Read(ref _loadRequestId);
+
+    private Task<TResponse> SendIsolatedAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
+        => _scopeExecutor.ExecuteAsync<IMediator, TResponse>((mediator, token) => mediator.Send(request, token), ct);
+
+    private Task<TResult> ExecuteIsolatedAsync<TService, TResult>(
+        Func<TService, CancellationToken, Task<TResult>> operation,
+        CancellationToken ct = default)
+        where TService : notnull
+        => _scopeExecutor.ExecuteAsync(operation, ct);
+
+    private async Task RunDeferredSettingsLoadAsync(
+        long requestId,
+        UserProfileSessionDto? activeProfile,
+        CancellationToken ct)
     {
         try
         {
-            var entries = await _journal.GetRecentAsync(5);
+            await Task.WhenAll(
+                RunDeferredSettingsSectionAsync("windows_autostart", () => LoadWindowsAutostartStateAsync(ct), ct),
+                RunDeferredSettingsSectionAsync("artifact_encryption", () => LoadArtifactEncryptionStateAsync(ct), ct),
+                RunDeferredSettingsSectionAsync("local_storage_metrics", () => LoadLocalStorageMetricsAsync(silent: true, ct), ct),
+                RunDeferredSettingsSectionAsync("cloud_storage_metrics", () => LoadCloudStorageMetricsAsync(activeProfile, silent: true, ct), ct),
+                RunDeferredSettingsSectionAsync("operation_journal", () => LoadOperationJournalAsync(ct), ct));
+
+            if (!IsLatestLoadRequest(requestId) || ct.IsCancellationRequested)
+                return;
+
+            _log.LogInformation("App settings deferred sections loaded");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RunDeferredSettingsSectionAsync(
+        string sectionName,
+        Func<Task> loadAsync,
+        CancellationToken ct)
+    {
+        try
+        {
+            await loadAsync();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Deferred app settings section load failed. Section {Section}", sectionName);
+        }
+    }
+
+    private async Task LoadOperationJournalAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var entries = await ExecuteIsolatedAsync<IOperationJournalService, IReadOnlyList<OperationJournalEntryDto>>(
+                (journal, token) => journal.GetRecentAsync(5, token),
+                ct);
             OperationJournalItems.Clear();
 
             foreach (var entry in entries)
@@ -3021,6 +3274,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             }
 
             OnPropertyChanged(nameof(HasOperationJournalItems));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
@@ -3430,4 +3686,3 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         return $"{localMetrics.ReducedPercentFloor}%";
     }
 }
-
