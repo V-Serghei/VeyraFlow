@@ -36,10 +36,6 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private const int CollapsedVisibleFileVersions = 4;
     private const int ExplorerFilterDebounceMs = 100;
 
-    private sealed record ExplorerTreeBuildResult(
-        ExplorerTreeNodeViewModel Root,
-        Dictionary<string, ExplorerTreeNodeViewModel> Nodes);
-
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
     private readonly ILogger<RepositoryExplorerViewModel> _log;
@@ -4427,49 +4423,6 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             "relink" => Loc.T("explorer.maintenance.action.relink"),
             _ => actionName
         };
-    }
-
-    private readonly record struct SearchDirectives(
-        string TextQuery,
-        string EntryTypeFilter,
-        string ExtensionFilter,
-        string ModifiedWindowFilter,
-        double? MinSizeMb,
-        double? MaxSizeMb)
-    {
-        public static SearchDirectives Empty => new(
-            TextQuery: string.Empty,
-            EntryTypeFilter: string.Empty,
-            ExtensionFilter: string.Empty,
-            ModifiedWindowFilter: string.Empty,
-            MinSizeMb: null,
-            MaxSizeMb: null);
-    }
-
-    private readonly record struct SearchSnapshotHistoryDirectives(
-        string TextQuery,
-        string TriggerFilter,
-        string TagFilter,
-        int? MinChangedFiles)
-    {
-        public static SearchSnapshotHistoryDirectives Empty => new(
-            TextQuery: string.Empty,
-            TriggerFilter: string.Empty,
-            TagFilter: string.Empty,
-            MinChangedFiles: null);
-    }
-
-    private readonly record struct SearchSnapshotFileDirectives(
-        string TextQuery,
-        string ChangeKindFilter,
-        string ExtensionFilter,
-        double? MinSizeDeltaKb)
-    {
-        public static SearchSnapshotFileDirectives Empty => new(
-            TextQuery: string.Empty,
-            ChangeKindFilter: string.Empty,
-            ExtensionFilter: string.Empty,
-            MinSizeDeltaKb: null);
     }
 
     private string BuildSuggestedBundleFileName()

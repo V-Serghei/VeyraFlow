@@ -8,8 +8,6 @@ using AvaloniaApplication = Avalonia.Application;
 
 namespace Veyra.Desktop.Styling;
 
-public sealed record ThemeOption(string Code, string LocalizationKey);
-
 public sealed class ThemeManager : INotifyPropertyChanged
 {
     private readonly LocalizationSettingsStore _settingsStore = new();

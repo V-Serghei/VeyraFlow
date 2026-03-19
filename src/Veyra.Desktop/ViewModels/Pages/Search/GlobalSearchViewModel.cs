@@ -19,62 +19,18 @@ using Veyra.Desktop.Services.Execution;
 
 namespace Veyra.Desktop.ViewModels.Pages.Search;
 
-public sealed record GlobalSearchRepositoryFilterOptionViewModel(int? RepositoryId, string Label);
-
-public sealed record GlobalSearchRepositoryResultItemViewModel(
-    int RepositoryId,
-    string Name,
-    string DirectoryPath,
-    string Description,
-    string FormatsText,
-    string MetricsText,
-    string StatusText,
-    string LastScannedText,
-    bool HasDescription,
-    bool HasFormats);
-
-public sealed record GlobalSearchFileResultItemViewModel(
-    int RepositoryId,
-    string RepositoryName,
-    string RelativePath,
-    bool IsDirectory,
-    string Name,
-    string ParentPath,
-    string KindText,
-    string ExtensionText,
-    string SizeText,
-    string ModifiedText,
-    string RepositoryBadgeText,
-    bool HasExtension,
-    bool HasParentPath);
-
-public sealed record GlobalSearchSnapshotResultItemViewModel(
-    int RepositoryId,
-    long SnapshotId,
-    string RepositoryName,
-    string Title,
-    string TriggerText,
-    string CreatedText,
-    string ChangedFilesText,
-    string TagsText,
-    bool HasTitle,
-    bool HasTags);
-
 public sealed partial class GlobalSearchViewModel : ObservableObject
 {
     private const int MaxVisibleFileResults = 500;
     private const int MaxRepositoryLoadConcurrency = 6;
     private const int FilterDebounceMs = 120;
 
-    private sealed record IndexedEntry(RepositoryDto Repository, RepositoryScanEntryDto Entry);
-    private sealed record IndexedSnapshot(RepositoryDto Repository, RepositorySnapshotHistoryItemDto Snapshot);
-
     private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly ILogger<GlobalSearchViewModel> _log;
     private readonly LocalizationManager _localization;
     private readonly List<RepositoryDto> _repositorySource = [];
-    private readonly List<IndexedEntry> _entrySource = [];
-    private readonly List<IndexedSnapshot> _snapshotSource = [];
+    private readonly List<GlobalSearchIndexedEntry> _entrySource = [];
+    private readonly List<GlobalSearchIndexedSnapshot> _snapshotSource = [];
     private int _matchedRepositoryCount;
     private int _matchedFileCount;
     private int _matchedSnapshotCount;
@@ -230,8 +186,8 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             IsLoading = false;
             await ApplyFiltersAsync(debounce: false);
 
-            var entryResults = new ConcurrentBag<IndexedEntry>();
-            var snapshotResults = new ConcurrentBag<IndexedSnapshot>();
+            var entryResults = new ConcurrentBag<GlobalSearchIndexedEntry>();
+            var snapshotResults = new ConcurrentBag<GlobalSearchIndexedSnapshot>();
             var failedRepositoryNames = new ConcurrentBag<string>();
             var concurrency = Math.Clamp(Environment.ProcessorCount, 2, MaxRepositoryLoadConcurrency);
             var totalRepositories = _repositorySource.Count;
@@ -248,10 +204,10 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                     await Task.WhenAll(entriesTask, snapshotsTask);
 
                     foreach (var entry in await entriesTask)
-                        entryResults.Add(new IndexedEntry(repository, entry));
+                        entryResults.Add(new GlobalSearchIndexedEntry(repository, entry));
 
                     foreach (var snapshot in await snapshotsTask)
-                        snapshotResults.Add(new IndexedSnapshot(repository, snapshot));
+                        snapshotResults.Add(new GlobalSearchIndexedSnapshot(repository, snapshot));
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -824,7 +780,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             !string.IsNullOrWhiteSpace(formats));
     }
 
-    private GlobalSearchFileResultItemViewModel MapEntry(IndexedEntry row)
+    private GlobalSearchFileResultItemViewModel MapEntry(GlobalSearchIndexedEntry row)
     {
         var parentPath = NormalizeParent(row.Entry.ParentRelativePath) ?? string.Empty;
         var extension = row.Entry.IsDirectory ? string.Empty : NormalizeExtensionFilter(row.Entry.Extension ?? string.Empty);
@@ -845,7 +801,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             !string.IsNullOrWhiteSpace(parentPath));
     }
 
-    private GlobalSearchSnapshotResultItemViewModel MapSnapshot(IndexedSnapshot row)
+    private GlobalSearchSnapshotResultItemViewModel MapSnapshot(GlobalSearchIndexedSnapshot row)
     {
         var title = row.Snapshot.Title ?? string.Empty;
         var triggerText = Humanize(row.Snapshot.Trigger);
@@ -875,7 +831,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                    && repository.Description.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool MatchesEntryText(IndexedEntry row, string textQuery)
+    private static bool MatchesEntryText(GlobalSearchIndexedEntry row, string textQuery)
     {
         if (string.IsNullOrWhiteSpace(textQuery))
             return true;
@@ -886,7 +842,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                || row.Repository.DirectoryPath.Contains(textQuery, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool MatchesSnapshotText(IndexedSnapshot row, string textQuery)
+    private static bool MatchesSnapshotText(GlobalSearchIndexedSnapshot row, string textQuery)
     {
         if (string.IsNullOrWhiteSpace(textQuery))
             return true;

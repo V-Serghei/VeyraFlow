@@ -207,8 +207,4 @@ public sealed class AppDiagnosticsService(
             report.ErrorMessage);
     }
 
-    private sealed record NativeScanEntry(
-        string? RelativePath,
-        bool IsDirectory,
-        long SizeBytes);
 }

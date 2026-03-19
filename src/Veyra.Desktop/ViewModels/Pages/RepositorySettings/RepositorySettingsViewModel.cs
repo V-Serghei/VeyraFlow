@@ -21,7 +21,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
-using Veyra.Desktop.Models.Formatted;
+using Veyra.Desktop.Models.TrackedFormats;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Storage;

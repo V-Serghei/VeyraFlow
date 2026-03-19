@@ -608,48 +608,4 @@ internal sealed class RustFileContentStore : IFileContentStore
         Directory.CreateDirectory(root);
         return Path.GetFullPath(root);
     }
-    private sealed record StorePayload
-    {
-        [JsonPropertyName("file_size_bytes")]
-        public long FileSizeBytes { get; init; }
-
-        [JsonPropertyName("stored_size_bytes")]
-        public long StoredSizeBytes { get; init; }
-
-        [JsonPropertyName("block_count")]
-        public int BlockCount { get; init; }
-
-        [JsonPropertyName("deduped_blocks")]
-        public int DedupedBlocks { get; init; }
-
-        [JsonPropertyName("new_blocks")]
-        public int NewBlocks { get; init; }
-
-        [JsonPropertyName("blocks")]
-        public List<StoreBlockPayload> Blocks { get; init; } = [];
-    }
-
-    private sealed record StoreBlockPayload
-    {
-        [JsonPropertyName("sequence")]
-        public int Sequence { get; init; }
-
-        [JsonPropertyName("block_hash_blake3")]
-        public string BlockHashBlake3 { get; init; } = string.Empty;
-
-        [JsonPropertyName("length_bytes")]
-        public int LengthBytes { get; init; }
-
-        [JsonPropertyName("stored_size_bytes")]
-        public long StoredSizeBytes { get; init; }
-    }
-
-    private sealed class RestoreBlockPayload
-    {
-        [JsonPropertyName("block_hash_blake3")]
-        public string BlockHashBlake3 { get; init; } = string.Empty;
-
-        [JsonPropertyName("length_bytes")]
-        public int LengthBytes { get; init; }
-    }
 }

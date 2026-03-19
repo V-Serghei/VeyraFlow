@@ -622,11 +622,4 @@ internal static class VeyraCoreNative
             .ToList();
     }
 
-    private sealed record NativeLibraryProbe(
-        IntPtr Handle,
-        string? LoadedPath,
-        HashSet<string> ExportedEntrypoints,
-        IReadOnlyList<string> CandidatePaths,
-        string? LoadError);
 }
-

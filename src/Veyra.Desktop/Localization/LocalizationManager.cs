@@ -302,30 +302,3 @@ public sealed class LocalizationManager : INotifyPropertyChanged
         }
     }
 }
-
-public sealed record LocalizationLanguageOption(string Code, string DisplayName);
-
-public sealed record LocalizationResourceIssue(string LanguageCode, string FilePath, string? Key, string Message);
-
-public sealed record LocalizationLanguageDiagnostics(
-    string LanguageCode,
-    int ResourceFileCount,
-    int TotalKeysCount,
-    int MissingKeysCount,
-    int ExtraKeysCount,
-    int DuplicateKeysCount,
-    IReadOnlyList<string> MissingKeysSample,
-    IReadOnlyList<string> DuplicateKeysSample,
-    IReadOnlyList<string> ExtraKeysSample)
-{
-    public static LocalizationLanguageDiagnostics Empty(string languageCode) => new(
-        LanguageCode: languageCode,
-        ResourceFileCount: 0,
-        TotalKeysCount: 0,
-        MissingKeysCount: 0,
-        ExtraKeysCount: 0,
-        DuplicateKeysCount: 0,
-        MissingKeysSample: [],
-        DuplicateKeysSample: [],
-        ExtraKeysSample: []);
-}

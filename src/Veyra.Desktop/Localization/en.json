@@ -57,6 +57,7 @@
     "login.error_sign_in_failed":  "Sign in failed.",
     "login.error_passwords_mismatch":  "Passwords do not match.",
     "login.error_registration_failed":  "Registration failed.",
+    "common.error_generic":  "Something went wrong.",
     "login.loading_title_sign_in":  "Signing you in",
     "login.loading_detail_sign_in":  "We are verifying your account details and preparing the session.",
     "login.loading_title_register":  "Creating your account",

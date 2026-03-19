@@ -6,8 +6,6 @@ using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.Styling;
 
-public sealed record UserExperienceOption(string Code, string LocalizationKey, string DescriptionKey);
-
 public sealed class UserExperienceManager : INotifyPropertyChanged
 {
     private readonly LocalizationSettingsStore _settingsStore = new();

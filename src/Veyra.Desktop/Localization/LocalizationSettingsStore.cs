@@ -77,7 +77,7 @@ internal sealed class LocalizationSettingsStore
             if (!string.IsNullOrWhiteSpace(directory))
                 Directory.CreateDirectory(directory);
 
-            var model = new SettingsModel(
+            var model = new LocalizationSettingsModel(
                 language: string.IsNullOrWhiteSpace(languageCode) ? null : languageCode.Trim(),
                 theme: string.IsNullOrWhiteSpace(themeCode) ? null : themeCode.Trim(),
                 experience: string.IsNullOrWhiteSpace(experienceCode) ? null : experienceCode.Trim(),
@@ -96,7 +96,7 @@ internal sealed class LocalizationSettingsStore
         }
     }
 
-    private SettingsModel? LoadModel()
+    private LocalizationSettingsModel? LoadModel()
     {
         if (!File.Exists(_settingsPath))
             return null;
@@ -118,12 +118,10 @@ internal sealed class LocalizationSettingsStore
             ? experienceElement.GetString()
             : null;
 
-        return new SettingsModel(
+        return new LocalizationSettingsModel(
             language: language,
             theme: theme,
             experience: experience,
             updatedAtUtc: DateTime.UtcNow);
     }
-
-    private sealed record SettingsModel(string? language, string? theme, string? experience, DateTime updatedAtUtc);
 }

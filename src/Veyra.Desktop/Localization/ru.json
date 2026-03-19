@@ -57,6 +57,7 @@
     "login.error_sign_in_failed":  "Не удалось выполнить вход.",
     "login.error_passwords_mismatch":  "Пароли не совпадают.",
     "login.error_registration_failed":  "Не удалось зарегистрироваться.",
+    "common.error_generic":  "Что-то пошло не так.",
     "login.loading_title_sign_in":  "Выполняем вход",
     "login.loading_detail_sign_in":  "Проверяем данные аккаунта и подготавливаем рабочую сессию.",
     "login.loading_title_register":  "Создаем аккаунт",

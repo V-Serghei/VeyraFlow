@@ -12,23 +12,6 @@ public sealed class AuthHttpService : IAuthService
     private readonly HttpClient _http;
     private readonly ILogger<AuthHttpService> _log;
 
-    private sealed record AuthRequest(string Username, string? Email, string Password);
-
-    private sealed record AuthResponse(
-        bool Ok,
-        long UserId,
-        string Username,
-        string? Email,
-        long? SessionId,
-        string AccessToken,
-        string? RefreshToken,
-        bool IsNewUser,
-        DateTime? ExpiresAtUtc,
-        DateTime? RefreshExpiresAtUtc,
-        string? Message);
-
-    private sealed record RefreshRequest(string RefreshToken);
-
     public AuthHttpService(HttpClient http, ILogger<AuthHttpService> log)
     {
         _http = http;

@@ -3,7 +3,7 @@
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:formatted="clr-namespace:Veyra.Desktop.Models.Formatted"
+        xmlns:formatted="clr-namespace:Veyra.Desktop.Models.TrackedFormats"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         mc:Ignorable="d"
         x:Class="Veyra.Desktop.Views.Windows.CreateRepositoryWindow"

@@ -3,40 +3,18 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
 using Veyra.Application.Abstractions.Sync;
-using Veyra.Desktop.Services.Navigation;
-using Veyra.Desktop.Services.Execution;
-using Veyra.Desktop.Services.Maintenance;
-using Veyra.Desktop.Services.Monitoring;
 using Veyra.Desktop.Services.Observability;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Sync;
-using Veyra.Desktop.Services.State;
-using Veyra.Desktop.Services.Preview;
-using Veyra.Desktop.ViewModels.Pages.AuthWindow;
-using Veyra.Desktop.ViewModels.Pages.Dashboard;
-using Veyra.Desktop.ViewModels.Pages.Explorer;
-using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
-using Veyra.Desktop.ViewModels.Pages.Search;
-using Veyra.Desktop.ViewModels.Pages.SetupWizard;
-using Veyra.Desktop.ViewModels.Pages.Settings;
-using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
-using Veyra.Desktop.ViewModels.Windows;
-using Veyra.Desktop.Views;
-using Veyra.Desktop.Views.Pages.SetupWizard;
-using Veyra.Desktop.Views.Windows;
-using Veyra.Desktop.Services.Security;
-using Veyra.Desktop.Services.Onboarding;
-using Veyra.Desktop.Services.System;
-using Veyra.Desktop.Services.Storage;
+using Veyra.Domain.Observability;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
-using Veyra.Domain.Observability;
 using Veyra.Shared.Logging;
 
 namespace Veyra.Desktop.CompositionRoot;
 
-public static class DependencyInjection
+public static partial class DependencyInjection
 {
     public static ServiceProvider BuildServiceProvider(string connectionString)
     {
@@ -60,10 +38,8 @@ public static class DependencyInjection
         services.AddApplication();
         services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
-        services.AddScoped<IRepositoryCloudSyncOrchestrator, RepositoryCloudSyncOrchestrator>();
-        services.AddSingleton<IRepositoryFsEventQueueService, RepositoryFsEventQueueService>();
-        services.AddSingleton<INativeWordCompareService, NativeWordCompareService>();
         services.AddInfrastructureNative(cfg);
+        services.AddDesktopInfrastructureOverrides();
 
         var schedulerOptions = new SnapshotSchedulerOptions
         {
@@ -82,100 +58,15 @@ public static class DependencyInjection
             IntegrityIssueSampleLimit = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIssueSampleLimit") ?? 200
         };
 
-        services.AddSingleton(schedulerOptions);
-        services.AddSingleton<ISnapshotSchedulerSettingsStore>(schedulerSettingsStore);
-        services.AddSingleton<IRuntimeObservabilitySettingsStore>(runtimeObservabilitySettingsStore);
-        services.AddSingleton<IRuntimeObservabilityControlService>(runtimeObservability);
-        services.AddSingleton<IRuntimeObservabilityState>(runtimeObservability);
-        services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
-        services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
-        services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
-        services.AddSingleton<OnboardingStateService>();
-
-        services.AddSingleton<IWindowService, WindowService>();
-        services.AddSingleton<INavigationService, NavigationService>();
-        services.AddSingleton<IServiceScopeExecutor, ServiceScopeExecutor>();
-        services.AddSingleton<IRetentionDefaultsStore, RetentionDefaultsStore>();
-        services.AddSingleton<IAppTransientStateMaintenanceService, AppTransientStateMaintenanceService>();
-        services.AddTransient<IRepositoryRetentionDefaultsApplier, RepositoryRetentionDefaultsApplier>();
-        services.AddTransient<ISensitiveActionGuard, SensitiveActionGuard>();
-        services.AddTransient<IAudioPreviewPlaybackService, AudioPreviewPlaybackService>();
-        services.AddTransient<IOperationMonitorService, OperationMonitorService>();
-        services.AddScoped<ILocalBlockStorageMetricsService, LocalBlockStorageMetricsService>();
-        services.AddSingleton<IWindowsAutostartService>(_ =>
-            OperatingSystem.IsWindows()
-                ? new WindowsAutostartService()
-                : new UnsupportedWindowsAutostartService());
-
-        services.AddTransient<WelcomeWindowViewModel>();
-        services.AddTransient<WelcomeIntroViewModel>();
-        services.AddTransient<WelcomeTipsOptInViewModel>();
-        services.AddTransient<LoginViewModel>();
-
-        services.AddTransient<SetupWizardViewModel>();
-        services.AddTransient<SelectDirectoriesViewModel>();
-        services.AddTransient<SelectFormatsViewModel>();
-
-        services.AddTransient<RepositoryDashboardViewModel>();
-        services.AddTransient<RepositoryExplorerViewModel>();
-        services.AddTransient<RepositorySettingsViewModel>();
-        services.AddTransient<GlobalSearchViewModel>();
-        services.AddTransient<AppSettingsViewModel>();
-
-        services.AddTransient<CreateRepositoryWindowViewModel>();
-        services.AddTransient<SnapshotNameDialogWindowViewModel>();
-        services.AddTransient<FileVersionCompareWindowViewModel>();
-        services.AddTransient<ConfirmActionWindowViewModel>();
-        services.AddTransient<PasswordVerificationWindowViewModel>();
-        services.AddTransient<AuthDialogWindowViewModel>();
-        services.AddTransient<OperationJournalWindowViewModel>();
-        services.AddTransient<OperationMonitorWindowViewModel>();
-        services.AddTransient<RepositoryBundleExportWizardWindowViewModel>();
-        services.AddTransient<RepositoryBundleImportWizardWindowViewModel>();
-
-        services.AddTransient<MainWindowViewModel>();
-        services.AddTransient<InfoWindowViewModel>();
-
-        services.AddTransient<WelcomeWindow>(sp =>
-            new WelcomeWindow { DataContext = sp.GetRequiredService<WelcomeWindowViewModel>() });
-
-        services.AddTransient<MainWindow>(sp =>
-            new MainWindow { DataContext = sp.GetRequiredService<MainWindowViewModel>() });
-
-        services.AddTransient<InfoWindow>(sp =>
-            new InfoWindow { DataContext = sp.GetRequiredService<InfoWindowViewModel>() });
-
-        services.AddTransient<CreateRepositoryWindow>(sp =>
-            new CreateRepositoryWindow { DataContext = sp.GetRequiredService<CreateRepositoryWindowViewModel>() });
-
-        services.AddTransient<SnapshotNameDialogWindow>(sp =>
-            new SnapshotNameDialogWindow { DataContext = sp.GetRequiredService<SnapshotNameDialogWindowViewModel>() });
-
-        services.AddTransient<FileVersionCompareWindow>(sp =>
-            new FileVersionCompareWindow { DataContext = sp.GetRequiredService<FileVersionCompareWindowViewModel>() });
-
-        services.AddTransient<ConfirmActionWindow>(sp =>
-            new ConfirmActionWindow { DataContext = sp.GetRequiredService<ConfirmActionWindowViewModel>() });
-
-        services.AddTransient<PasswordVerificationWindow>(sp =>
-            new PasswordVerificationWindow { DataContext = sp.GetRequiredService<PasswordVerificationWindowViewModel>() });
-
-        services.AddTransient<AuthDialogWindow>(sp =>
-            new AuthDialogWindow { DataContext = sp.GetRequiredService<AuthDialogWindowViewModel>() });
-
-        services.AddTransient<OperationJournalWindow>(sp =>
-            new OperationJournalWindow { DataContext = sp.GetRequiredService<OperationJournalWindowViewModel>() });
-
-        services.AddTransient<OperationMonitorWindow>(sp =>
-            new OperationMonitorWindow { DataContext = sp.GetRequiredService<OperationMonitorWindowViewModel>() });
-
-        services.AddTransient<RepositoryBundleExportWizardWindow>(sp =>
-            new RepositoryBundleExportWizardWindow { DataContext = sp.GetRequiredService<RepositoryBundleExportWizardWindowViewModel>() });
-
-        services.AddTransient<RepositoryBundleImportWizardWindow>(sp =>
-            new RepositoryBundleImportWizardWindow { DataContext = sp.GetRequiredService<RepositoryBundleImportWizardWindowViewModel>() });
-
-        services.AddTransient<SetupWizardWindow>();
+        services.AddDesktopRuntimeServices(
+            schedulerSettingsStore,
+            runtimeObservabilitySettingsStore,
+            runtimeObservability,
+            schedulerOptions);
+        services.AddDesktopPlatformServices();
+        services.AddDesktopPageViewModels();
+        services.AddDesktopWindowViewModels();
+        services.AddDesktopViews();
 
         return services.BuildServiceProvider();
     }

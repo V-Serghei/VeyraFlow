@@ -3,7 +3,7 @@
              xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.RepositorySettings"
-             xmlns:formatted="clr-namespace:Veyra.Desktop.Models.Formatted"
+             xmlns:formatted="clr-namespace:Veyra.Desktop.Models.TrackedFormats"
              xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              x:Class="Veyra.Desktop.Views.Pages.RepositorySettings.RepositorySettingsView"
              x:Name="Root"

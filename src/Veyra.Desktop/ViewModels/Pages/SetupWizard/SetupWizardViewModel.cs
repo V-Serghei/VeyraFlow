@@ -16,8 +16,6 @@ using Veyra.Desktop.Services.Maintenance;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
-public sealed record SetupWizardProgressLogItemViewModel(string TimestampText, string Message);
-
 public sealed class SetupWizardViewModel : INotifyPropertyChanged
 {
     private readonly IMediator _mediator;
