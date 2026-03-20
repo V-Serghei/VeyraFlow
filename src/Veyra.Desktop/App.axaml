@@ -14,4 +14,16 @@
         <StyleInclude Source="avares://Veyra.Desktop/Styles/Controls.axaml"/>
     </Application.Styles>
 
+    <TrayIcon.Icons>
+        <TrayIcons>
+            <TrayIcon Icon="/Assets/avalonia-logo.ico"
+                      ToolTipText="VeyraFlow"
+                      IsVisible="False">
+                <TrayIcon.Menu>
+                    <NativeMenu />
+                </TrayIcon.Menu>
+            </TrayIcon>
+        </TrayIcons>
+    </TrayIcon.Icons>
+
 </Application>

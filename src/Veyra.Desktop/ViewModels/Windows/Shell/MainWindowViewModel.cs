@@ -184,6 +184,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
         await TryStartPendingGuidedTourAsync();
     }
 
+    public Task ShowDashboardPageAsync()
+        => ShowDashboardAsync();
+
+    public Task ShowSearchPageAsync()
+        => OpenGlobalSearchAsync();
+
+    public Task ShowAppSettingsPageAsync()
+        => OpenGlobalSettingsAsync();
+
     private async Task OpenRepositoryAsync(int repositoryId)
     {
         _log.LogInformation("Opening repository explorer. RepositoryId {RepositoryId}", repositoryId);

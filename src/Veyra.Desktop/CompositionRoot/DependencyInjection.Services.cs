@@ -6,6 +6,7 @@ using Veyra.Desktop.Services.Monitoring;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Preview;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.System;
 
@@ -17,6 +18,7 @@ public static partial class DependencyInjection
     {
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<INavigationService, NavigationService>();
+        services.AddSingleton<IAppTrayService, AppTrayService>();
         services.AddSingleton<IServiceScopeExecutor, ServiceScopeExecutor>();
         services.AddSingleton<IRetentionDefaultsStore, RetentionDefaultsStore>();
         services.AddSingleton<IAppTransientStateMaintenanceService, AppTransientStateMaintenanceService>();

@@ -15,6 +15,7 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Persistence;
 using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.Styling;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
@@ -30,6 +31,7 @@ public partial class App : AvaloniaApplication
     public static IServiceProvider? _serviceProvider { get; private set; } = null!;
     private static ISnapshotScheduler? _snapshotScheduler;
     private static Task? _startupBackgroundTask;
+    private IAppTrayService? _trayService;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -51,6 +53,11 @@ public partial class App : AvaloniaApplication
             classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
             classicDesktop.Exit += OnDesktopExit;
 
+            _trayService = _serviceProvider.GetService<IAppTrayService>();
+            var trayIcon = TrayIcon.GetIcons(this)?.FirstOrDefault();
+            if (_trayService is not null && trayIcon is not null)
+                _trayService.Initialize(trayIcon);
+
             var nav = _serviceProvider.GetRequiredService<INavigationService>();
             nav.ShowWelcome();
 
@@ -67,6 +74,8 @@ public partial class App : AvaloniaApplication
     {
         try
         {
+            _trayService?.PrepareForShutdown();
+
             if (_startupBackgroundTask is { IsCompleted: false })
             {
                 Log.Information("Deferred startup task is still running during shutdown; skipping wait to keep shutdown responsive.");

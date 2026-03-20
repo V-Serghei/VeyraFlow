@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.VisualTree;
 using Avalonia.Threading;
 using Avalonia;
+using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.ViewModels.Windows;
 using System.ComponentModel;
 using System.Linq;
@@ -17,12 +18,15 @@ public partial class MainWindow : Window
     private const double GuidedTourBubblePadding = 18;
     private MainWindowViewModel? _tourViewModel;
     private bool _isGuidedTourRelayoutQueued;
+    private readonly IAppTrayService? _trayService;
 
     public MainWindow()
     {
+        _trayService = App._serviceProvider?.GetService(typeof(IAppTrayService)) as IAppTrayService;
         InitializeComponent();
         DataContextChanged += (_, _) => AttachTourViewModel();
         SizeChanged += OnSizeChanged;
+        Closing += OnClosing;
         Opened += (_, _) =>
         {
             WindowLayoutHelper.FitToWorkingArea(
@@ -48,6 +52,9 @@ public partial class MainWindow : Window
                 vm.OnLoaded();
         };
     }
+
+    private void OnClosing(object? sender, WindowClosingEventArgs e)
+        => _trayService?.HandleMainWindowClosing(this, e);
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {

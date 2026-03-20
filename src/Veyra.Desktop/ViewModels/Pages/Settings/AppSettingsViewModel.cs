@@ -919,7 +919,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             IsGlobalRetentionBusy = true;
             GlobalRetentionMessage = string.Empty;
 
-            var results = await _retention.RunDueRetentionAsync();
+            var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var retentionEnabledRepositories = repositories
+                .Where(static repository => repository.RetentionPolicy.Enabled)
+                .ToList();
+
+            var results = new List<RepositoryRetentionRunResultDto>(retentionEnabledRepositories.Count);
+            foreach (var repository in retentionEnabledRepositories)
+            {
+                var result = await _retention.RunRetentionAsync(repository.Id, dryRun: false);
+                results.Add(result);
+            }
+
             var affected = results.Count(result => result.PolicyApplied);
             GlobalRetentionMessage = Loc.F("app_settings.global_retention_cleanup_done", affected, results.Count);
             await AppendJournalAsync("info", "retention", "settings_global_retention_cleanup_now", GlobalRetentionMessage, ActiveUsername);
