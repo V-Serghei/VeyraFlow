@@ -86,6 +86,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private CancellationTokenSource? _syncStatusAutoRefreshCts;
     private Task? _syncStatusAutoRefreshTask;
     private LocalBlockStorageMetricsDto? _lastLocalStorageMetrics;
+    private CloudStorageMetricsDto? _lastCloudStorageMetrics;
     private AppDiagnosticsReportDto? _lastDiagnosticsReport;
     private CancellationTokenSource? _loadCts;
     private long _loadRequestId;
@@ -2117,12 +2118,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         foreach (var tab in Tabs)
             tab.RefreshLocalization();
 
+        if (!HasActiveProfile)
+        {
+            ActiveUsername = Loc.T("app_settings.not_signed_in");
+            ActiveEmail = Loc.T("common.not_available_short");
+            ActiveCloudUserText = Loc.T("common.not_available_short");
+            ActiveSessionTokenState = Loc.T("app_settings.no_token");
+        }
+
         TokenPolicyHint = LocalizeUserFacingMessage(_tokenPolicy.GetPolicySummary(), "common.not_available_short");
         RebuildLanguageOptions();
         RebuildThemeOptions();
         RebuildExperienceOptions();
         UpdateTabVisibility();
         UpdateLocalizationDiagnostics();
+        ArtifactEncryptionStatusText = IsArtifactEncryptionEnabled
+            ? Loc.T("app_settings.artifact_encryption_enabled")
+            : Loc.T("app_settings.artifact_encryption_disabled");
         OnPropertyChanged(nameof(IsBasicMode));
         OnPropertyChanged(nameof(IsProfessionalMode));
         OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
@@ -2136,6 +2148,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SyncSectionHelpText));
         OnPropertyChanged(nameof(CloudStorageHelpText));
         OnPropertyChanged(nameof(LocalStorageHelpText));
+        OnPropertyChanged(nameof(SystemDiagnosticsHelpText));
         OnPropertyChanged(nameof(AutomaticSnapshotsSummaryText));
         OnPropertyChanged(nameof(GlobalRetentionSummaryText));
         OnPropertyChanged(nameof(RepositorySyncHealthHelpText));
@@ -2158,6 +2171,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ToggleAuthLabel));
         _ = LoadWindowsAutostartStateAsync();
         _ = LoadArtifactEncryptionStateAsync();
+
+        if (_lastCloudStorageMetrics is not null)
+            ApplyCloudStorageMetrics(_lastCloudStorageMetrics);
+        else if (!HasCloudStorageMetrics)
+            ClearCloudStorageMetrics();
+
+        if (_lastLocalStorageMetrics is not null)
+            ApplyLocalStorageMetrics(_lastLocalStorageMetrics);
+        else if (!HasLocalStorageMetrics)
+            ClearLocalStorageMetrics();
 
         if (_lastDiagnosticsReport is not null)
             ApplySystemDiagnostics(_lastDiagnosticsReport);
@@ -2288,6 +2311,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private void ApplyCloudStorageMetrics(CloudStorageMetricsDto metrics)
     {
+        _lastCloudStorageMetrics = metrics;
         HasCloudStorageMetrics = true;
         CloudStorageLogicalBlockCount = metrics.Summary.LogicalBlockCount;
         CloudStoragePhysicalObjectCount = metrics.Summary.PhysicalObjectCount;
@@ -2830,6 +2854,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private void ClearCloudStorageMetrics()
     {
+        _lastCloudStorageMetrics = null;
         HasCloudStorageMetrics = false;
         CloudStorageLogicalBlockCount = 0;
         CloudStoragePhysicalObjectCount = 0;

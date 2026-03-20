@@ -12,6 +12,16 @@ namespace Veyra.Shared.Logging;
 
 public static class LoggingSetup
 {
+    /// <summary>
+    /// Configures Serilog for the application, setting up file logging with compact JSON formatting,
+    /// console logging, and optional Seq integration. The minimum log level can be configured via
+    /// the provided IConfiguration or environment variables. Additionally, it supports dynamic log
+    /// level control based on the IRuntimeObservabilityState.
+    /// </summary>
+    /// <param name="services"></param>
+    /// <param name="configuration"></param>
+    /// <param name="baseDirectory"></param>
+    /// <param name="runtimeObservability"></param>
     public static void AddVeyraLogging(
         this IServiceCollection services,
         IConfiguration? configuration = null,

@@ -52,7 +52,9 @@ public sealed class LocalizationManager : INotifyPropertyChanged
             _currentLanguageCode = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentLanguageCode)));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentDiagnostics)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item"));
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
             LanguageChanged?.Invoke(this, EventArgs.Empty);
         }
     }
