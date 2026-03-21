@@ -26,6 +26,8 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Connectivity;
+using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
@@ -36,6 +38,8 @@ using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Storage.Models;
 using Veyra.Desktop.Services.System;
+using Veyra.Desktop.Services.Sync.Runtime;
+using Veyra.Desktop.Services.Sync.Runtime.Models;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -45,10 +49,12 @@ namespace Veyra.Desktop.ViewModels.Pages.Settings;
 
 public sealed partial class AppSettingsViewModel : ObservableObject
 {
+    private const string SafeDefaultRetentionTriggerFilter = "automatic";
     private static readonly TimeSpan SyncStatusAutoRefreshInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan SyncProgressStallThreshold = TimeSpan.FromSeconds(90);
 
     private readonly IUserProfileRepository _userProfiles;
+    private readonly ILocalCredentialStore _localCredentialStore;
     private readonly IAccessTokenPolicyService _tokenPolicy;
     private readonly IAuthService _auth;
     private readonly IOperationJournalService _journal;
@@ -62,6 +68,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly IWindowService _windows;
     private readonly IWindowsAutostartService _autostart;
+    private readonly IConnectivityStatusService _connectivity;
+    private readonly ICloudSyncRuntimeControlService _cloudSyncRuntime;
     private readonly ISnapshotScheduler _snapshotScheduler;
     private readonly ISnapshotSchedulerSettingsStore _snapshotSchedulerSettingsStore;
     private readonly IRuntimeObservabilityControlService _runtimeObservability;
@@ -88,6 +96,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private LocalBlockStorageMetricsDto? _lastLocalStorageMetrics;
     private CloudStorageMetricsDto? _lastCloudStorageMetrics;
     private AppDiagnosticsReportDto? _lastDiagnosticsReport;
+    private UserProfileSessionDto? _lastActiveProfile;
     private CancellationTokenSource? _loadCts;
     private long _loadRequestId;
 
@@ -200,6 +209,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private int _repositorySyncIssueCount;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanEditSensitiveActionVerification))]
+    [NotifyPropertyChangedFor(nameof(ShowConnectivityBanner))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityBannerAccentColor))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityBannerBackgroundColor))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityBannerText))]
     private bool _hasActiveProfile;
     [ObservableProperty] private bool _requirePasswordForSensitiveActions;
     [ObservableProperty] private bool _isWindowsAutostartEnabled;
@@ -320,6 +333,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     public AppSettingsViewModel(
         IUserProfileRepository userProfiles,
+        ILocalCredentialStore localCredentialStore,
         IAccessTokenPolicyService tokenPolicy,
         IAuthService auth,
         IOperationJournalService journal,
@@ -334,6 +348,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         ISensitiveActionGuard sensitiveActionGuard,
         IWindowService windows,
         IWindowsAutostartService autostart,
+        IConnectivityStatusService connectivity,
+        ICloudSyncRuntimeControlService cloudSyncRuntime,
         ISnapshotScheduler snapshotScheduler,
         ISnapshotSchedulerSettingsStore snapshotSchedulerSettingsStore,
         IRuntimeObservabilityControlService runtimeObservability,
@@ -344,6 +360,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         ILogger<AppSettingsViewModel> log)
     {
         _userProfiles = userProfiles;
+        _localCredentialStore = localCredentialStore;
         _tokenPolicy = tokenPolicy;
         _auth = auth;
         _journal = journal;
@@ -358,6 +375,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _sensitiveActionGuard = sensitiveActionGuard;
         _windows = windows;
         _autostart = autostart;
+        _connectivity = connectivity;
+        _cloudSyncRuntime = cloudSyncRuntime;
         _snapshotScheduler = snapshotScheduler;
         _snapshotSchedulerSettingsStore = snapshotSchedulerSettingsStore;
         _runtimeObservability = runtimeObservability;
@@ -392,6 +411,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _localization.LanguageChanged += OnLanguageChanged;
         _theme.ThemeChanged += OnThemeChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
+        _connectivity.StatusChanged += OnConnectivityStatusChanged;
+        _cloudSyncRuntime.StateChanged += OnCloudSyncRuntimeStateChanged;
         RebuildLanguageOptions();
         RebuildThemeOptions();
         RebuildExperienceOptions();
@@ -420,9 +441,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool IsBasicMode => _experience.IsBasicMode;
     public bool IsProfessionalMode => _experience.IsProfessionalMode;
     public bool ShowLocalizationDiagnostics => IsProfessionalMode;
-    public bool ShowTechnicalCloudDetails => IsProfessionalMode;
+    public bool ShowTechnicalCloudDetails => IsProfessionalMode && HasActiveProfile;
     public bool ShowTechnicalProfileDetails => IsProfessionalMode;
-    public bool ShowCloudStorageDiagnostics => IsProfessionalMode;
+    public bool ShowCloudStorageDiagnostics => IsProfessionalMode && HasActiveProfile;
     public bool ShowDetailedRepositorySyncIssueDiagnostics => IsProfessionalMode;
     public bool CanConfigureWindowsAutostart => _autostart.IsSupported;
     public string AutomaticSnapshotsSummaryText => !IsAutomaticSnapshotsEnabled
@@ -446,12 +467,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public string LocalizationSummaryText => HasLocalizationIssues
         ? Loc.T("app_settings.localization_user_warning")
         : Loc.T("app_settings.localization_user_ok");
-    public string SyncSectionIntroText => IsBasicMode
-        ? Loc.T("app_settings.sync_intro_basic")
-        : Loc.T("app_settings.sync_intro_professional");
-    public string SyncSectionHelpText => IsBasicMode
-        ? Loc.T("app_settings.sync_help_basic")
-        : Loc.T("app_settings.sync_help_professional");
+    public string SyncSectionIntroText => IsGuestMode
+        ? Loc.T("app_settings.sync_intro_guest")
+        : IsBasicMode
+            ? Loc.T("app_settings.sync_intro_basic")
+            : Loc.T("app_settings.sync_intro_professional");
+    public string SyncSectionHelpText => IsGuestMode
+        ? Loc.T("app_settings.sync_help_guest")
+        : IsBasicMode
+            ? Loc.T("app_settings.sync_help_basic")
+            : Loc.T("app_settings.sync_help_professional");
     public string CloudStorageHelpText => IsBasicMode
         ? Loc.T("app_settings.cloud_storage_help_basic")
         : Loc.T("app_settings.cloud_storage_help_professional");
@@ -526,7 +551,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         if (_suppressThemeSelectionChanged || value is null)
             return;
 
-        _theme.SetTheme(value.Code);
+        if (!_theme.SetTheme(value.Code))
+            SyncSelectedThemeOption(rebuildIfMissing: true);
     }
 
     partial void OnSelectedExperienceModeChanged(AppExperienceOptionItemViewModel? value)
@@ -645,6 +671,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 return;
 
             var active = await activeTask;
+            _lastActiveProfile = active;
             var activeTokenState = _tokenPolicy.Evaluate(active?.AccessToken);
             HasActiveProfile = active is not null;
             OnPropertyChanged(nameof(IsGuestMode));
@@ -870,16 +897,43 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
             var settings = BuildGlobalRetentionDefaults();
             await _retentionDefaultsStore.SaveAsync(settings);
+
+            if (!settings.Enabled)
+            {
+                GlobalRetentionMessage = GlobalRetentionSummaryText;
+                return;
+            }
+
             var policy = settings.ToPolicy();
 
             var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
+            var targetRepositories = repositories
+                .Where(static repository => repository.RetentionPolicy.Enabled)
+                .ToList();
             var updated = 0;
 
-            foreach (var repository in repositories)
+            foreach (var repository in targetRepositories)
             {
                 var detail = await _mediator.Send(new GetRepositoryDetailQuery(repository.Id));
                 if (detail is null)
                     continue;
+
+                var effectiveTriggers = policy.TriggerFilters.Count == 0
+                    ? [SafeDefaultRetentionTriggerFilter]
+                    : policy.TriggerFilters;
+
+                var effectivePolicy = new RepositoryRetentionPolicyDto(
+                    Enabled: detail.RetentionPolicy.Enabled,
+                    MaxAgeDays: policy.MaxAgeDays,
+                    MaxSnapshots: policy.MaxSnapshots,
+                    MaxTotalSizeBytes: policy.MaxTotalSizeBytes,
+                    TriggerFilters: effectiveTriggers,
+                    RunIntervalMinutes: policy.RunIntervalMinutes,
+                    MaintenanceWindowStartHour: detail.RetentionPolicy.MaintenanceWindowStartHour,
+                    MaintenanceWindowEndHour: detail.RetentionPolicy.MaintenanceWindowEndHour,
+                    LastRunAtUtc: detail.RetentionPolicy.LastRunAtUtc,
+                    LastStatus: detail.RetentionPolicy.LastStatus,
+                    StorageMode: policy.StorageMode);
 
                 var result = await _mediator.Send(new UpdateRepositoryConfigurationCommand(
                     detail.Id,
@@ -890,7 +944,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     detail.AutoCaptureFileVersions,
                     detail.ProtectCloudMetadata,
                     detail.ExcludedPatterns,
-                    policy));
+                    effectivePolicy));
 
                 if (result.Success)
                     updated++;
@@ -1110,8 +1164,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             SelectTab(tab);
     }
 
+    public Task ShowCloudSyncHealthCenterAsync()
+        => OpenCloudSyncHealthCenterCoreAsync();
+
+    public Task OpenRepositorySyncIssueSettingsDirectAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => OpenRepositorySyncIssueSettingsCoreAsync(issue);
+
+    public Task RetryRepositorySyncIssueDirectAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => RetryRepositorySyncIssueCoreAsync(issue);
+
+    public Task CancelRepositorySyncIssueDirectAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => CancelRepositorySyncIssueCoreAsync(issue);
+
     [RelayCommand]
     private async Task OpenRepositorySyncIssueSettingsAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => await OpenRepositorySyncIssueSettingsCoreAsync(issue);
+
+    private async Task OpenRepositorySyncIssueSettingsCoreAsync(AppRepositorySyncIssueItemViewModel? issue)
     {
         if (issue is null || OpenRepositorySettingsRequested is null)
             return;
@@ -1122,12 +1191,21 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     [RelayCommand]
     private async Task RetryRepositorySyncIssueAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => await RetryRepositorySyncIssueCoreAsync(issue);
+
+    private async Task RetryRepositorySyncIssueCoreAsync(AppRepositorySyncIssueItemViewModel? issue)
     {
         if (issue is null)
             return;
 
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                SyncMessage = connectivityMessage;
+                return;
+            }
+
             var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
                 "security.action_cloud_sync",
                 "security.action_retry_repository_sync_body",
@@ -1173,6 +1251,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     [RelayCommand]
     private async Task CancelRepositorySyncIssueAsync(AppRepositorySyncIssueItemViewModel? issue)
+        => await CancelRepositorySyncIssueCoreAsync(issue);
+
+    private async Task CancelRepositorySyncIssueCoreAsync(AppRepositorySyncIssueItemViewModel? issue)
     {
         if (issue is null)
             return;
@@ -1353,9 +1434,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 session.RefreshToken,
                 session.AccessTokenExpiresAtUtc,
                 session.RefreshTokenExpiresAtUtc);
+            await _localCredentialStore.SavePasswordAsync(session.Username, PasswordInput);
 
-            var restored = await _sync.RestoreRepositoriesFromCloudAsync();
-            await _sync.ProcessPendingQueueAsync();
+            var restored = 0;
+            try
+            {
+                restored = await _sync.RestoreRepositoriesFromCloudAsync();
+                await _sync.ProcessPendingQueueAsync();
+            }
+            catch (Exception cloudEx)
+            {
+                _log.LogWarning(cloudEx, "Cloud follow-up after auth is unavailable. Username {Username}", session.Username);
+            }
 
             PasswordInput = string.Empty;
             ConfirmPasswordInput = string.Empty;
@@ -1386,7 +1476,20 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Auth submit failed in app settings");
-            AuthMessage = Loc.T("app_settings.auth_request_failed");
+
+            if (!IsRegisterMode)
+            {
+                var normalizedUsername = UsernameInput.Trim();
+                if (await _localCredentialStore.VerifyPasswordAsync(normalizedUsername, PasswordInput) &&
+                    await _userProfiles.SetActiveProfileAsync(normalizedUsername))
+                {
+                    AuthMessage = Loc.F("app_settings.profile_switched_without_token", normalizedUsername);
+                    await LoadAsync();
+                    return;
+                }
+            }
+
+            AuthMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "app_settings.auth_request_failed");
             await AppendJournalAsync(
                 "error",
                 "auth",
@@ -1427,7 +1530,14 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 return;
             }
 
-            await _sync.ProcessPendingQueueAsync();
+            try
+            {
+                await _sync.ProcessPendingQueueAsync();
+            }
+            catch (Exception syncEx)
+            {
+                _log.LogWarning(syncEx, "Cloud queue resume skipped while activating profile {Username}", profile.Username);
+            }
             AuthMessage = profile.HasAccessToken
                 ? Loc.F("app_settings.profile_switched", profile.Username)
                 : Loc.F("app_settings.profile_switched_without_token", profile.Username);
@@ -1542,6 +1652,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     [RelayCommand]
     private async Task OpenCloudSyncHealthCenterAsync()
+        => await OpenCloudSyncHealthCenterCoreAsync();
+
+    private async Task OpenCloudSyncHealthCenterCoreAsync()
     {
         await RunTransientActionAsync(
             "app_settings.sync_health_center_loading_title",
@@ -1551,10 +1664,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 await RefreshSyncHealthAsync();
 
                 var owner = _windows.GetActiveWindow();
-                var window = new CloudSyncHealthWindow
-                {
-                    DataContext = new CloudSyncHealthWindowViewModel(this)
-                };
+                var window = _windows.Create<CloudSyncHealthWindow>();
+                window.DataContext = new CloudSyncHealthWindowViewModel(this);
 
                 if (owner is not null)
                     await _windows.ShowDialogAsync(window, owner);
@@ -1601,6 +1712,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                SyncMessage = connectivityMessage;
+                return;
+            }
+
             var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
                 "security.action_cloud_sync",
                 "security.action_cloud_restore_body");
@@ -1612,19 +1729,40 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 return;
             }
 
+            var owner = _windows.GetActiveWindow();
+            if (owner is null)
+            {
+                SyncMessage = Loc.T("repo_settings.error_picker_unavailable");
+                return;
+            }
+
+            var folder = await owner.StorageProvider.OpenFolderPickerAsync(
+                new FolderPickerOpenOptions
+                {
+                    AllowMultiple = false,
+                    Title = Loc.T("app_settings.restore_from_cloud_pick_folder")
+                });
+
+            var targetRoot = StoragePathResolver.TryGetLocalPath(folder.FirstOrDefault());
+            if (string.IsNullOrWhiteSpace(targetRoot))
+            {
+                SyncMessage = Loc.T("app_settings.restore_from_cloud_cancelled");
+                return;
+            }
+
             IsSyncBusy = true;
             SyncMessage = string.Empty;
             await AppendJournalAsync("info", "sync", "settings_restore_from_cloud", "Operation started.", ActiveUsername);
 
-            var restored = await _sync.RestoreRepositoriesFromCloudAsync();
-            SyncMessage = Loc.F("app_settings.sync_restore_finished", restored);
+            var restored = await _sync.RestoreRepositoriesFromCloudAsync(targetRoot);
+            SyncMessage = Loc.F("app_settings.sync_restore_finished_with_path", restored, targetRoot);
             await AppendJournalAsync("info", "sync", "settings_restore_from_cloud", SyncMessage, ActiveUsername);
             await LoadAsync();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Cloud restore failed");
-            SyncMessage = Loc.T("app_settings.sync_restore_failed");
+            SyncMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "app_settings.sync_restore_failed");
             await AppendJournalAsync("error", "sync", "settings_restore_from_cloud", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
@@ -1638,6 +1776,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                SyncMessage = connectivityMessage;
+                return;
+            }
+
             var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
                 "security.action_cloud_sync",
                 "security.action_process_queue_body");
@@ -1661,7 +1805,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Processing sync queue failed");
-            SyncMessage = Loc.T("app_settings.sync_queue_failed");
+            SyncMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "app_settings.sync_queue_failed");
             await AppendJournalAsync("error", "sync", "settings_process_queue", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
@@ -1675,6 +1819,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                SyncMessage = connectivityMessage;
+                return;
+            }
+
             var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
                 "security.action_cloud_sync",
                 "security.action_push_all_body");
@@ -1703,7 +1853,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Push all repositories to cloud failed");
-            SyncMessage = Loc.T("app_settings.sync_push_failed");
+            SyncMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "app_settings.sync_push_failed");
             await AppendJournalAsync("error", "sync", "settings_push_all", $"{SyncMessage} {ex.Message}", ActiveUsername);
         }
         finally
@@ -1717,6 +1867,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                CloudStorageMessage = connectivityMessage;
+                return;
+            }
+
             IsCloudMaintenanceBusy = true;
             CloudStorageMessage = string.Empty;
             LocalStorageMessage = string.Empty;
@@ -1760,6 +1916,12 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         try
         {
+            if (ResolveCloudConnectivityMessage() is { } connectivityMessage)
+            {
+                CloudStorageMessage = connectivityMessage;
+                return;
+            }
+
             var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
                 "security.action_cloud_storage_repair",
                 "security.action_cloud_storage_repair_body");
@@ -1899,14 +2061,27 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         var maxAge = ParseNullablePositiveInt(GlobalRetentionMaxAgeDays, 1, 3650);
         var maxSnapshots = ParseNullablePositiveInt(GlobalRetentionMaxSnapshots, 1, 100000);
         var maxTotalSizeMb = ParseNullablePositiveLong(GlobalRetentionMaxTotalSizeMb, 1, 10L * 1024 * 1024);
+        var triggerFilter = string.IsNullOrWhiteSpace(GlobalRetentionTriggerFilter)
+            ? GlobalRetentionEnabled
+                ? SafeDefaultRetentionTriggerFilter
+                : null
+            : GlobalRetentionTriggerFilter.Trim();
 
         return new RetentionDefaultsUserSettings(
             Enabled: GlobalRetentionEnabled,
             MaxAgeDays: maxAge,
             MaxSnapshots: maxSnapshots,
             MaxTotalSizeBytes: maxTotalSizeMb.HasValue ? maxTotalSizeMb.Value * 1024 * 1024 : null,
-            TriggerFilter: string.IsNullOrWhiteSpace(GlobalRetentionTriggerFilter) ? null : GlobalRetentionTriggerFilter.Trim(),
+            TriggerFilter: triggerFilter,
             RunIntervalMinutes: Math.Clamp(GlobalRetentionRunIntervalMinutes, 5, 7 * 24 * 60));
+    }
+
+    partial void OnGlobalRetentionEnabledChanged(bool value)
+    {
+        if (value && string.IsNullOrWhiteSpace(GlobalRetentionTriggerFilter))
+            GlobalRetentionTriggerFilter = SafeDefaultRetentionTriggerFilter;
+
+        OnPropertyChanged(nameof(GlobalRetentionSummaryText));
     }
 
     private async Task LoadArtifactEncryptionStateAsync(CancellationToken ct = default)
@@ -2015,7 +2190,29 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
-        RebuildThemeOptions();
+        Dispatcher.UIThread.Post(() => SyncSelectedThemeOption(rebuildIfMissing: false));
+    }
+
+    private void OnConnectivityStatusChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(ShowConnectivityBanner));
+            OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
+            OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
+            OnPropertyChanged(nameof(ConnectivityBannerText));
+        });
+    }
+
+    private void OnCloudSyncRuntimeStateChanged(CloudSyncRuntimeSnapshot snapshot)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(ShowConnectivityBanner));
+            OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
+            OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
+            OnPropertyChanged(nameof(ConnectivityBannerText));
+        });
     }
 
     private void OnExperienceModeChanged(object? sender, EventArgs e)
@@ -2049,6 +2246,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ArtifactActiveKeyCount));
         OnPropertyChanged(nameof(ArtifactRetiredKeyCount));
         OnPropertyChanged(nameof(ArtifactRevokedKeyCount));
+        OnPropertyChanged(nameof(ShowConnectivityBanner));
+        OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
+        OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
+        OnPropertyChanged(nameof(ConnectivityBannerText));
         _ = LoadOperationJournalAsync();
         _ = RefreshSyncSectionAsync(silentMetrics: true, refreshStorageMetrics: false, CancellationToken.None);
         _ = LoadWindowsAutostartStateAsync();
@@ -2214,9 +2415,15 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         try
         {
-            var active = await ExecuteIsolatedAsync<IUserProfileRepository, UserProfileSessionDto?>(
-                (profiles, token) => profiles.GetActiveProfileAsync(token),
-                ct);
+            UserProfileSessionDto? active = _lastActiveProfile;
+            if (refreshStorageMetrics)
+            {
+                active = await ExecuteIsolatedAsync<IUserProfileRepository, UserProfileSessionDto?>(
+                    (profiles, token) => profiles.GetActiveProfileAsync(token),
+                    ct);
+                _lastActiveProfile = active;
+            }
+
             var repositories = await SendIsolatedAsync(new GetAllRepositoriesQuery(), ct);
 
             LocalRepositoryCount = repositories.Count;
@@ -2373,9 +2580,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private bool RefreshRepositorySyncIssues(IReadOnlyList<RepositoryDto> repositories)
     {
-        RepositorySyncIssues.Clear();
         var hasActiveWork = false;
         var currentStallStates = new Dictionary<int, bool>();
+        var nextItems = new List<AppRepositorySyncIssueItemViewModel>();
 
         foreach (var repository in repositories
                      .Where(HasSyncIssue)
@@ -2396,7 +2603,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             currentStallStates[repository.Id] = isStalled;
             LogStallTransition(repository, isStalled, stallText);
 
-            RepositorySyncIssues.Add(new AppRepositorySyncIssueItemViewModel(
+            nextItems.Add(new AppRepositorySyncIssueItemViewModel(
                 repository.Id,
                 repository.Name,
                 FormatCloudSyncStatus(cloud?.LastStatus),
@@ -2445,7 +2652,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         foreach (var pair in currentStallStates)
             _stallStateByRepositoryId[pair.Key] = pair.Value;
 
-        RepositorySyncIssueCount = RepositorySyncIssues.Count;
+        ReplaceCollectionIfChanged(RepositorySyncIssues, nextItems);
+        RepositorySyncIssueCount = nextItems.Count;
         return hasActiveWork;
     }
 
@@ -3100,8 +3308,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     Loc.T(option.LocalizationKey)));
             }
 
-            SelectedTheme = Themes.FirstOrDefault(x =>
-                string.Equals(x.Code, _theme.CurrentThemeCode, StringComparison.OrdinalIgnoreCase));
+            SyncSelectedThemeOption(rebuildIfMissing: false);
         }
         finally
         {
@@ -3131,6 +3338,58 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             _suppressExperienceSelectionChanged = false;
         }
     }
+
+    private void SyncSelectedThemeOption(bool rebuildIfMissing)
+    {
+        var match = Themes.FirstOrDefault(x =>
+            string.Equals(x.Code, _theme.CurrentThemeCode, StringComparison.OrdinalIgnoreCase));
+
+        if (match is not null)
+        {
+            if (!EqualityComparer<AppThemeOptionItemViewModel?>.Default.Equals(SelectedTheme, match))
+                SelectedTheme = match;
+
+            return;
+        }
+
+        if (rebuildIfMissing)
+            RebuildThemeOptions();
+    }
+
+    public bool ShowConnectivityBanner
+        => HasActiveProfile
+           && (_connectivity.Snapshot.State is ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable
+               || _cloudSyncRuntime.IsPaused);
+
+    public string ConnectivityBannerAccentColor
+        => _cloudSyncRuntime.IsPaused && HasActiveProfile
+            ? "#6EA8FF"
+            : _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => "#F59E0B",
+            ConnectivityState.CloudUnavailable => "#F59E0B",
+            _ => "#6EA8FF"
+        };
+
+    public string ConnectivityBannerBackgroundColor
+        => _cloudSyncRuntime.IsPaused && HasActiveProfile
+            ? "#1A6EA8FF"
+            : _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => "#1AF59E0B",
+            ConnectivityState.CloudUnavailable => "#1AF59E0B",
+            _ => "#1A6EA8FF"
+        };
+
+    public string ConnectivityBannerText
+        => _cloudSyncRuntime.IsPaused && HasActiveProfile
+            ? Loc.T("ui_error.cloud_actions_paused")
+            : _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("connectivity.banner.internet_required"),
+            ConnectivityState.CloudUnavailable => Loc.T("connectivity.banner.cloud_unavailable"),
+            _ => string.Empty
+        };
 
     private (long RequestId, CancellationToken Token) BeginLoadRequest()
     {
@@ -3343,6 +3602,57 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             .Select(segment => char.ToUpperInvariant(segment[0]) + segment[1..].ToLowerInvariant()));
     }
 
+    private static void ReplaceCollectionIfChanged<T>(ObservableCollection<T> collection, IReadOnlyList<T> items)
+    {
+        if (CollectionEquals(collection, items))
+            return;
+
+        SyncCollection(collection, items);
+    }
+
+    private static bool CollectionEquals<T>(IReadOnlyList<T> current, IReadOnlyList<T> next)
+    {
+        if (current.Count != next.Count)
+            return false;
+
+        var comparer = EqualityComparer<T>.Default;
+        for (var i = 0; i < current.Count; i++)
+        {
+            if (!comparer.Equals(current[i], next[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void SyncCollection<T>(ObservableCollection<T> collection, IReadOnlyList<T> items)
+    {
+        var comparer = EqualityComparer<T>.Default;
+        var sharedPrefix = 0;
+        var maxPrefix = Math.Min(collection.Count, items.Count);
+        while (sharedPrefix < maxPrefix && comparer.Equals(collection[sharedPrefix], items[sharedPrefix]))
+            sharedPrefix++;
+
+        var sharedSuffix = 0;
+        var maxSuffix = Math.Min(collection.Count - sharedPrefix, items.Count - sharedPrefix);
+        while (sharedSuffix < maxSuffix &&
+               comparer.Equals(
+                   collection[collection.Count - 1 - sharedSuffix],
+                   items[items.Count - 1 - sharedSuffix]))
+        {
+            sharedSuffix++;
+        }
+
+        var removeStart = sharedPrefix;
+        var removeCount = collection.Count - sharedPrefix - sharedSuffix;
+        for (var i = 0; i < removeCount; i++)
+            collection.RemoveAt(removeStart);
+
+        var insertCount = items.Count - sharedPrefix - sharedSuffix;
+        for (var i = 0; i < insertCount; i++)
+            collection.Insert(removeStart + i, items[sharedPrefix + i]);
+    }
+
     private static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
@@ -3454,6 +3764,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
         return ex.InnerException is not null && IsCloudConnectivityFailure(ex.InnerException);
     }
+
+    private string? ResolveCloudConnectivityMessage()
+        => !HasActiveProfile
+            ? Loc.T("app_settings.guest_auth_hint")
+            : _cloudSyncRuntime.IsPaused
+            ? Loc.T("ui_error.cloud_actions_paused")
+            : _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("ui_error.internet_required"),
+            ConnectivityState.CloudUnavailable => Loc.T("ui_error.cloud_temporarily_unavailable"),
+            _ => null
+        };
 
     private async Task ExportSystemDiagnosticsAsync(bool asJson)
     {

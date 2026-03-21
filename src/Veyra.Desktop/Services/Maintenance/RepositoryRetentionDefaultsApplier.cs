@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MediatR;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 
 namespace Veyra.Desktop.Services.Maintenance;
@@ -13,6 +14,8 @@ public sealed class RepositoryRetentionDefaultsApplier(
     IRetentionDefaultsStore retentionDefaultsStore)
     : IRepositoryRetentionDefaultsApplier
 {
+    private const string SafeDefaultTriggerFilter = "automatic";
+
     public Task<int> ApplyToRepositoryAsync(int repositoryId, CancellationToken ct = default)
         => ApplyToRepositoriesAsync([repositoryId], ct);
 
@@ -34,6 +37,26 @@ public sealed class RepositoryRetentionDefaultsApplier(
             if (detail is null)
                 continue;
 
+            var effectiveTriggers = policy.TriggerFilters.Count == 0
+                ? [SafeDefaultTriggerFilter]
+                : policy.TriggerFilters;
+
+            var effectivePolicy = new RepositoryRetentionPolicyDto(
+                Enabled: detail.RetentionPolicy.Enabled,
+                MaxAgeDays: policy.MaxAgeDays,
+                MaxSnapshots: policy.MaxSnapshots,
+                MaxTotalSizeBytes: policy.MaxTotalSizeBytes,
+                TriggerFilters: effectiveTriggers,
+                RunIntervalMinutes: policy.RunIntervalMinutes,
+                MaintenanceWindowStartHour: detail.RetentionPolicy.MaintenanceWindowStartHour,
+                MaintenanceWindowEndHour: detail.RetentionPolicy.MaintenanceWindowEndHour,
+                LastRunAtUtc: detail.RetentionPolicy.LastRunAtUtc,
+                LastStatus: detail.RetentionPolicy.LastStatus,
+                StorageMode: policy.StorageMode,
+                AllowManualSnapshotCleanup: detail.RetentionPolicy.AllowManualSnapshotCleanup,
+                AutomaticCompactionEnabled: detail.RetentionPolicy.AutomaticCompactionEnabled,
+                AutomaticCompactionWindowHours: detail.RetentionPolicy.AutomaticCompactionWindowHours);
+
             var result = await mediator.Send(new UpdateRepositoryConfigurationCommand(
                 detail.Id,
                 detail.Name,
@@ -43,7 +66,7 @@ public sealed class RepositoryRetentionDefaultsApplier(
                 detail.AutoCaptureFileVersions,
                 detail.ProtectCloudMetadata,
                 detail.ExcludedPatterns,
-                policy), ct);
+                effectivePolicy), ct);
 
             if (result.Success)
                 updated++;

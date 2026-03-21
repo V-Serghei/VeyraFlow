@@ -12,6 +12,7 @@ namespace Veyra.Infrastructure.Data.Setup;
 public sealed class EfRepositoryRetentionService(
     VeyraDbContext db,
     IConfiguration configuration,
+    IRepositorySnapshotArchiveService snapshotArchive,
     ILogger<EfRepositoryRetentionService> log)
     : IRepositoryRetentionService
 {
@@ -21,14 +22,17 @@ public sealed class EfRepositoryRetentionService(
         IProgress<RepositoryRetentionProgressDto>? progress = null,
         CancellationToken ct = default)
     {
-        var now = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
+        var nowLocal = DateTime.Now;
         var dueRepos = await db.Set<Repository>()
             .Where(r => !r.IsDeleted && r.RetentionEnabled)
             .Select(r => new
             {
                 r.Id,
                 r.RetentionRunIntervalMinutes,
-                r.RetentionLastRunAt
+                r.RetentionLastRunAt,
+                r.RetentionMaintenanceWindowStartHour,
+                r.RetentionMaintenanceWindowEndHour
             })
             .ToListAsync(ct);
 
@@ -39,12 +43,25 @@ public sealed class EfRepositoryRetentionService(
             ct.ThrowIfCancellationRequested();
 
             var intervalMinutes = Math.Clamp(repo.RetentionRunIntervalMinutes, 5, 7 * 24 * 60);
-            if (repo.RetentionLastRunAt is not null && now - repo.RetentionLastRunAt.Value < TimeSpan.FromMinutes(intervalMinutes))
+            if (repo.RetentionLastRunAt is not null && nowUtc - repo.RetentionLastRunAt.Value < TimeSpan.FromMinutes(intervalMinutes))
                 continue;
+
+            if (!IsWithinMaintenanceWindow(
+                    nowLocal,
+                    repo.RetentionMaintenanceWindowStartHour,
+                    repo.RetentionMaintenanceWindowEndHour))
+            {
+                continue;
+            }
 
             try
             {
-                var result = await RunRetentionAsync(repo.Id, dryRun: false, progress, ct);
+                var result = await RunRetentionAsync(
+                    repo.Id,
+                    dryRun: false,
+                    policyOverride: null,
+                    progress: progress,
+                    ct: ct);
                 results.Add(result);
             }
             catch (OperationCanceledException)
@@ -63,6 +80,7 @@ public sealed class EfRepositoryRetentionService(
     public async Task<RepositoryRetentionRunResultDto> RunRetentionAsync(
         int repositoryId,
         bool dryRun,
+        RepositoryRetentionPolicyDto? policyOverride = null,
         IProgress<RepositoryRetentionProgressDto>? progress = null,
         CancellationToken ct = default)
     {
@@ -84,7 +102,8 @@ public sealed class EfRepositoryRetentionService(
                 summary: "Repository not found.");
         }
 
-        if (!repository.RetentionEnabled)
+        var effectivePolicy = BuildEffectivePolicy(repository, policyOverride);
+        if (!effectivePolicy.Enabled)
         {
             return BuildResult(
                 repositoryId,
@@ -95,9 +114,12 @@ public sealed class EfRepositoryRetentionService(
                 summary: "Retention is disabled for this repository.");
         }
 
+        var archiveMode = RepositoryRetentionStorageModes.IsArchive(effectivePolicy.StorageMode);
+
         var snapshots = await db.Set<RepositorySnapshot>()
             .IgnoreQueryFilters()
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => !archiveMode || !s.IsArchived)
             .OrderBy(s => s.CreatedAt)
             .ThenBy(s => s.Id)
             .Select(s => new SnapshotState(
@@ -125,13 +147,16 @@ public sealed class EfRepositoryRetentionService(
 
         progress?.Report(new RepositoryRetentionProgressDto("plan", 10, "Planning retention candidates..."));
 
-        var triggerFilter = ParseTriggerFilter(repository.RetentionTriggerFilter);
-        var snapshotsToDelete = PlanSnapshotsToDelete(
+        var triggerFilter = NormalizeTriggerFilters(effectivePolicy.TriggerFilters);
+        var (snapshotsToDelete, automaticSnapshotsCompacted) = PlanSnapshotsToDelete(
             snapshots,
-            repository.RetentionMaxAgeDays,
-            repository.RetentionMaxSnapshots,
-            repository.RetentionMaxTotalSizeBytes,
+            effectivePolicy.MaxAgeDays,
+            effectivePolicy.MaxSnapshots,
+            effectivePolicy.MaxTotalSizeBytes,
             triggerFilter,
+            effectivePolicy.AllowManualSnapshotCleanup,
+            effectivePolicy.AutomaticCompactionEnabled,
+            effectivePolicy.AutomaticCompactionWindowHours,
             DateTime.UtcNow);
 
         if (snapshots.Count - snapshotsToDelete.Count <= 0)
@@ -144,60 +169,96 @@ public sealed class EfRepositoryRetentionService(
             .Where(s => !snapshotsToDelete.Contains(s.Id))
             .Select(s => s.Id)
             .ToList();
+        var (manualSnapshotsMarked, automaticSnapshotsMarked, workingSnapshotsMarked) =
+            CountSnapshotsByKind(snapshots, snapshotsToDelete);
 
         var snapshotEntriesMarked = await CountSnapshotEntriesToMarkAsync(repositoryId, snapshotsToDelete, ct);
         var snapshotLinksMarked = await CountSnapshotLinksToMarkAsync(snapshotsToDelete, ct);
 
         progress?.Report(new RepositoryRetentionProgressDto("analyze", 25, "Collecting GC candidates..."));
 
-        var candidateVersionIds = await GetCandidateVersionIdsAsync(repositoryId, retainedSnapshotIds, ct);
-        var candidateIdentityIds = await GetCandidateIdentityIdsAsync(repositoryId, retainedSnapshotIds, candidateVersionIds, ct);
+        List<long> candidateVersionIds;
+        List<long> candidateIdentityIds;
+        List<BlockState> candidateBlocks;
+        List<long> candidateDiffIds;
+        List<long> candidateHunkIds;
+        List<long> candidateLineIds;
+        HashSet<string> deletableManagedHashes;
+        long estimatedManagedFreedBytes;
 
-        var candidateBlocks = await db.Set<FileVersionBlock>()
-            .IgnoreQueryFilters()
-            .Where(b => !b.IsDeleted && candidateVersionIds.Contains(b.FileVersionId))
-            .Select(b => new BlockState(b.Id, b.BlockHashBlake3, b.StoredSizeBytes))
-            .ToListAsync(ct);
+        if (archiveMode)
+        {
+            candidateVersionIds = [];
+            candidateIdentityIds = [];
+            candidateDiffIds = [];
+            candidateHunkIds = [];
+            candidateLineIds = [];
+            candidateBlocks = await GetArchiveCandidateBlocksAsync(repositoryId, snapshotsToDelete, retainedSnapshotIds, ct);
+            deletableManagedHashes = await ResolveArchivePrunableManagedHashesAsync(repositoryId, retainedSnapshotIds, ct);
+            estimatedManagedFreedBytes = EstimateManagedFreedBytes(deletableManagedHashes);
+        }
+        else
+        {
+            candidateVersionIds = await GetCandidateVersionIdsAsync(repositoryId, retainedSnapshotIds, ct);
+            candidateIdentityIds = await GetCandidateIdentityIdsAsync(repositoryId, retainedSnapshotIds, candidateVersionIds, ct);
 
-        var candidateDiffIds = await db.Set<FileVersionTextDiff>()
-            .IgnoreQueryFilters()
-            .Where(d => !d.IsDeleted && (candidateVersionIds.Contains(d.LeftFileVersionId) || candidateVersionIds.Contains(d.RightFileVersionId)))
-            .Select(d => d.Id)
-            .ToListAsync(ct);
+            candidateBlocks = await db.Set<FileVersionBlock>()
+                .IgnoreQueryFilters()
+                .Where(b => !b.IsDeleted && candidateVersionIds.Contains(b.FileVersionId))
+                .Select(b => new BlockState(b.Id, b.BlockStorageKey, b.StoredSizeBytes))
+                .ToListAsync(ct);
 
-        var candidateHunkIds = await db.Set<FileVersionTextDiffHunk>()
-            .IgnoreQueryFilters()
-            .Where(h => !h.IsDeleted && candidateDiffIds.Contains(h.DiffId))
-            .Select(h => h.Id)
-            .ToListAsync(ct);
+            candidateDiffIds = await db.Set<FileVersionTextDiff>()
+                .IgnoreQueryFilters()
+                .Where(d => !d.IsDeleted && (candidateVersionIds.Contains(d.LeftFileVersionId) || candidateVersionIds.Contains(d.RightFileVersionId)))
+                .Select(d => d.Id)
+                .ToListAsync(ct);
 
-        var candidateLineIds = await db.Set<FileVersionTextDiffLine>()
-            .IgnoreQueryFilters()
-            .Where(l => !l.IsDeleted && candidateDiffIds.Contains(l.DiffId))
-            .Select(l => l.Id)
-            .ToListAsync(ct);
+            candidateHunkIds = await db.Set<FileVersionTextDiffHunk>()
+                .IgnoreQueryFilters()
+                .Where(h => !h.IsDeleted && candidateDiffIds.Contains(h.DiffId))
+                .Select(h => h.Id)
+                .ToListAsync(ct);
 
-        var deletableManagedHashes = await ResolveDeletableManagedHashesAsync(candidateBlocks, ct);
-        var estimatedManagedFreedBytes = EstimateManagedFreedBytes(deletableManagedHashes);
+            candidateLineIds = await db.Set<FileVersionTextDiffLine>()
+                .IgnoreQueryFilters()
+                .Where(l => !l.IsDeleted && candidateDiffIds.Contains(l.DiffId))
+                .Select(l => l.Id)
+                .ToListAsync(ct);
+
+            deletableManagedHashes = await ResolveDeletableManagedHashesAsync(candidateBlocks, ct);
+            estimatedManagedFreedBytes = EstimateManagedFreedBytes(deletableManagedHashes);
+        }
 
         if (dryRun)
         {
             var finished = DateTime.UtcNow;
             var summary = BuildSummary(
                 snapshotsToDelete.Count,
+                automaticSnapshotsCompacted,
                 candidateVersionIds.Count,
                 candidateDiffIds.Count,
                 candidateBlocks.Count,
                 true,
-                estimatedManagedFreedBytes);
+                estimatedManagedFreedBytes,
+                archiveMode,
+                archiveMode ? snapshotsToDelete.Count : 0);
 
             return BuildResult(
                 repositoryId,
                 dryRun,
                 startedAt,
                 finished,
-                policyApplied: snapshotsToDelete.Count > 0 || candidateVersionIds.Count > 0 || candidateDiffIds.Count > 0,
+                policyApplied: archiveMode
+                    ? snapshotsToDelete.Count > 0
+                    : snapshotsToDelete.Count > 0 || candidateVersionIds.Count > 0 || candidateDiffIds.Count > 0,
+                archiveMode: archiveMode,
                 snapshotsMarked: snapshotsToDelete.Count,
+                snapshotsArchived: archiveMode ? snapshotsToDelete.Count : 0,
+                manualSnapshotsMarked: manualSnapshotsMarked,
+                automaticSnapshotsMarked: automaticSnapshotsMarked,
+                workingSnapshotsMarked: workingSnapshotsMarked,
+                automaticSnapshotsCompacted: automaticSnapshotsCompacted,
                 snapshotEntriesMarked: snapshotEntriesMarked,
                 snapshotLinksMarked: snapshotLinksMarked,
                 fileVersionsMarked: candidateVersionIds.Count,
@@ -210,6 +271,64 @@ public sealed class EfRepositoryRetentionService(
                 blockFilesDeleted: deletableManagedHashes.Count,
                 estimatedFreedBytes: estimatedManagedFreedBytes,
                 summary: summary);
+        }
+
+        if (archiveMode)
+        {
+            progress?.Report(new RepositoryRetentionProgressDto("archive", 55, "Archiving selected snapshots..."));
+
+            var archivedCount = await snapshotArchive.EnsureSnapshotsArchivedAsync(
+                repositoryId,
+                snapshotsToDelete.ToList(),
+                ct);
+
+            progress?.Report(new RepositoryRetentionProgressDto("archive-prune", 85, "Cleaning local blocks that now live in archive..."));
+
+            var (archivedDeletedBlockFiles, archivedDeletedManagedBytes) = await snapshotArchive.PruneArchivedOnlyLocalBlocksAsync(
+                repositoryId,
+                ct);
+
+            var finishedAtArchive = DateTime.UtcNow;
+            var summaryArchive = BuildSummary(
+                snapshotsToDelete.Count,
+                automaticSnapshotsCompacted,
+                0,
+                0,
+                archivedDeletedBlockFiles,
+                false,
+                archivedDeletedManagedBytes,
+                archiveMode,
+                archivedCount);
+
+            await UpdateRetentionRunStateAsync(repositoryId, finishedAtArchive, summaryArchive, ct);
+
+            progress?.Report(new RepositoryRetentionProgressDto("done", 100, "Archive retention completed."));
+
+            return BuildResult(
+                repositoryId,
+                dryRun,
+                startedAt,
+                finishedAtArchive,
+                policyApplied: archivedCount > 0,
+                archiveMode: true,
+                snapshotsMarked: snapshotsToDelete.Count,
+                snapshotsArchived: archivedCount,
+                manualSnapshotsMarked: manualSnapshotsMarked,
+                automaticSnapshotsMarked: automaticSnapshotsMarked,
+                workingSnapshotsMarked: workingSnapshotsMarked,
+                automaticSnapshotsCompacted: automaticSnapshotsCompacted,
+                snapshotEntriesMarked: snapshotEntriesMarked,
+                snapshotLinksMarked: snapshotLinksMarked,
+                fileVersionsMarked: 0,
+                fileVersionBlocksMarked: candidateBlocks.Count,
+                fileIdentitiesMarked: 0,
+                diffsMarked: 0,
+                diffHunksMarked: 0,
+                diffLinesMarked: 0,
+                textLineAtomsDeleted: 0,
+                blockFilesDeleted: archivedDeletedBlockFiles,
+                estimatedFreedBytes: archivedDeletedManagedBytes,
+                summary: summaryArchive);
         }
 
         progress?.Report(new RepositoryRetentionProgressDto("mark", 45, "Applying soft-delete marks..."));
@@ -372,11 +491,14 @@ public sealed class EfRepositoryRetentionService(
         var finishedAt = DateTime.UtcNow;
         var summaryText = BuildSummary(
             snapshotsToDelete.Count,
+            automaticSnapshotsCompacted,
             candidateVersionIds.Count,
             candidateDiffIds.Count,
             candidateBlocks.Count,
             false,
-            deletedManagedBytes);
+            deletedManagedBytes,
+            archiveMode: false,
+            snapshotsArchived: 0);
 
         await UpdateRetentionRunStateAsync(repositoryId, finishedAt, summaryText, ct);
         await tx.CommitAsync(ct);
@@ -389,7 +511,13 @@ public sealed class EfRepositoryRetentionService(
             startedAt,
             finishedAt,
             policyApplied: snapshotsToDelete.Count > 0 || candidateVersionIds.Count > 0 || candidateDiffIds.Count > 0,
+            archiveMode: false,
             snapshotsMarked: snapshotsToDelete.Count,
+            snapshotsArchived: 0,
+            manualSnapshotsMarked: manualSnapshotsMarked,
+            automaticSnapshotsMarked: automaticSnapshotsMarked,
+            workingSnapshotsMarked: workingSnapshotsMarked,
+            automaticSnapshotsCompacted: automaticSnapshotsCompacted,
             snapshotEntriesMarked: snapshotEntriesMarked,
             snapshotLinksMarked: snapshotLinksMarked,
             fileVersionsMarked: candidateVersionIds.Count,
@@ -495,8 +623,8 @@ public sealed class EfRepositoryRetentionService(
 
         var activeManagedHashes = await db.Set<FileVersionBlock>()
             .IgnoreQueryFilters()
-            .Where(b => !b.IsDeleted && candidateHashes.Contains(b.BlockHashBlake3))
-            .Select(b => b.BlockHashBlake3)
+            .Where(b => !b.IsDeleted && candidateHashes.Contains(b.BlockStorageKey))
+            .Select(b => b.BlockStorageKey)
             .Distinct()
             .ToListAsync(ct);
 
@@ -592,19 +720,23 @@ public sealed class EfRepositoryRetentionService(
                 .SetProperty(x => x.UpdatedAt, runAtUtc), ct);
     }
 
-    private static HashSet<long> PlanSnapshotsToDelete(
+    private static (HashSet<long> SnapshotsToDelete, int AutomaticSnapshotsCompacted) PlanSnapshotsToDelete(
         IReadOnlyList<SnapshotState> snapshots,
         int? maxAgeDays,
         int? maxSnapshots,
         long? maxTotalSizeBytes,
         HashSet<string> triggerFilter,
+        bool allowManualSnapshotCleanup,
+        bool automaticCompactionEnabled,
+        int? automaticCompactionWindowHours,
         DateTime nowUtc)
     {
         var eligible = snapshots
-            .Where(s => triggerFilter.Count == 0 || triggerFilter.Contains(s.Trigger))
+            .Where(s => MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
             .ToList();
 
         var toDelete = new HashSet<long>();
+        var automaticSnapshotsCompacted = 0;
 
         if (maxAgeDays is > 0)
         {
@@ -615,6 +747,14 @@ public sealed class EfRepositoryRetentionService(
                     toDelete.Add(snapshot.Id);
             }
         }
+
+        automaticSnapshotsCompacted = ApplyAutomaticCompactionCandidates(
+            snapshots,
+            toDelete,
+            triggerFilter,
+            allowManualSnapshotCleanup,
+            automaticCompactionEnabled,
+            automaticCompactionWindowHours);
 
         if (maxSnapshots is > 0)
         {
@@ -645,7 +785,7 @@ public sealed class EfRepositoryRetentionService(
             if (total > maxTotalSizeBytes.Value)
             {
                 var removable = snapshots
-                    .Where(s => !toDelete.Contains(s.Id) && (triggerFilter.Count == 0 || triggerFilter.Contains(s.Trigger)))
+                    .Where(s => !toDelete.Contains(s.Id) && MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
                     .OrderBy(s => s.CreatedAt)
                     .ThenBy(s => s.Id)
                     .ToList();
@@ -665,10 +805,55 @@ public sealed class EfRepositoryRetentionService(
             }
         }
 
-        return toDelete;
+        return (toDelete, automaticSnapshotsCompacted);
     }
 
-    private static HashSet<string> ParseTriggerFilter(string? csv)
+    private static RepositoryRetentionPolicyDto BuildEffectivePolicy(
+        Repository repository,
+        RepositoryRetentionPolicyDto? policyOverride)
+    {
+        var source = policyOverride ?? new RepositoryRetentionPolicyDto(
+            repository.RetentionEnabled,
+            repository.RetentionMaxAgeDays,
+            repository.RetentionMaxSnapshots,
+            repository.RetentionMaxTotalSizeBytes,
+            ParseTriggerFilters(repository.RetentionTriggerFilter),
+            repository.RetentionRunIntervalMinutes,
+            repository.RetentionMaintenanceWindowStartHour,
+            repository.RetentionMaintenanceWindowEndHour,
+            repository.RetentionLastRunAt,
+            repository.RetentionLastStatus,
+            repository.RetentionStorageMode,
+            repository.RetentionAllowManualSnapshotCleanup,
+            repository.RetentionAutomaticCompactionEnabled,
+            repository.RetentionAutomaticCompactionWindowHours);
+
+        var normalizedTriggers = source.TriggerFilters
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (source.Enabled && normalizedTriggers.Count == 0)
+            normalizedTriggers = ["automatic"];
+
+        return source with
+        {
+            MaxAgeDays = NormalizePositive(source.MaxAgeDays),
+            MaxSnapshots = NormalizePositive(source.MaxSnapshots),
+            MaxTotalSizeBytes = NormalizePositive(source.MaxTotalSizeBytes),
+            TriggerFilters = normalizedTriggers,
+            RunIntervalMinutes = Math.Clamp(source.RunIntervalMinutes, 5, 7 * 24 * 60),
+            MaintenanceWindowStartHour = NormalizeHour(source.MaintenanceWindowStartHour),
+            MaintenanceWindowEndHour = NormalizeHour(source.MaintenanceWindowEndHour),
+            StorageMode = RepositoryRetentionStorageModes.Normalize(source.StorageMode),
+            AutomaticCompactionWindowHours = source.AutomaticCompactionEnabled
+                ? NormalizePositive(source.AutomaticCompactionWindowHours)
+                : null
+        };
+    }
+
+    private static List<string> ParseTriggerFilters(string? csv)
     {
         if (string.IsNullOrWhiteSpace(csv))
             return [];
@@ -676,8 +861,186 @@ public sealed class EfRepositoryRetentionService(
         return csv
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(static v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static HashSet<string> NormalizeTriggerFilters(IReadOnlyList<string> triggerFilters)
+    {
+        if (triggerFilters.Count == 0)
+            return ["automatic"];
+
+        return triggerFilters
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
+
+    private static bool MatchesTriggerFilter(
+        string? trigger,
+        IReadOnlySet<string> triggerFilter,
+        bool allowManualSnapshotCleanup)
+    {
+        var normalizedTrigger = (trigger ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalizedTrigger))
+            return false;
+
+        if (!allowManualSnapshotCleanup && RepositorySnapshotTriggerClassifier.IsManual(normalizedTrigger))
+            return false;
+
+        if (triggerFilter.Count == 0)
+            return true;
+
+        foreach (var token in triggerFilter)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                continue;
+
+            if (string.Equals(token, "all", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.Equals(token, normalizedTrigger, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (token.EndsWith('*') &&
+                normalizedTrigger.StartsWith(token[..^1], StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(token, "automatic", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(token, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                if (IsAutomaticTrigger(normalizedTrigger))
+                    return true;
+
+                continue;
+            }
+
+            if (string.Equals(token, "manual", StringComparison.OrdinalIgnoreCase))
+            {
+                if (allowManualSnapshotCleanup && IsManualTrigger(normalizedTrigger))
+                    return true;
+
+                continue;
+            }
+
+            if (string.Equals(token, "working", StringComparison.OrdinalIgnoreCase))
+            {
+                if (IsWorkingTrigger(normalizedTrigger))
+                    return true;
+
+                continue;
+            }
+
+            if (string.Equals(token, "scheduled", StringComparison.OrdinalIgnoreCase)
+                && normalizedTrigger.StartsWith("scheduled_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int ApplyAutomaticCompactionCandidates(
+        IReadOnlyList<SnapshotState> snapshots,
+        HashSet<long> toDelete,
+        IReadOnlySet<string> triggerFilter,
+        bool allowManualSnapshotCleanup,
+        bool automaticCompactionEnabled,
+        int? automaticCompactionWindowHours)
+    {
+        if (!automaticCompactionEnabled || automaticCompactionWindowHours is not > 0)
+            return 0;
+
+        var ticksPerBucket = TimeSpan.FromHours(automaticCompactionWindowHours.Value).Ticks;
+        if (ticksPerBucket <= 0)
+            return 0;
+
+        var compactable = snapshots
+            .Where(s => !toDelete.Contains(s.Id))
+            .Where(s => RepositorySnapshotTriggerClassifier.IsAutomatic(s.Trigger))
+            .Where(s => MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
+            .GroupBy(s => GetCompactionBucket(s.CreatedAt, ticksPerBucket));
+
+        var compacted = 0;
+
+        foreach (var bucket in compactable)
+        {
+            var ordered = bucket
+                .OrderByDescending(s => s.CreatedAt)
+                .ThenByDescending(s => s.Id)
+                .ToList();
+
+            foreach (var snapshot in ordered.Skip(1))
+            {
+                if (toDelete.Add(snapshot.Id))
+                    compacted++;
+            }
+        }
+
+        return compacted;
+    }
+
+    private static long GetCompactionBucket(DateTime createdAt, long ticksPerBucket)
+    {
+        var utc = createdAt.Kind == DateTimeKind.Utc
+            ? createdAt
+            : createdAt.ToUniversalTime();
+
+        return utc.Ticks / ticksPerBucket;
+    }
+
+    private static bool IsAutomaticTrigger(string trigger)
+    {
+        return RepositorySnapshotTriggerClassifier.IsAutomatic(trigger)
+               || RepositorySnapshotTriggerClassifier.IsWorking(trigger);
+    }
+
+    private static bool IsManualTrigger(string trigger)
+    {
+        return RepositorySnapshotTriggerClassifier.IsManual(trigger);
+    }
+
+    private static bool IsWorkingTrigger(string trigger)
+    {
+        return RepositorySnapshotTriggerClassifier.IsWorking(trigger);
+    }
+
+    private static bool IsWithinMaintenanceWindow(
+        DateTime localNow,
+        int? startHour,
+        int? endHour)
+    {
+        if (!startHour.HasValue || !endHour.HasValue)
+            return false;
+
+        var start = startHour.GetValueOrDefault();
+        var end = endHour.GetValueOrDefault();
+
+        if (start is < 0 or > 23 || end is < 0 or > 23)
+            return false;
+
+        if (start == end)
+            return false;
+
+        var hour = localNow.Hour;
+        if (start < end)
+            return hour >= start && hour < end;
+
+        return hour >= start || hour < end;
+    }
+
+    private static int? NormalizePositive(int? value)
+        => value is > 0 ? value : null;
+
+    private static long? NormalizePositive(long? value)
+        => value is > 0 ? value : null;
+
+    private static int? NormalizeHour(int? value)
+        => value is >= 0 and <= 23 ? value : null;
 
     private static string ResolveStoreRoot(IConfiguration configuration)
     {
@@ -712,14 +1075,56 @@ public sealed class EfRepositoryRetentionService(
 
     private static string BuildSummary(
         int snapshots,
+        int automaticSnapshotsCompacted,
         int versions,
         int diffs,
         int blocks,
         bool dryRun,
-        long freedBytes)
+        long freedBytes,
+        bool archiveMode,
+        int snapshotsArchived)
     {
         var mode = dryRun ? "Dry-run" : "Applied";
-        return $"{mode}: snapshots={snapshots}, versions={versions}, diffs={diffs}, blocks={blocks}, freed={FormatBytes(freedBytes)}";
+        if (archiveMode)
+        {
+            return $"{mode}: snapshots={snapshots}, archived={snapshotsArchived}, auto-compacted={automaticSnapshotsCompacted}, local-blocks-pruned={blocks}, freed={FormatBytes(freedBytes)}";
+        }
+
+        return $"{mode}: snapshots={snapshots}, auto-compacted={automaticSnapshotsCompacted}, versions={versions}, diffs={diffs}, blocks={blocks}, freed={FormatBytes(freedBytes)}";
+    }
+
+    private static (int ManualSnapshotsMarked, int AutomaticSnapshotsMarked, int WorkingSnapshotsMarked) CountSnapshotsByKind(
+        IReadOnlyCollection<SnapshotState> snapshots,
+        IReadOnlySet<long> snapshotsToDelete)
+    {
+        if (snapshots.Count == 0 || snapshotsToDelete.Count == 0)
+            return (0, 0, 0);
+
+        var manual = 0;
+        var automatic = 0;
+        var working = 0;
+
+        foreach (var snapshot in snapshots)
+        {
+            if (!snapshotsToDelete.Contains(snapshot.Id))
+                continue;
+
+            var kind = RepositorySnapshotTriggerClassifier.GetKind(snapshot.Trigger);
+            switch (kind)
+            {
+                case RepositorySnapshotKind.Automatic:
+                    automatic++;
+                    break;
+                case RepositorySnapshotKind.Working:
+                    working++;
+                    break;
+                default:
+                    manual++;
+                    break;
+            }
+        }
+
+        return (manual, automatic, working);
     }
 
     private static string FormatBytes(long bytes)
@@ -746,7 +1151,13 @@ public sealed class EfRepositoryRetentionService(
         DateTime startedAtUtc,
         DateTime finishedAtUtc,
         bool policyApplied,
+        bool archiveMode = false,
         int snapshotsMarked = 0,
+        int snapshotsArchived = 0,
+        int manualSnapshotsMarked = 0,
+        int automaticSnapshotsMarked = 0,
+        int workingSnapshotsMarked = 0,
+        int automaticSnapshotsCompacted = 0,
         int snapshotEntriesMarked = 0,
         int snapshotLinksMarked = 0,
         int fileVersionsMarked = 0,
@@ -766,7 +1177,13 @@ public sealed class EfRepositoryRetentionService(
             startedAtUtc,
             finishedAtUtc,
             policyApplied,
+            archiveMode,
             snapshotsMarked,
+            snapshotsArchived,
+            manualSnapshotsMarked,
+            automaticSnapshotsMarked,
+            workingSnapshotsMarked,
+            automaticSnapshotsCompacted,
             snapshotEntriesMarked,
             snapshotLinksMarked,
             fileVersionsMarked,
@@ -779,6 +1196,74 @@ public sealed class EfRepositoryRetentionService(
             blockFilesDeleted,
             estimatedFreedBytes,
             summary);
+    }
+
+    private async Task<List<BlockState>> GetArchiveCandidateBlocksAsync(
+        int repositoryId,
+        IReadOnlyCollection<long> snapshotIdsToArchive,
+        IReadOnlyCollection<long> retainedSnapshotIds,
+        CancellationToken ct)
+    {
+        if (snapshotIdsToArchive.Count == 0)
+            return [];
+
+        var activeVersionIdsQuery = retainedSnapshotIds.Count == 0
+            ? db.Set<SnapshotFileLink>()
+                .IgnoreQueryFilters()
+                .Where(static _ => false)
+                .Select(l => l.FileVersionId)
+            : db.Set<SnapshotFileLink>()
+                .IgnoreQueryFilters()
+                .Where(l => !l.IsDeleted && retainedSnapshotIds.Contains(l.SnapshotId))
+                .Select(l => l.FileVersionId)
+                .Distinct();
+
+        return await db.Set<FileVersionBlock>()
+            .IgnoreQueryFilters()
+            .Where(b => !b.IsDeleted)
+            .Where(b => b.FileVersion.SnapshotLinks.Any(l => !l.IsDeleted && snapshotIdsToArchive.Contains(l.SnapshotId)))
+            .Where(b => !activeVersionIdsQuery.Contains(b.FileVersionId))
+            .Select(b => new BlockState(b.Id, b.BlockStorageKey, b.StoredSizeBytes))
+            .Distinct()
+            .ToListAsync(ct);
+    }
+
+    private async Task<HashSet<string>> ResolveArchivePrunableManagedHashesAsync(
+        int repositoryId,
+        IReadOnlyCollection<long> retainedSnapshotIds,
+        CancellationToken ct)
+    {
+        var retainedSnapshotIdList = retainedSnapshotIds
+            .Distinct()
+            .ToList();
+
+        var activeManagedHashes = retainedSnapshotIdList.Count == 0
+            ? []
+            : await db.Set<FileVersionBlock>()
+                .IgnoreQueryFilters()
+                .Where(b => !b.IsDeleted
+                            && b.BlockStorageKey.StartsWith(ManagedHashPrefix)
+                            && b.FileVersion.SnapshotLinks.Any(l => !l.IsDeleted && retainedSnapshotIdList.Contains(l.SnapshotId)))
+                .Select(b => b.BlockStorageKey)
+                .Distinct()
+                .ToListAsync(ct);
+
+        var archivedManagedHashes = await db.Set<FileVersionBlock>()
+            .IgnoreQueryFilters()
+            .Where(b => !b.IsDeleted
+                        && b.BlockStorageKey.StartsWith(ManagedHashPrefix)
+                        && b.FileVersion.SnapshotLinks.Any(l =>
+                            !l.IsDeleted
+                            && l.Snapshot.RepositoryId == repositoryId
+                            && !l.Snapshot.IsDeleted))
+            .Select(b => b.BlockStorageKey)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var activeSet = new HashSet<string>(activeManagedHashes, StringComparer.OrdinalIgnoreCase);
+        return archivedManagedHashes
+            .Where(hash => !activeSet.Contains(hash))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
 }

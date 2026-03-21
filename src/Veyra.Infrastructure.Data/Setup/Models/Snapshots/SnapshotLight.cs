@@ -6,5 +6,6 @@ internal sealed record SnapshotLight(
     long SnapshotId,
     string? Title,
     DateTime CreatedAtUtc,
+    bool IsArchived,
     string Trigger,
     string? TagsCsv);

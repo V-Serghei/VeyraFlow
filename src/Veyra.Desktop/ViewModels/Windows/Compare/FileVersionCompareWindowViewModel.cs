@@ -671,6 +671,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         ShowImageDiffSettings = !ShowImageDiffSettings;
     }
 
+    public void HideImageDiffSettingsPane()
+    {
+        ShowImageDiffSettings = false;
+    }
+
     [RelayCommand]
     private void ToggleShowImageDiffDetails()
     {
@@ -1034,6 +1039,34 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         => _lastRenderedOverlayPngBytes.Length == 0
             ? Array.Empty<byte>()
             : _lastRenderedOverlayPngBytes.ToArray();
+
+    public DetachedImagePreviewRequest? BuildDetachedImagePreviewRequest()
+    {
+        if (!IsImagePreview)
+            return null;
+
+        var overlayBytes = GetCurrentImageDiffPreviewPngBytes();
+        var leftPath = _lastImagePreview?.BaselineImagePath;
+        var rightPath = _lastImagePreview?.CurrentImagePath;
+        var hasSplitSource = !string.IsNullOrWhiteSpace(leftPath) && !string.IsNullOrWhiteSpace(rightPath);
+
+        if (overlayBytes.Length == 0 && !hasSplitSource)
+            return null;
+
+        var previewTitle = string.IsNullOrWhiteSpace(OverlayImageCaption)
+            ? Loc.T("compare.window_title")
+            : OverlayImageCaption;
+
+        return new DetachedImagePreviewRequest
+        {
+            Title = previewTitle,
+            LeftImagePath = leftPath,
+            RightImagePath = rightPath,
+            OverlayPngBytes = overlayBytes,
+            IsSplitMode = IsSplitImageDiffMode && hasSplitSource,
+            InitialSplitPercent = ComparisonSplitPercent
+        };
+    }
 
     public string BuildSuggestedImageDiffFileName()
     {

@@ -23,6 +23,7 @@ public sealed class RunRepositoryRetentionHandler(
             var result = await retention.RunRetentionAsync(
                 request.RepositoryId,
                 request.DryRun,
+                request.PolicyOverride,
                 request.Progress,
                 ct);
 
@@ -48,4 +49,3 @@ public sealed class RunRepositoryRetentionHandler(
         }
     }
 }
-

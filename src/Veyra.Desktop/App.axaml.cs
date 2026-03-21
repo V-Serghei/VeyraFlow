@@ -31,6 +31,7 @@ public partial class App : AvaloniaApplication
     public static IServiceProvider? _serviceProvider { get; private set; } = null!;
     private static ISnapshotScheduler? _snapshotScheduler;
     private static Task? _startupBackgroundTask;
+    private static bool _databaseInitialized;
     private IAppTrayService? _trayService;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -47,6 +48,7 @@ public partial class App : AvaloniaApplication
         var connectionString = $"Data Source={dbPath}";
 
         _serviceProvider = DependencyInjection.BuildServiceProvider(connectionString);
+        EnsureDatabaseReadyForShell();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime classicDesktop)
         {
@@ -133,7 +135,11 @@ public partial class App : AvaloniaApplication
             var localRepositoryCount = 0;
             var isMainShellActive = false;
 
-            DatabaseStartupBootstrapper.Initialize(db);
+            if (!_databaseInitialized)
+            {
+                DatabaseStartupBootstrapper.Initialize(db);
+                _databaseInitialized = true;
+            }
 
             var nativeHealth = NativeRuntimeHealth.Probe();
             if (nativeHealth.IsHealthy)
@@ -296,6 +302,25 @@ public partial class App : AvaloniaApplication
         catch (Exception ex)
         {
             Log.Error(ex, "Deferred startup pipeline failed");
+        }
+    }
+
+    private static void EnsureDatabaseReadyForShell()
+    {
+        if (_serviceProvider is null || _databaseInitialized)
+            return;
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+            DatabaseStartupBootstrapper.Initialize(db);
+            _databaseInitialized = true;
+            Log.Information("Database schema is ready before shell initialization.");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to prepare database schema before shell initialization. Deferred startup will retry.");
         }
     }
 }

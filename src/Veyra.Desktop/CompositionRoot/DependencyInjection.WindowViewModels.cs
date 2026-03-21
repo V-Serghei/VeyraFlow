@@ -14,10 +14,12 @@ public static partial class DependencyInjection
         services.AddTransient<ConfirmActionWindowViewModel>();
         services.AddTransient<PasswordVerificationWindowViewModel>();
         services.AddTransient<AuthDialogWindowViewModel>();
+        services.AddTransient<RepositoryRetentionWizardWindowViewModel>();
         services.AddTransient<OperationJournalWindowViewModel>();
         services.AddTransient<OperationMonitorWindowViewModel>();
         services.AddTransient<RepositoryBundleExportWizardWindowViewModel>();
         services.AddTransient<RepositoryBundleImportWizardWindowViewModel>();
+        services.AddTransient<TrayPanelWindowViewModel>();
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
         return services;

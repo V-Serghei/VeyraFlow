@@ -53,15 +53,18 @@ internal static class RepositoryBundleBlockPathResolver
         if (safe.Length < 4)
             return null;
 
-        var candidate1 = Path.Combine(storeRoot, "managed", "blocks", safe[..2], safe[2..4], safe + ".bin");
-        if (File.Exists(candidate1))
-            return candidate1;
+        var nativeCandidate = Path.Combine(storeRoot, "blocks", safe[..2], safe[2..4], safe + ".zst");
+        if (File.Exists(nativeCandidate))
+            return nativeCandidate;
 
-        var candidate2 = Path.Combine(storeRoot, safe[..2], safe[2..4], safe + ".bin");
-        if (File.Exists(candidate2))
-            return candidate2;
+        var managedCandidate = Path.Combine(storeRoot, "managed", "blocks", safe[..2], safe[2..4], safe + ".bin");
+        if (File.Exists(managedCandidate))
+            return managedCandidate;
 
-        return candidate1;
+        var legacyCandidate = Path.Combine(storeRoot, safe[..2], safe[2..4], safe + ".bin");
+        if (File.Exists(legacyCandidate))
+            return legacyCandidate;
+
+        return nativeCandidate;
     }
 }
-

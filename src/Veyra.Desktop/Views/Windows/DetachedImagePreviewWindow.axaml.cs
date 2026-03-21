@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using Avalonia;
 using Avalonia.Controls;
@@ -14,31 +13,45 @@ namespace Veyra.Desktop.Views.Windows;
 
 public partial class DetachedImagePreviewWindow : Window
 {
-    private readonly Bitmap? _bitmap;
+    private readonly DetachedImagePreviewRequest _request;
+    private Bitmap? _overlayBitmap;
+    private Bitmap? _leftBitmap;
+    private Bitmap? _rightBitmap;
     private InteractiveImageViewportController? _viewportController;
+    private double _splitPercent;
 
     public DetachedImagePreviewWindow()
     {
         InitializeComponent();
+        _request = new DetachedImagePreviewRequest();
     }
 
-    public DetachedImagePreviewWindow(byte[] pngBytes, string title, Window owner)
+    public DetachedImagePreviewWindow(DetachedImagePreviewRequest request, Window owner)
         : this()
     {
+        _request = request;
+        _splitPercent = request.InitialSplitPercent;
         Owner = owner;
-        Title = title;
-        PreviewTitleTextBlock.Text = title;
+        Title = request.Title;
+        PreviewTitleTextBlock.Text = request.Title;
         AddHandler(
             InputElement.PointerWheelChangedEvent,
             OnImagePointerWheelChanged,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
 
-        if (pngBytes.Length > 0)
+        LoadBitmaps();
+
+        if (_overlayBitmap is not null)
+            PreviewImage.Source = _overlayBitmap;
+
+        if (_rightBitmap is not null)
+            SplitBaseImage.Source = _rightBitmap;
+
+        if (_leftBitmap is not null)
         {
-            using var stream = new MemoryStream(pngBytes, writable: false);
-            _bitmap = new Bitmap(stream);
-            PreviewImage.Source = _bitmap;
+            SplitRevealImage.Source = _leftBitmap;
+            PeekBeforeImage.Source = _leftBitmap;
         }
 
         Opened += (_, _) =>
@@ -56,20 +69,20 @@ public partial class DetachedImagePreviewWindow : Window
                 ImageViewportHost,
                 ImageHost,
                 PreviewImage,
-                splitBaseImage: null,
-                splitRevealHost: null,
-                splitRevealImage: null,
-                splitDivider: null,
-                peekBeforeImage: null,
+                SplitBaseImage,
+                SplitRevealHost,
+                SplitRevealImage,
+                SplitDivider,
+                PeekBeforeImage,
                 ZoomSlider,
                 ZoomValueTextBlock,
-                () => _bitmap,
-                () => null,
-                () => null,
-                () => _bitmap,
-                () => false,
-                () => 50d,
-                setSplitPercent: null);
+                () => _overlayBitmap,
+                () => _leftBitmap,
+                () => _rightBitmap,
+                GetReferenceBitmap,
+                () => _request.IsSplitMode,
+                () => _splitPercent,
+                value => _splitPercent = value);
 
             _viewportController.UpdateZoomUi();
             Dispatcher.UIThread.Post(() => _viewportController?.HandleContentChanged(), DispatcherPriority.Background);
@@ -80,26 +93,72 @@ public partial class DetachedImagePreviewWindow : Window
             _viewportController?.Cleanup();
             _viewportController = null;
             PreviewImage.Source = null;
-            _bitmap?.Dispose();
+            SplitBaseImage.Source = null;
+            SplitRevealImage.Source = null;
+            PeekBeforeImage.Source = null;
+            _overlayBitmap?.Dispose();
+            _leftBitmap?.Dispose();
+            _rightBitmap?.Dispose();
+            _overlayBitmap = null;
+            _leftBitmap = null;
+            _rightBitmap = null;
         };
     }
 
-    private void OnZoomOutClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    public DetachedImagePreviewWindow(byte[] pngBytes, string title, Window owner)
+        : this(
+            new DetachedImagePreviewRequest
+            {
+                Title = title,
+                OverlayPngBytes = pngBytes
+            },
+            owner)
+    {
+    }
+
+    private void LoadBitmaps()
+    {
+        if (_request.OverlayPngBytes.Length > 0)
+        {
+            using var stream = new MemoryStream(_request.OverlayPngBytes, writable: false);
+            _overlayBitmap = new Bitmap(stream);
+        }
+
+        _leftBitmap = LoadBitmap(_request.LeftImagePath);
+        _rightBitmap = LoadBitmap(_request.RightImagePath);
+    }
+
+    private static Bitmap? LoadBitmap(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return null;
+
+        using var stream = File.OpenRead(path);
+        return new Bitmap(stream);
+    }
+
+    private Bitmap? GetReferenceBitmap()
+    {
+        if (_request.IsSplitMode)
+            return _leftBitmap ?? _rightBitmap ?? _overlayBitmap;
+
+        return _overlayBitmap ?? _rightBitmap ?? _leftBitmap;
+    }
+
+    private void OnZoomOutClicked(object? sender, RoutedEventArgs e)
         => _viewportController?.ZoomOut();
 
-    private void OnZoomInClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnZoomInClicked(object? sender, RoutedEventArgs e)
         => _viewportController?.ZoomIn();
 
-    private void OnFitToWindowClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnFitToWindowClicked(object? sender, RoutedEventArgs e)
         => _viewportController?.FitToView();
 
-    private void OnResetToHundredClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnResetToHundredClicked(object? sender, RoutedEventArgs e)
         => _viewportController?.ResetToHundred();
 
-    private void OnCloseClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        Close();
-    }
+    private void OnCloseClicked(object? sender, RoutedEventArgs e)
+        => Close();
 
     private void OnZoomSliderValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
         => _viewportController?.HandleZoomSliderValueChanged(e.NewValue);

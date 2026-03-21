@@ -141,7 +141,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (!saveFileVersions && previousSnapshotId > 0)
         {
             var currentEntriesByPath = entries.ToDictionary(e => e.RelativePath, e => e, StringComparer.OrdinalIgnoreCase);
-            if (!HasEntryChanges(currentEntriesByPath, previousEntriesByPath))
+            if (!HasMeaningfulEntryChanges(currentEntriesByPath, previousEntriesByPath))
             {
                 preparationMs = stageTimer.ElapsedMilliseconds;
                 repo.FileCount = fileEntries;
@@ -480,7 +480,7 @@ public sealed class EfRepositorySnapshotRepository(
                 version.Blocks.Add(new FileVersionBlock
                 {
                     Sequence = block.Sequence,
-                    BlockHashBlake3 = block.BlockHashBlake3,
+                    BlockStorageKey = block.BlockStorageKey,
                     LengthBytes = block.LengthBytes,
                     StoredSizeBytes = block.StoredSizeBytes,
                     CreatedAt = scannedAtUtc,
@@ -733,7 +733,7 @@ public sealed class EfRepositorySnapshotRepository(
             .ExecuteDeleteAsync(ct);
     }
 
-    private static bool HasEntryChanges(
+    private static bool HasMeaningfulEntryChanges(
         IReadOnlyDictionary<string, RepositoryScanEntryDto> currentEntriesByPath,
         IReadOnlyDictionary<string, RepositoryScanEntryDto> previousEntriesByPath)
     {
@@ -745,11 +745,36 @@ public sealed class EfRepositorySnapshotRepository(
             if (!previousEntriesByPath.TryGetValue(entry.Key, out var previousEntry))
                 return true;
 
-            if (previousEntry != entry.Value)
+            if (EntriesDifferMeaningfully(previousEntry, entry.Value))
                 return true;
         }
 
         return false;
+    }
+
+    private static bool EntriesDifferMeaningfully(RepositoryScanEntryDto previousEntry, RepositoryScanEntryDto currentEntry)
+    {
+        if (previousEntry.IsDirectory != currentEntry.IsDirectory)
+            return true;
+
+        if (!string.Equals(previousEntry.RelativePath, currentEntry.RelativePath, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(previousEntry.ParentRelativePath, currentEntry.ParentRelativePath, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(previousEntry.Name, currentEntry.Name, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!string.Equals(previousEntry.Extension, currentEntry.Extension, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (previousEntry.SizeBytes != currentEntry.SizeBytes)
+            return true;
+
+        var previousHash = previousEntry.ContentHashSha256 ?? string.Empty;
+        var currentHash = currentEntry.ContentHashSha256 ?? string.Empty;
+        return !string.Equals(previousHash, currentHash, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
@@ -954,6 +979,7 @@ public sealed class EfRepositorySnapshotRepository(
                 s.Id,
                 s.Title,
                 s.CreatedAt,
+                s.IsArchived,
                 s.Trigger,
                 s.TagsCsv))
             .ToListAsync(ct);
@@ -1012,6 +1038,8 @@ public sealed class EfRepositorySnapshotRepository(
                     pair.current.SnapshotId,
                     pair.current.Title,
                     pair.current.CreatedAtUtc,
+                    RepositorySnapshotTriggerClassifier.GetKind(pair.current.Trigger),
+                    pair.current.IsArchived,
                     pair.current.Trigger,
                     comparison.ChangedFilesCount,
                     ParseSnapshotTags(pair.current.TagsCsv));
@@ -1169,7 +1197,7 @@ public sealed class EfRepositorySnapshotRepository(
                 .OrderBy(b => b.Sequence)
                 .Select(b => new StoredFileBlockDto(
                     b.Sequence,
-                    b.BlockHashBlake3,
+                    b.BlockStorageKey,
                     b.LengthBytes,
                     b.StoredSizeBytes))
                 .ToListAsync(ct);
@@ -1913,7 +1941,7 @@ public sealed class EfRepositorySnapshotRepository(
             .OrderBy(b => b.Sequence)
             .Select(b => new StoredFileBlockDto(
                 b.Sequence,
-                b.BlockHashBlake3,
+                b.BlockStorageKey,
                 b.LengthBytes,
                 b.StoredSizeBytes))
             .ToListAsync(ct);
@@ -2245,9 +2273,9 @@ public sealed class EfRepositorySnapshotRepository(
         IReadOnlyList<StoredFileBlockDto> baselineBlocks,
         CurrentFileDigest currentDigest)
     {
-        var baselineFamily = GetDominantHashFamily(baselineBlocks.Select(b => b.BlockHashBlake3));
+        var baselineFamily = GetDominantHashFamily(baselineBlocks.Select(b => b.BlockStorageKey));
         var (sharedBlockCount, dedupRatio, changedBlockRatio) = ComputeBlockOverlapMetrics(
-            baselineBlocks.Select(b => b.BlockHashBlake3),
+            baselineBlocks.Select(b => b.BlockStorageKey),
             currentDigest.ChunkHashes,
             baselineFamily,
             currentDigest.HashFamily);
@@ -2271,12 +2299,12 @@ public sealed class EfRepositorySnapshotRepository(
         FileVersionRestoreDto baselineVersion,
         FileVersionRestoreDto currentVersion)
     {
-        var baselineFamily = GetDominantHashFamily(baselineVersion.Blocks.Select(b => b.BlockHashBlake3));
-        var currentFamily = GetDominantHashFamily(currentVersion.Blocks.Select(b => b.BlockHashBlake3));
+        var baselineFamily = GetDominantHashFamily(baselineVersion.Blocks.Select(b => b.BlockStorageKey));
+        var currentFamily = GetDominantHashFamily(currentVersion.Blocks.Select(b => b.BlockStorageKey));
 
         var (sharedBlockCount, dedupRatio, changedBlockRatio) = ComputeBlockOverlapMetrics(
-            baselineVersion.Blocks.Select(b => b.BlockHashBlake3),
-            currentVersion.Blocks.Select(b => b.BlockHashBlake3),
+            baselineVersion.Blocks.Select(b => b.BlockStorageKey),
+            currentVersion.Blocks.Select(b => b.BlockStorageKey),
             baselineFamily,
             currentFamily);
 

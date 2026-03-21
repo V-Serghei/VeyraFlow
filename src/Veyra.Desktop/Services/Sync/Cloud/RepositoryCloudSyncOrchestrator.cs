@@ -19,6 +19,8 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Desktop.Services.Sync.Runtime;
+using Veyra.Desktop.Services.Sync.Runtime.Models;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -34,6 +36,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
     IFileContentStore fileContentStore,
     IMediator mediator,
     IConfiguration configuration,
+    ICloudSyncRuntimeControlService runtimeControl,
     ILogger<RepositoryCloudSyncOrchestrator> log)
     : IRepositoryCloudSyncOrchestrator
 {
@@ -55,6 +58,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     public async Task TryPushLatestSnapshotAsync(int repositoryId, CancellationToken ct = default)
     {
+        if (await TryQueueLatestSnapshotWhilePausedAsync(repositoryId, ct))
+            return;
+
         var accessToken = await TryGetSyncAccessTokenAsync("push latest snapshot", ct);
         if (string.IsNullOrWhiteSpace(accessToken))
             return;
@@ -89,29 +95,57 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     public async Task ProcessPendingQueueAsync(CancellationToken ct = default)
     {
-        var accessToken = await TryGetSyncAccessTokenAsync("process sync queue", ct);
-        if (string.IsNullOrWhiteSpace(accessToken))
+        if (runtimeControl.IsPaused)
+        {
+            await ApplyPausedStatusToQueuedRepositoriesAsync(ct);
             return;
+        }
 
-        await _queueGate.WaitAsync(ct);
+        void OnRuntimeStateChanged(CloudSyncRuntimeSnapshot snapshot)
+        {
+            if (snapshot.IsPaused)
+                CancelActiveQueueItemForPause();
+        }
+
+        runtimeControl.StateChanged += OnRuntimeStateChanged;
+
+        var accessToken = await TryGetSyncAccessTokenAsync("process sync queue", ct);
         try
         {
-            await RecoverStaleRunningQueueItemsAsync(ct);
+            if (string.IsNullOrWhiteSpace(accessToken))
+                return;
 
-            while (true)
+            await _queueGate.WaitAsync(ct);
+            try
             {
-                ct.ThrowIfCancellationRequested();
+                await RecoverStaleRunningQueueItemsAsync(ct);
 
-                var next = await GetNextQueueItemAsync(ct);
-                if (next is null)
-                    break;
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
 
-                await ProcessQueueItemAsync(accessToken, next.Id, ct);
+                    if (runtimeControl.IsPaused)
+                    {
+                        await ApplyPausedStatusToQueuedRepositoriesAsync(CancellationToken.None);
+                        log.LogInformation("Cloud sync queue processing paused before the next queued item.");
+                        break;
+                    }
+
+                    var next = await GetNextQueueItemAsync(ct);
+                    if (next is null)
+                        break;
+
+                    await ProcessQueueItemAsync(accessToken, next.Id, ct);
+                }
+            }
+            finally
+            {
+                _queueGate.Release();
             }
         }
         finally
         {
-            _queueGate.Release();
+            runtimeControl.StateChanged -= OnRuntimeStateChanged;
         }
     }
 
@@ -149,6 +183,18 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     public async Task<RepositoryCloudRepairResultDto> RepairRepositoryCloudDataAsync(int repositoryId, CancellationToken ct = default)
     {
+        if (runtimeControl.IsPaused)
+        {
+            return new RepositoryCloudRepairResultDto(
+                Success: false,
+                ReferencedBlocks: 0,
+                AlreadyPresentBlocks: 0,
+                UploadedBlocks: 0,
+                MissingLocalBlocks: 0,
+                FailedUploads: 0,
+                ErrorMessage: "Cloud actions are paused.");
+        }
+
         var accessToken = await TryGetSyncAccessTokenAsync("repair repository cloud data", ct);
         if (string.IsNullOrWhiteSpace(accessToken))
         {
@@ -182,7 +228,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             .Where(b => !b.FileVersion.IsDeleted)
             .Where(b => !b.FileVersion.FileIdentity.IsDeleted)
             .Where(b => b.FileVersion.FileIdentity.RepositoryId == repositoryId)
-            .Select(b => b.BlockHashBlake3)
+            .Select(b => b.BlockStorageKey)
             .Where(h => !string.IsNullOrWhiteSpace(h))
             .Distinct()
             .OrderBy(h => h)
@@ -276,8 +322,11 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 : $"Failed to upload {failedUploads} block(s) during repair.");
     }
 
-    public async Task<int> RestoreRepositoriesFromCloudAsync(CancellationToken ct = default)
+    public async Task<int> RestoreRepositoriesFromCloudAsync(string? targetRootDirectory = null, CancellationToken ct = default)
     {
+        if (runtimeControl.IsPaused)
+            return 0;
+
         var profile = await userProfiles.GetActiveProfileAsync(ct);
         if (profile is null)
             return 0;
@@ -309,7 +358,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             if (package is null)
                 continue;
 
-            var restorePath = BuildRestorePath(profile.Username, remote.Name);
+            var restorePath = BuildRestorePath(targetRootDirectory, profile.Username, remote.Name);
             Directory.CreateDirectory(restorePath);
 
             await RestoreFilesFromPackageAsync(accessToken, package, restorePath, ct);
@@ -562,6 +611,48 @@ public sealed class RepositoryCloudSyncOrchestrator(
         repository.UpdatedAt = now;
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<bool> TryQueueLatestSnapshotWhilePausedAsync(int repositoryId, CancellationToken ct)
+    {
+        if (!runtimeControl.IsPaused)
+            return false;
+
+        var profile = await userProfiles.GetActiveProfileAsync(ct);
+        if (profile is null)
+            return true;
+
+        var repository = await db.Repositories
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repository is null)
+            return true;
+
+        var latestSnapshot = await db.RepositorySnapshots
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.SnapshotFileLinks.Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new { s.Id, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+
+        if (latestSnapshot is null)
+            return true;
+
+        var remoteSnapshotId = BuildRemoteSnapshotId(repositoryId, latestSnapshot.Id, latestSnapshot.CreatedAt);
+        await EnqueueSnapshotPushAsync(repository, latestSnapshot.Id, remoteSnapshotId, ct);
+
+        repository.CloudSyncLastStatus = "paused";
+        repository.CloudSyncLastError = null;
+        repository.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+
+        log.LogInformation(
+            "Queued latest snapshot for later cloud sync because cloud actions are paused. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}",
+            repositoryId,
+            latestSnapshot.Id);
+
+        return true;
     }
 
     private async Task<RepositorySyncQueueItem?> GetNextQueueItemAsync(CancellationToken ct)
@@ -930,17 +1021,31 @@ public sealed class RepositoryCloudSyncOrchestrator(
         }
         catch (OperationCanceledException) when (queueItemCts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
-            var affected = await MarkRepositoryQueueCancelledAsync(
-                repository.Id,
-                "Cloud sync cancelled by user.",
-                CancellationToken.None);
+            if (runtimeControl.IsPaused)
+            {
+                var affected = await PauseRepositoryQueueAsync(repository.Id, CancellationToken.None);
 
-            log.LogInformation(
-                "Cloud queue item cancelled by user. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. AffectedQueueItems {AffectedQueueItems}",
-                queueItem.Id,
-                repository.Id,
-                queueItem.SnapshotId,
-                affected);
+                log.LogInformation(
+                    "Cloud queue item paused. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. AffectedQueueItems {AffectedQueueItems}",
+                    queueItem.Id,
+                    repository.Id,
+                    queueItem.SnapshotId,
+                    affected);
+            }
+            else
+            {
+                var affected = await MarkRepositoryQueueCancelledAsync(
+                    repository.Id,
+                    "Cloud sync cancelled by user.",
+                    CancellationToken.None);
+
+                log.LogInformation(
+                    "Cloud queue item cancelled by user. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. AffectedQueueItems {AffectedQueueItems}",
+                    queueItem.Id,
+                    repository.Id,
+                    queueItem.SnapshotId,
+                    affected);
+            }
         }
         catch (Exception ex)
         {
@@ -1063,6 +1168,87 @@ public sealed class RepositoryCloudSyncOrchestrator(
             await db.SaveChangesAsync(ct);
 
         return affected;
+    }
+
+    private async Task<int> PauseRepositoryQueueAsync(
+        int repositoryId,
+        CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var affected = 0;
+
+        var queueItems = await db.Set<RepositorySyncQueueItem>()
+            .Include(q => q.Repository)
+            .Where(q => q.RepositoryId == repositoryId
+                        && q.OperationType == PushOperationType
+                        && (q.Status == RepositorySyncQueueItem.StatusPending
+                            || q.Status == RepositorySyncQueueItem.StatusRunning
+                            || q.Status == RepositorySyncQueueItem.StatusRetry))
+            .ToListAsync(ct);
+
+        foreach (var queueItem in queueItems)
+        {
+            if (queueItem.Status == RepositorySyncQueueItem.StatusRunning)
+                queueItem.Status = RepositorySyncQueueItem.StatusRetry;
+
+            queueItem.LastError = null;
+            queueItem.NextAttemptAtUtc = now;
+            queueItem.UpdatedAt = now;
+            affected++;
+        }
+
+        var repository = queueItems.Select(q => q.Repository).FirstOrDefault()
+                         ?? await db.Repositories.FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repository is not null)
+        {
+            repository.CloudSyncLastStatus = "paused";
+            repository.CloudSyncLastError = null;
+            repository.UpdatedAt = now;
+        }
+
+        if (affected > 0 || repository is not null)
+            await db.SaveChangesAsync(ct);
+
+        return affected;
+    }
+
+    private async Task ApplyPausedStatusToQueuedRepositoriesAsync(CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var repositoryIds = await db.Set<RepositorySyncQueueItem>()
+            .Where(q => q.OperationType == PushOperationType)
+            .Where(q => q.Status == RepositorySyncQueueItem.StatusPending
+                        || q.Status == RepositorySyncQueueItem.StatusRunning
+                        || q.Status == RepositorySyncQueueItem.StatusRetry)
+            .Select(q => q.RepositoryId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (repositoryIds.Count == 0)
+            return;
+
+        var repositoriesToUpdate = await db.Repositories
+            .Where(r => !r.IsDeleted && repositoryIds.Contains(r.Id))
+            .ToListAsync(ct);
+
+        foreach (var repository in repositoriesToUpdate)
+        {
+            repository.CloudSyncLastStatus = "paused";
+            repository.CloudSyncLastError = null;
+            repository.UpdatedAt = now;
+        }
+
+        if (repositoriesToUpdate.Count > 0)
+            await db.SaveChangesAsync(ct);
+    }
+
+    private void CancelActiveQueueItemForPause()
+    {
+        lock (_activeQueueItemStateGate)
+        {
+            _activeQueueItemCts?.Cancel();
+        }
     }
 
     private async Task MarkQueueFailureAsync(long queueItemId, Exception ex, CancellationToken ct)
@@ -1271,7 +1457,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 b.FileVersionId,
                 Block = new CloudBlockRefDto(
                     b.Sequence,
-                    b.BlockHashBlake3,
+                    b.BlockStorageKey,
                     b.LengthBytes,
                     b.StoredSizeBytes)
             })
@@ -1523,15 +1709,19 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (safe.Length < 4)
             return null;
 
-        var candidate1 = Path.Combine(root, "managed", "blocks", safe[..2], safe[2..4], safe + ".bin");
-        if (File.Exists(candidate1))
-            return candidate1;
+        var nativeCandidate = Path.Combine(root, "blocks", safe[..2], safe[2..4], safe + ".zst");
+        if (File.Exists(nativeCandidate))
+            return nativeCandidate;
 
-        var candidate2 = Path.Combine(root, safe[..2], safe[2..4], safe + ".bin");
-        if (File.Exists(candidate2))
-            return candidate2;
+        var managedCandidate = Path.Combine(root, "managed", "blocks", safe[..2], safe[2..4], safe + ".bin");
+        if (File.Exists(managedCandidate))
+            return managedCandidate;
 
-        return candidate1;
+        var legacyCandidate = Path.Combine(root, safe[..2], safe[2..4], safe + ".bin");
+        if (File.Exists(legacyCandidate))
+            return legacyCandidate;
+
+        return nativeCandidate;
     }
 
     private string ResolveBlockStoreRoot()
@@ -1652,17 +1842,19 @@ public sealed class RepositoryCloudSyncOrchestrator(
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 
-    private static string BuildRestorePath(string username, string repositoryName)
+    private static string BuildRestorePath(string? targetRootDirectory, string username, string repositoryName)
     {
         var safeRepo = SanitizeSegment(repositoryName);
         var safeUser = SanitizeSegment(username);
 
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VeyraFlow",
-            "cloud-restored",
-            safeUser,
-            safeRepo);
+        var root = string.IsNullOrWhiteSpace(targetRootDirectory)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VeyraFlow",
+                "cloud-restored")
+            : Path.GetFullPath(targetRootDirectory.Trim());
+
+        return Path.Combine(root, safeUser, safeRepo);
     }
 
     private static string SanitizeSegment(string value)

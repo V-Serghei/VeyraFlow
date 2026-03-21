@@ -616,7 +616,7 @@
                 </Border>
             </Grid>
 
-            <Border IsVisible="{Binding IsSnapshotHistoryMenuOpen}"
+            <Border IsVisible="False"
                     Classes="overlay-backdrop"
                     Padding="24">
                 <Border Classes="dialog-shell"
@@ -656,6 +656,22 @@
                                                      Classes="compact"
                                                      Watermark="{loc:Tr explorer.search_commits}"/>
                                             <WrapPanel Orientation="Horizontal">
+                                                <ComboBox Width="152"
+                                                          Margin="0,0,8,8"
+                                                          Classes="compact"
+                                                          ItemsSource="{Binding SnapshotKindFilters}"
+                                                          SelectedItem="{Binding SelectedSnapshotKindFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_kind}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_kind}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
                                                 <ComboBox Width="160"
                                                           Margin="0,0,8,8"
                                                           Classes="compact"
@@ -719,11 +735,17 @@
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate x:DataType="explorer:RepositorySnapshotHistoryEntryViewModel">
                                                         <Border Padding="10" Background="Transparent" BorderThickness="0">
-                                                       <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="4">
+                                                       <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="4">
                                                            <TextBlock Grid.Row="0" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                           <TextBlock Grid.Row="1" Text="{Binding DisplayTime}" Classes="muted" FontSize="11"/>
-                                                           <TextBlock Grid.Row="2" Text="{Binding ChangedFilesLabel}" Classes="muted" FontSize="11"/>
-                                                           <TextBlock Grid.Row="3" Text="{Binding TagsLabel}" Classes="muted" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasTags}"/>
+                                                           <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                                               <TextBlock Text="{Binding KindLabel}" Classes="muted" FontSize="11"/>
+                                                               <Border Background="#223B5B" CornerRadius="8" Padding="6,1" IsVisible="{Binding IsArchived}">
+                                                                   <TextBlock Text="{Binding ArchivedLabel}" Foreground="#A9D3FF" FontSize="10" FontWeight="SemiBold"/>
+                                                               </Border>
+                                                           </StackPanel>
+                                                           <TextBlock Grid.Row="2" Text="{Binding DisplayTime}" Classes="muted" FontSize="11"/>
+                                                           <TextBlock Grid.Row="3" Text="{Binding ChangedFilesLabel}" Classes="muted" FontSize="11"/>
+                                                           <TextBlock Grid.Row="4" Text="{Binding TagsLabel}" Classes="muted" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasTags}"/>
                                                        </Grid>
                                                    </Border>
                                                </DataTemplate>

@@ -208,23 +208,24 @@ public partial class FileVersionCompareWindow : Window
         if (DataContext is not FileVersionCompareWindowViewModel vm)
             return;
 
-        var pngBytes = vm.GetCurrentImageDiffPreviewPngBytes();
-        if (pngBytes.Length == 0)
+        var request = vm.BuildDetachedImagePreviewRequest();
+        if (request is null)
             return;
 
-        var previewTitle = string.IsNullOrWhiteSpace(vm.OverlayImageCaption)
-            ? Loc.T("compare.window_title")
-            : vm.OverlayImageCaption;
-
         var detachedWindow = new DetachedImagePreviewWindow(
-            pngBytes,
-            previewTitle,
+            request,
             Owner as Window ?? this)
         {
             Topmost = true
         };
 
         detachedWindow.Show();
+    }
+
+    private void OnImageDiffSettingsBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        GetViewModel()?.HideImageDiffSettingsPane();
+        e.Handled = true;
     }
 
     private void OnVersionItemPointerPressed(object? sender, PointerPressedEventArgs e)

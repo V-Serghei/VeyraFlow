@@ -232,6 +232,12 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
         <Setter Property="Padding" Value="10"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.18"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.18"/>
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="Border.card:hover, Border.list-item:hover">
@@ -336,14 +342,12 @@
         <Setter Property="Padding" Value="12,8"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Transitions">
-            <Transitions>
-                <BrushTransition Property="Background" Duration="0:0:0.12"/>
-                <BrushTransition Property="BorderBrush" Duration="0:0:0.12"/>
-            </Transitions>
+            <Transitions/>
         </Setter>
     </Style>
 
     <Style Selector="Button:pointerover">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
     </Style>
 
@@ -367,7 +371,7 @@
     </Style>
 
     <Style Selector="Button.primary:pointerover">
-        <Setter Property="Background" Value="{DynamicResource VeyraAccentStrongBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource VeyraAccentBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource VeyraAccentStrongBrush}"/>
         <Setter Property="Opacity" Value="1"/>
     </Style>
@@ -379,8 +383,8 @@
     </Style>
 
     <Style Selector="Button.subtle:pointerover">
-        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
     </Style>
 
     <Style Selector="Button.ghost">
@@ -390,8 +394,8 @@
     </Style>
 
     <Style Selector="Button.ghost:pointerover">
-        <Setter Property="Background" Value="{DynamicResource VeyraCardNeutralBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
     </Style>
 
     <Style Selector="Button.icon">
@@ -488,6 +492,12 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Padding" Value="10,8"/>
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusMedium}"/>
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.18"/>
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.18"/>
+            </Transitions>
+        </Setter>
     </Style>
 
     <Style Selector="TextBox.compact, ComboBox.compact">

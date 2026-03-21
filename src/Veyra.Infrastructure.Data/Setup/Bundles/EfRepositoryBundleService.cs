@@ -21,6 +21,7 @@ public sealed class EfRepositoryBundleService(
     private const int CurrentBundleFormatVersion = 1;
     private const string ManifestEntryName = "manifest.json";
     private const int MaxNameLength = 256;
+    private const int ImportBatchSize = 1000;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -185,7 +186,7 @@ public sealed class EfRepositoryBundleService(
                 Id = b.Id,
                 FileVersionId = b.FileVersionId,
                 Sequence = b.Sequence,
-                BlockHashBlake3 = b.BlockHashBlake3,
+                BlockStorageKey = b.BlockStorageKey,
                 LengthBytes = b.LengthBytes,
                 StoredSizeBytes = b.StoredSizeBytes,
                 CreatedAtUtc = b.CreatedAt
@@ -340,7 +341,7 @@ public sealed class EfRepositoryBundleService(
 
         var storeRoot = RepositoryBundleBlockPathResolver.ResolveStoreRoot(configuration);
         var uniqueBlockHashes = fileVersionBlocks
-            .Select(b => b.BlockHashBlake3)
+            .Select(b => b.BlockStorageKey)
             .Where(h => !string.IsNullOrWhiteSpace(h))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(h => h, StringComparer.OrdinalIgnoreCase)
@@ -568,11 +569,11 @@ public sealed class EfRepositoryBundleService(
 
         if (snapshotRows.Count > 0)
         {
-            db.AddRange(snapshotRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in snapshotRows)
-                snapshotIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                snapshotRows,
+                row => row.Entity,
+                (row, entity) => snapshotIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var entryRows = manifest.SnapshotEntries
@@ -596,10 +597,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (entryRows.Count > 0)
-        {
-            db.AddRange(entryRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(entryRows, ct);
 
         var identityRows = manifest.FileIdentities
             .OrderBy(i => i.RelativePath, StringComparer.OrdinalIgnoreCase)
@@ -623,11 +621,11 @@ public sealed class EfRepositoryBundleService(
 
         if (identityRows.Count > 0)
         {
-            db.AddRange(identityRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in identityRows)
-                identityIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                identityRows,
+                row => row.Entity,
+                (row, entity) => identityIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var versionRows = manifest.FileVersions
@@ -653,11 +651,11 @@ public sealed class EfRepositoryBundleService(
 
         if (versionRows.Count > 0)
         {
-            db.AddRange(versionRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in versionRows)
-                versionIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                versionRows,
+                row => row.Entity,
+                (row, entity) => versionIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var blockRows = manifest.FileVersionBlocks
@@ -668,7 +666,7 @@ public sealed class EfRepositoryBundleService(
             {
                 FileVersionId = versionIdMap[b.FileVersionId],
                 Sequence = b.Sequence,
-                BlockHashBlake3 = b.BlockHashBlake3,
+                BlockStorageKey = b.BlockStorageKey,
                 LengthBytes = b.LengthBytes,
                 StoredSizeBytes = b.StoredSizeBytes,
                 CreatedAt = b.CreatedAtUtc,
@@ -678,10 +676,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (blockRows.Count > 0)
-        {
-            db.AddRange(blockRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(blockRows, ct);
 
         var linkRows = manifest.SnapshotFileLinks
             .Where(l => snapshotIdMap.ContainsKey(l.SnapshotId)
@@ -701,10 +696,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (linkRows.Count > 0)
-        {
-            db.AddRange(linkRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(linkRows, ct);
 
         var diffRows = manifest.TextDiffs
             .Where(d => versionIdMap.ContainsKey(d.LeftFileVersionId)
@@ -735,11 +727,11 @@ public sealed class EfRepositoryBundleService(
 
         if (diffRows.Count > 0)
         {
-            db.AddRange(diffRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in diffRows)
-                diffIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                diffRows,
+                row => row.Entity,
+                (row, entity) => diffIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var atomRows = await UpsertTextLineAtomsAsync(manifest.TextLineAtoms, atomIdMap, ct);
@@ -771,11 +763,11 @@ public sealed class EfRepositoryBundleService(
 
         if (hunkRows.Count > 0)
         {
-            db.AddRange(hunkRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in hunkRows)
-                hunkIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                hunkRows,
+                row => row.Entity,
+                (row, entity) => hunkIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var lineRows = manifest.TextDiffLines
@@ -801,10 +793,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (lineRows.Count > 0)
-        {
-            db.AddRange(lineRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(lineRows, ct);
 
         var latestSnapshot = snapshotRows
             .Select(r => r.Entity)
@@ -858,6 +847,68 @@ public sealed class EfRepositoryBundleService(
             ImportedAtUtc: DateTime.UtcNow,
             Warnings: warnings,
             Summary: summary);
+    }
+
+    private async Task SaveEntitiesInBatchesAsync<TEntity>(
+        IReadOnlyList<TEntity> entities,
+        CancellationToken ct)
+        where TEntity : class
+    {
+        foreach (var chunk in Chunk(entities, ImportBatchSize))
+        {
+            var previousAutoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
+            try
+            {
+                db.AddRange(chunk);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+                DetachEntities(chunk);
+            }
+        }
+    }
+
+    private async Task SaveMappedRowsInBatchesAsync<TSource, TEntity>(
+        IReadOnlyList<TSource> rows,
+        Func<TSource, TEntity> entitySelector,
+        Action<TSource, TEntity> afterSave,
+        CancellationToken ct)
+        where TEntity : class
+    {
+        foreach (var chunk in Chunk(rows, ImportBatchSize))
+        {
+            var entities = chunk.Select(entitySelector).ToList();
+            var previousAutoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
+            try
+            {
+                db.AddRange(entities);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+            }
+
+            foreach (var row in chunk)
+                afterSave(row, entitySelector(row));
+
+            DetachEntities(entities);
+        }
+    }
+
+    private void DetachEntities<TEntity>(IReadOnlyList<TEntity> entities)
+        where TEntity : class
+    {
+        foreach (var entity in entities)
+        {
+            var entry = db.Entry(entity);
+            if (entry.State != EntityState.Detached)
+                entry.State = EntityState.Detached;
+        }
     }
 
     private static bool ValidateManifestShape(
@@ -1197,4 +1248,3 @@ public sealed class EfRepositoryBundleService(
         }
     }
 }
-

@@ -7,6 +7,7 @@ public interface IRepositoryRetentionService
     Task<RepositoryRetentionRunResultDto> RunRetentionAsync(
         int repositoryId,
         bool dryRun,
+        RepositoryRetentionPolicyDto? policyOverride = null,
         IProgress<RepositoryRetentionProgressDto>? progress = null,
         CancellationToken ct = default);
 

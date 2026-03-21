@@ -21,11 +21,15 @@ public static partial class DependencyInjection
         services.AddWindowWithDataContext<ConfirmActionWindow, ConfirmActionWindowViewModel>();
         services.AddWindowWithDataContext<PasswordVerificationWindow, PasswordVerificationWindowViewModel>();
         services.AddWindowWithDataContext<AuthDialogWindow, AuthDialogWindowViewModel>();
+        services.AddWindowWithDataContext<RepositoryRetentionWizardWindow, RepositoryRetentionWizardWindowViewModel>();
         services.AddWindowWithDataContext<OperationJournalWindow, OperationJournalWindowViewModel>();
         services.AddWindowWithDataContext<OperationMonitorWindow, OperationMonitorWindowViewModel>();
         services.AddWindowWithDataContext<RepositoryBundleExportWizardWindow, RepositoryBundleExportWizardWindowViewModel>();
         services.AddWindowWithDataContext<RepositoryBundleImportWizardWindow, RepositoryBundleImportWizardWindowViewModel>();
+        services.AddWindowWithDataContext<TrayPanelWindow, TrayPanelWindowViewModel>();
 
+        services.AddTransient<CloudSyncHealthWindow>();
+        services.AddTransient<SnapshotHistoryWindow>();
         services.AddTransient<SetupWizardWindow>();
         return services;
     }

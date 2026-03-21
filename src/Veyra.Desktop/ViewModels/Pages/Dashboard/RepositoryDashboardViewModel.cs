@@ -6,17 +6,21 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Connectivity;
+using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.Views.Windows;
@@ -31,6 +35,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private readonly ILogger<RepositoryDashboardViewModel> _log;
     private readonly IWindowService _windows;
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
+    private readonly IUserProfileRepository _userProfiles;
+    private readonly IConnectivityStatusService _connectivity;
     private readonly IRepositoryDashboardFilterStore _filterStore;
     private readonly LocalizationManager _localization;
     private readonly UserExperienceManager _experience;
@@ -40,6 +46,12 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private bool _suppressFilterApply;
     private CancellationTokenSource? _filterCts;
     private long _filterRequestId;
+    private const string LocalModeAccent = "#6EA8FF";
+    private const string WarningAccent = "#F59E0B";
+    private const string SuccessAccent = "#4CAF50";
+    private const string LocalModeSurface = "#1A6EA8FF";
+    private const string WarningSurface = "#1AF59E0B";
+    private const string SuccessSurface = "#144CAF50";
 
     public event Func<int, Task>? OpenRepositoryRequested;
     public event Func<int, Task>? OpenRepositorySettingsRequested;
@@ -68,8 +80,45 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private string _savedFilterName = string.Empty;
     [ObservableProperty] private RepositoryDashboardSavedFilterViewModel? _selectedSavedFilter;
     [ObservableProperty] private bool _hasSavedFilters;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowConnectivityPanel))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelText))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelBadgeText))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelTitle))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelDetail))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelAccentColor))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelBackgroundColor))]
+    private bool _hasCloudAccess;
 
     public bool HasActiveFilters => GetActiveFilterCount() > 0;
+    public bool ShowConnectivityPanel => HasCloudAccess
+        && (_connectivity.Snapshot.State is ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable);
+    public string ConnectivityPanelText => _connectivity.Snapshot.State switch
+    {
+        ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_compact"),
+        ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_compact"),
+        _ => string.Empty
+    };
+    public string ConnectivityPanelBadgeText => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.cloud_mode.internet_unavailable"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.cloud_mode.cloud_unavailable"),
+            _ => Loc.T("dashboard.cloud_mode.ready")
+        };
+    public string ConnectivityPanelTitle => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_title"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_title"),
+            _ => string.Empty
+        };
+    public string ConnectivityPanelDetail => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_detail"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_detail"),
+            _ => string.Empty
+        };
+    public string ConnectivityPanelAccentColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).AccentColor;
+    public string ConnectivityPanelBackgroundColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).BackgroundColor;
     public bool ShowLoadingOverlay => IsLoading || IsTransientActionBusy;
     public string LoadingOverlayTitle => IsTransientActionBusy
         ? TransientActionTitle
@@ -92,17 +141,22 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         ILogger<RepositoryDashboardViewModel> log,
         IWindowService windows,
         ISensitiveActionGuard sensitiveActionGuard,
+        IUserProfileRepository userProfiles,
+        IConnectivityStatusService connectivity,
         IRepositoryDashboardFilterStore filterStore)
     {
         _mediator = mediator;
         _log = log;
         _windows = windows;
         _sensitiveActionGuard = sensitiveActionGuard;
+        _userProfiles = userProfiles;
+        _connectivity = connectivity;
         _filterStore = filterStore;
         _localization = LocalizationManager.Instance;
         _experience = UserExperienceManager.Instance;
         _localization.LanguageChanged += OnLanguageChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
+        _connectivity.StatusChanged += OnConnectivityStatusChanged;
     }
 
     [RelayCommand]
@@ -126,11 +180,12 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             if (!_presetsLoaded)
                 _presetsLoaded = true;
 
+            HasCloudAccess = (await _userProfiles.GetActiveProfileAsync()) is not null;
             var repos = await _mediator.Send(new GetAllRepositoriesQuery());
             _allRepositories.Clear();
 
             var cards = await Task.Run(() => repos
-                .Select(MapRepositoryCard)
+                .Select(repo => MapRepositoryCard(repo, HasCloudAccess, _connectivity.Snapshot.State))
                 .OrderBy(card => card.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList());
 
@@ -503,34 +558,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
     private void ReplaceVisibleRepositories(IReadOnlyCollection<RepositoryCardViewModel> repositories)
     {
-        if (AreVisibleRepositoriesEquivalent(repositories))
-        {
-            NotifyDashboardChromeStateChanged();
-            return;
-        }
-
-        Repositories.Clear();
-        foreach (var repository in repositories)
-            Repositories.Add(repository);
-
+        SyncCollection(Repositories, [.. repositories]);
         NotifyDashboardChromeStateChanged();
-    }
-
-    private bool AreVisibleRepositoriesEquivalent(IReadOnlyCollection<RepositoryCardViewModel> repositories)
-    {
-        if (Repositories.Count != repositories.Count)
-            return false;
-
-        using var currentEnumerator = Repositories.GetEnumerator();
-        using var nextEnumerator = repositories.GetEnumerator();
-
-        while (currentEnumerator.MoveNext() && nextEnumerator.MoveNext())
-        {
-            if (!ReferenceEquals(currentEnumerator.Current, nextEnumerator.Current))
-                return false;
-        }
-
-        return true;
     }
 
     private void ApplyPreset(RepositoryDashboardFilterPreset preset)
@@ -624,9 +653,38 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (CollectionEquals(collection, items))
             return;
 
-        collection.Clear();
-        foreach (var item in items)
-            collection.Add(item);
+        SyncCollection(collection, items);
+    }
+
+    private static void SyncCollection<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items)
+    {
+        var comparer = EqualityComparer<T>.Default;
+        var prefixLength = 0;
+        var currentCount = collection.Count;
+        var nextCount = items.Count;
+
+        while (prefixLength < currentCount &&
+               prefixLength < nextCount &&
+               comparer.Equals(collection[prefixLength], items[prefixLength]))
+        {
+            prefixLength++;
+        }
+
+        var suffixLength = 0;
+        while (suffixLength < currentCount - prefixLength &&
+               suffixLength < nextCount - prefixLength &&
+               comparer.Equals(collection[currentCount - 1 - suffixLength], items[nextCount - 1 - suffixLength]))
+        {
+            suffixLength++;
+        }
+
+        for (var index = currentCount - suffixLength - 1; index >= prefixLength; index--)
+            collection.RemoveAt(index);
+
+        for (var index = prefixLength; index < nextCount - suffixLength; index++)
+            collection.Insert(index, items[index]);
     }
 
     private static bool CollectionEquals<T>(IReadOnlyList<T> current, IReadOnlyList<T> next)
@@ -644,7 +702,10 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return true;
     }
 
-    private static RepositoryCardViewModel MapRepositoryCard(RepositoryDto repository)
+    private static RepositoryCardViewModel MapRepositoryCard(
+        RepositoryDto repository,
+        bool hasCloudAccess,
+        ConnectivityState connectivityState)
     {
         var isAvailable = Directory.Exists(repository.DirectoryPath);
         var syncStateKey = NormalizeCloudSyncStateKey(repository.CloudSync?.LastStatus);
@@ -679,8 +740,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             VersionCount = repository.VersionCount,
             TotalSizeBytes = repository.TotalSizeBytes,
             SizeDisplay = FormatSize(repository.TotalSizeBytes),
+            ShowCloudSection = hasCloudAccess,
             CloudSyncStateKey = syncStateKey,
-            CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus),
+            CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus, hasCloudAccess, connectivityState),
+            CloudModeText = FormatCloudMode(hasCloudAccess, connectivityState, syncStateKey),
+            CloudModeColor = FormatCloudModeColor(hasCloudAccess, connectivityState),
+            CloudModeBorderColor = FormatCloudModeBorderColor(hasCloudAccess, connectivityState),
+            CloudModeBackgroundColor = FormatCloudModeBackgroundColor(hasCloudAccess, connectivityState),
             CloudQueueSummary = BuildQueueSummary(queuePending, queueRunning, queueRetry, queueConflict, queueDeadLetter),
             IsDirectoryAvailable = isAvailable,
             QueuePendingCount = queuePending,
@@ -944,6 +1010,67 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
     }
 
+    private static string FormatCloudMode(bool hasCloudAccess, ConnectivityState connectivityState, string syncStateKey)
+    {
+        if (!hasCloudAccess)
+            return Loc.T("dashboard.cloud_mode.local");
+
+        return connectivityState switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.cloud_mode.internet_unavailable"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.cloud_mode.cloud_unavailable"),
+            _ when syncStateKey == "idle" => Loc.T("dashboard.cloud_mode.ready"),
+            _ => Loc.T("dashboard.cloud_mode.ready")
+        };
+    }
+
+    private static string FormatCloudSyncStatus(string? cloudStatus, bool hasCloudAccess, ConnectivityState connectivityState)
+    {
+        if (hasCloudAccess)
+        {
+            if (connectivityState == ConnectivityState.InternetUnavailable)
+                return Loc.T("dashboard.sync.internet_unavailable_status");
+
+            if (connectivityState == ConnectivityState.CloudUnavailable)
+                return Loc.T("dashboard.sync.cloud_unavailable_status");
+        }
+
+        return FormatCloudSyncStatus(cloudStatus);
+    }
+
+    private static string FormatCloudModeColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => !hasCloudAccess
+            ? LocalModeAccent
+            : connectivityState switch
+            {
+                ConnectivityState.InternetUnavailable => WarningAccent,
+                ConnectivityState.CloudUnavailable => WarningAccent,
+                _ => SuccessAccent
+            };
+
+    private static string FormatCloudModeBorderColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => FormatCloudModeColor(hasCloudAccess, connectivityState);
+
+    private static string FormatCloudModeBackgroundColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => !hasCloudAccess
+            ? LocalModeSurface
+            : connectivityState switch
+            {
+                ConnectivityState.InternetUnavailable => WarningSurface,
+                ConnectivityState.CloudUnavailable => WarningSurface,
+                _ => SuccessSurface
+            };
+
+    private static (string AccentColor, string BackgroundColor) DescribeConnectivityVisuals(bool hasCloudAccess, ConnectivityState state)
+        => !hasCloudAccess
+            ? (LocalModeAccent, LocalModeSurface)
+            : state switch
+            {
+                ConnectivityState.InternetUnavailable => (WarningAccent, WarningSurface),
+                ConnectivityState.CloudUnavailable => (WarningAccent, WarningSurface),
+                _ => (SuccessAccent, SuccessSurface)
+            };
+
     private static (string Text, string Color) BuildRepositoryStatusBadge(
         bool isDirectoryAvailable,
         string? cloudStatus,
@@ -980,6 +1107,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         RefreshLocalizationState();
     }
 
+    private void OnConnectivityStatusChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(RefreshLocalizationState);
+    }
+
     private void RefreshLocalizationState()
     {
         RefreshFilterOptionBindings();
@@ -998,7 +1130,12 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             card.StatusText = statusBadge.Text;
             card.StatusColor = statusBadge.Color;
             card.LastActivity = FormatLastActivity(card.LastActivityUtc);
-            card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey);
+            card.ShowCloudSection = HasCloudAccess;
+            card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey, HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeText = FormatCloudMode(HasCloudAccess, _connectivity.Snapshot.State, card.CloudSyncStateKey);
+            card.CloudModeColor = FormatCloudModeColor(HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeBorderColor = FormatCloudModeBorderColor(HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeBackgroundColor = FormatCloudModeBackgroundColor(HasCloudAccess, _connectivity.Snapshot.State);
             card.CloudQueueSummary = BuildQueueSummary(
                 card.QueuePendingCount,
                 card.QueueRunningCount,
@@ -1010,6 +1147,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
         RefreshRepositoryBindings();
         NotifyDashboardChromeStateChanged();
+        OnPropertyChanged(nameof(ShowConnectivityPanel));
+        OnPropertyChanged(nameof(ConnectivityPanelText));
+        OnPropertyChanged(nameof(ConnectivityPanelBadgeText));
+        OnPropertyChanged(nameof(ConnectivityPanelTitle));
+        OnPropertyChanged(nameof(ConnectivityPanelDetail));
+        OnPropertyChanged(nameof(ConnectivityPanelAccentColor));
+        OnPropertyChanged(nameof(ConnectivityPanelBackgroundColor));
     }
 
     private void RefreshFilterOptionBindings()

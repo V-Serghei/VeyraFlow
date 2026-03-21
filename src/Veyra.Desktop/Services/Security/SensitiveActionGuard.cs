@@ -12,6 +12,7 @@ namespace Veyra.Desktop.Services.Security;
 
 public sealed class SensitiveActionGuard(
     IUserProfileRepository userProfiles,
+    ILocalCredentialStore localCredentialStore,
     IAuthService auth,
     IWindowService windows,
     ILogger<SensitiveActionGuard> log) : ISensitiveActionGuard
@@ -87,6 +88,9 @@ public sealed class SensitiveActionGuard(
 
         try
         {
+            if (await localCredentialStore.VerifyPasswordAsync(activeProfile.Username, resultVm.Password, ct))
+                return new SensitiveActionGuardResult(true, false);
+
             var session = await auth.LoginAsync(activeProfile.Username, resultVm.Password, ct);
             if (session is null)
                 return new SensitiveActionGuardResult(false, false, Loc.T("security.error_invalid_password"));

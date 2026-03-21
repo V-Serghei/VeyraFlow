@@ -9,7 +9,10 @@ public sealed record RetentionDefaultsUserSettings(
     int? MaxSnapshots,
     long? MaxTotalSizeBytes,
     string? TriggerFilter,
-    int RunIntervalMinutes)
+    int RunIntervalMinutes,
+    string StorageMode = RepositoryRetentionStorageModes.Delete,
+    int? MaintenanceWindowStartHour = null,
+    int? MaintenanceWindowEndHour = null)
 {
     public RepositoryRetentionPolicyDto ToPolicy() => new(
         Enabled,
@@ -18,6 +21,9 @@ public sealed record RetentionDefaultsUserSettings(
         MaxTotalSizeBytes,
         string.IsNullOrWhiteSpace(TriggerFilter) ? [] : TriggerFilter.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries),
         RunIntervalMinutes,
+        MaintenanceWindowStartHour,
+        MaintenanceWindowEndHour,
         null,
-        null);
+        null,
+        StorageMode);
 }

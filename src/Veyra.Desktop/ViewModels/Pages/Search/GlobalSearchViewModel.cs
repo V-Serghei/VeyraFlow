@@ -24,6 +24,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     private const int MaxVisibleFileResults = 500;
     private const int MaxRepositoryLoadConcurrency = 6;
     private const int FilterDebounceMs = 120;
+    private const int LoadingProgressReportInterval = 4;
 
     private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly ILogger<GlobalSearchViewModel> _log;
@@ -31,6 +32,9 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     private readonly List<RepositoryDto> _repositorySource = [];
     private readonly List<GlobalSearchIndexedEntry> _entrySource = [];
     private readonly List<GlobalSearchIndexedSnapshot> _snapshotSource = [];
+    private readonly Dictionary<int, GlobalSearchRepositoryResultItemViewModel> _repositoryResultCache = [];
+    private readonly Dictionary<(int RepositoryId, string RelativePath), GlobalSearchFileResultItemViewModel> _fileResultCache = [];
+    private readonly Dictionary<(int RepositoryId, long SnapshotId), GlobalSearchSnapshotResultItemViewModel> _snapshotResultCache = [];
     private int _matchedRepositoryCount;
     private int _matchedFileCount;
     private int _matchedSnapshotCount;
@@ -182,9 +186,10 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
 
             _entrySource.Clear();
             _snapshotSource.Clear();
+            ResetResultCaches();
             RebuildFilterOptions();
             IsLoading = false;
-            await ApplyFiltersAsync(debounce: false);
+            ResetVisibleResults();
 
             var entryResults = new ConcurrentBag<GlobalSearchIndexedEntry>();
             var snapshotResults = new ConcurrentBag<GlobalSearchIndexedSnapshot>();
@@ -222,7 +227,9 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                     gate.Release();
 
                     var completed = Interlocked.Increment(ref completedRepositories);
-                    if (IsLatestLoadRequest(requestId) && !ct.IsCancellationRequested)
+                    if (IsLatestLoadRequest(requestId)
+                        && !ct.IsCancellationRequested
+                        && ShouldReportLoadingProgress(completed, totalRepositories))
                     {
                         await Dispatcher.UIThread.InvokeAsync(() =>
                         {
@@ -271,16 +278,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             _log.LogError(ex, "Failed to load global search index");
             ErrorMessage = Loc.T("search.load_failed");
             if (_repositorySource.Count == 0)
-            {
-                RepositoryResults.Clear();
-                FileResults.Clear();
-                SnapshotResults.Clear();
-                _matchedRepositoryCount = 0;
-                _matchedFileCount = 0;
-                _matchedSnapshotCount = 0;
-                _fileResultsLimited = false;
-                NotifyResultStateChanged();
-            }
+                ResetVisibleResults();
         }
         finally
         {
@@ -505,15 +503,15 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
                 return;
 
             var repositoryResults = result.RepositoryMatches
-                .Select(MapRepository)
+                .Select(MapRepositoryCached)
                 .ToList();
             var snapshotResults = result.SnapshotMatches
                 .Take(200)
-                .Select(MapSnapshot)
+                .Select(MapSnapshotCached)
                 .ToList();
             var fileResults = result.FileMatches
                 .Take(MaxVisibleFileResults)
-                .Select(MapEntry)
+                .Select(MapEntryCached)
                 .ToList();
 
             ReplaceCollectionIfChanged(RepositoryResults, repositoryResults);
@@ -623,9 +621,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
         if (CollectionEquals(collection, items))
             return;
 
-        collection.Clear();
-        foreach (var item in items)
-            collection.Add(item);
+        SyncCollection(collection, items);
     }
 
     private static bool CollectionEquals<T>(
@@ -657,6 +653,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
+        ResetResultCaches();
         RebuildRepositoryFilterOptions();
         ApplyFiltersIfNeeded(debounce: false);
         if (string.IsNullOrWhiteSpace(LoadingStatusText))
@@ -747,6 +744,38 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
 
     private Task<TResponse> SendIsolatedAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
         => _scopeExecutor.ExecuteAsync<IMediator, TResponse>((mediator, token) => mediator.Send(request, token), ct);
+
+    private GlobalSearchRepositoryResultItemViewModel MapRepositoryCached(RepositoryDto repository)
+    {
+        if (_repositoryResultCache.TryGetValue(repository.Id, out var cached))
+            return cached;
+
+        var mapped = MapRepository(repository);
+        _repositoryResultCache[repository.Id] = mapped;
+        return mapped;
+    }
+
+    private GlobalSearchFileResultItemViewModel MapEntryCached(GlobalSearchIndexedEntry row)
+    {
+        var cacheKey = (row.Repository.Id, row.Entry.RelativePath);
+        if (_fileResultCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        var mapped = MapEntry(row);
+        _fileResultCache[cacheKey] = mapped;
+        return mapped;
+    }
+
+    private GlobalSearchSnapshotResultItemViewModel MapSnapshotCached(GlobalSearchIndexedSnapshot row)
+    {
+        var cacheKey = (row.Repository.Id, row.Snapshot.SnapshotId);
+        if (_snapshotResultCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        var mapped = MapSnapshot(row);
+        _snapshotResultCache[cacheKey] = mapped;
+        return mapped;
+    }
 
     private GlobalSearchRepositoryResultItemViewModel MapRepository(RepositoryDto repository)
     {
@@ -849,6 +878,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
 
         return (!string.IsNullOrWhiteSpace(row.Snapshot.Title)
                    && row.Snapshot.Title.Contains(textQuery, StringComparison.OrdinalIgnoreCase))
+               || row.Snapshot.Kind.Contains(textQuery, StringComparison.OrdinalIgnoreCase)
                || row.Snapshot.Trigger.Contains(textQuery, StringComparison.OrdinalIgnoreCase)
                || (row.Snapshot.Tags?.Any(tag => tag.Contains(textQuery, StringComparison.OrdinalIgnoreCase)) ?? false)
                || row.Repository.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase)
@@ -966,5 +996,57 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             return Loc.T("common.not_available_short");
 
         return char.ToUpperInvariant(text[0]) + text[1..];
+    }
+
+    private void ResetVisibleResults()
+    {
+        RepositoryResults.Clear();
+        FileResults.Clear();
+        SnapshotResults.Clear();
+        _matchedRepositoryCount = 0;
+        _matchedFileCount = 0;
+        _matchedSnapshotCount = 0;
+        _fileResultsLimited = false;
+        NotifyResultStateChanged();
+    }
+
+    private void ResetResultCaches()
+    {
+        _repositoryResultCache.Clear();
+        _fileResultCache.Clear();
+        _snapshotResultCache.Clear();
+    }
+
+    private static bool ShouldReportLoadingProgress(int completedRepositories, int totalRepositories)
+        => completedRepositories <= 1
+           || completedRepositories >= totalRepositories
+           || completedRepositories % LoadingProgressReportInterval == 0;
+
+    private static void SyncCollection<T>(ObservableCollection<T> collection, IReadOnlyList<T> items)
+    {
+        var comparer = EqualityComparer<T>.Default;
+        var sharedPrefix = 0;
+        var maxPrefix = Math.Min(collection.Count, items.Count);
+        while (sharedPrefix < maxPrefix && comparer.Equals(collection[sharedPrefix], items[sharedPrefix]))
+            sharedPrefix++;
+
+        var sharedSuffix = 0;
+        var maxSuffix = Math.Min(collection.Count - sharedPrefix, items.Count - sharedPrefix);
+        while (sharedSuffix < maxSuffix &&
+               comparer.Equals(
+                   collection[collection.Count - 1 - sharedSuffix],
+                   items[items.Count - 1 - sharedSuffix]))
+        {
+            sharedSuffix++;
+        }
+
+        var removeStart = sharedPrefix;
+        var removeCount = collection.Count - sharedPrefix - sharedSuffix;
+        for (var i = 0; i < removeCount; i++)
+            collection.RemoveAt(removeStart);
+
+        var insertCount = items.Count - sharedPrefix - sharedSuffix;
+        for (var i = 0; i < insertCount; i++)
+            collection.Insert(removeStart + i, items[sharedPrefix + i]);
     }
 }

@@ -83,6 +83,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private int _pendingDeletedCount;
     private bool _suppressFileVersionsCollectionChanged;
     private bool _suppressComparableVersionsCollectionChanged;
+    private SnapshotHistoryWindow? _snapshotHistoryWindow;
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -225,6 +226,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasNoSnapshotHistory))]
     private bool _hasSnapshotHistory;
     [ObservableProperty] private string _snapshotHistorySearchQuery = string.Empty;
+    [ObservableProperty] private string _selectedSnapshotKindFilter = "all";
     [ObservableProperty] private string _selectedSnapshotTriggerFilter = "all";
     [ObservableProperty] private string _selectedSnapshotTagFilter = "all";
     [ObservableProperty] private string _snapshotHistoryMinChangedFiles = string.Empty;
@@ -435,6 +437,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public ObservableCollection<string> ExtensionFilters { get; } = ["all"];
     public ObservableCollection<string> ModifiedWindowFilters { get; } = ["all", "24h", "7d", "30d"];
     public ObservableCollection<RepositoryExplorerSavedFilterViewModel> SavedExplorerFilters { get; } = [];
+    public ObservableCollection<string> SnapshotKindFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotTriggerFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotTagFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotFileChangeKindFilters { get; } = ["all", "added", "modified", "removed"];
@@ -511,6 +514,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             HasSnapshotFiles = false;
             IsSnapshotHistoryLoading = false;
             IsSnapshotFilesLoading = false;
+            CloseSnapshotHistoryWindow();
             IsSnapshotHistoryMenuOpen = false;
             IsDiffPreviewMenuOpen = false;
             IsDiffPreviewLoading = false;
@@ -609,6 +613,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnMinSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
     partial void OnMaxSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
     partial void OnSnapshotHistorySearchQueryChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSelectedSnapshotKindFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSelectedSnapshotTriggerFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSelectedSnapshotTagFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSnapshotHistoryMinChangedFilesChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
@@ -769,6 +774,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private void Back()
     {
+        CloseSnapshotHistoryWindow();
         StopLiveSync();
         BackRequested?.Invoke();
     }
@@ -913,6 +919,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         try
         {
             SnapshotHistorySearchQuery = string.Empty;
+            SelectedSnapshotKindFilter = "all";
             SelectedSnapshotTriggerFilter = "all";
             SelectedSnapshotTagFilter = "all";
             SnapshotHistoryMinChangedFiles = string.Empty;
@@ -1029,22 +1036,61 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private async Task ShowSnapshotHistoryAsync()
     {
-        IsSnapshotHistoryMenuOpen = true;
-        await Task.Yield();
-
         if (RepositoryId == 0)
             return;
+
+        IsSnapshotHistoryMenuOpen = true;
 
         if (!IsSnapshotHistoryLoading)
             await LoadSnapshotHistoryAsync(SelectedSnapshot?.SnapshotId ?? 0);
 
         if (SelectedSnapshot is null && SnapshotHistory.Count > 0)
             SelectedSnapshot = SnapshotHistory[0];
+
+        ShowSnapshotHistoryWindow();
     }
 
     [RelayCommand]
     private void CloseSnapshotHistoryMenu()
-        => IsSnapshotHistoryMenuOpen = false;
+        => CloseSnapshotHistoryWindow();
+
+    private void ShowSnapshotHistoryWindow()
+    {
+        if (_snapshotHistoryWindow is { } existing)
+        {
+            existing.Activate();
+            existing.Focus();
+            return;
+        }
+
+        var window = _windows.Create<SnapshotHistoryWindow>();
+        window.DataContext = this;
+
+        window.Closed += OnSnapshotHistoryWindowClosed;
+        _snapshotHistoryWindow = window;
+        _windows.Show(window);
+    }
+
+    private void CloseSnapshotHistoryWindow()
+    {
+        IsSnapshotHistoryMenuOpen = false;
+
+        if (_snapshotHistoryWindow is not { } window)
+            return;
+
+        _snapshotHistoryWindow = null;
+        window.Closed -= OnSnapshotHistoryWindowClosed;
+        window.Close();
+    }
+
+    private void OnSnapshotHistoryWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is SnapshotHistoryWindow window)
+            window.Closed -= OnSnapshotHistoryWindowClosed;
+
+        _snapshotHistoryWindow = null;
+        IsSnapshotHistoryMenuOpen = false;
+    }
 
     [RelayCommand]
     private async Task ExportRepositoryBundleAsync()
@@ -1462,6 +1508,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         IsSnapshotHistoryMenuOpen = true;
         await LoadSnapshotHistoryAsync(snapshotId);
+        ShowSnapshotHistoryWindow();
 
         var target = SnapshotHistory.FirstOrDefault(item => item.SnapshotId == snapshotId);
         if (target is not null)
@@ -2100,6 +2147,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         RebuildStaticFilterOptions(ModifiedWindowFilters, SelectedModifiedWindowFilter, ["all", "24h", "7d", "30d"], value => SelectedModifiedWindowFilter = value);
         RebuildStaticFilterOptions(SnapshotFileChangeKindFilters, SelectedSnapshotFileChangeKindFilter, ["all", "added", "modified", "removed"], value => SelectedSnapshotFileChangeKindFilter = value);
 
+        var selectedKind = SelectedSnapshotKindFilter;
+        var currentKinds = SnapshotKindFilters.ToList();
+        RebuildStaticFilterOptions(SnapshotKindFilters, selectedKind, currentKinds, value => SelectedSnapshotKindFilter = value);
+
         var selectedTrigger = SelectedSnapshotTriggerFilter;
         var currentTriggers = SnapshotTriggerFilters.ToList();
         RebuildStaticFilterOptions(SnapshotTriggerFilters, selectedTrigger, currentTriggers, value => SelectedSnapshotTriggerFilter = value);
@@ -2210,6 +2261,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     SnapshotId = item.SnapshotId,
                     Title = item.Title,
                     CreatedAtUtc = item.CreatedAtUtc,
+                    Kind = item.Kind,
+                    IsArchived = item.IsArchived,
                     Trigger = item.Trigger,
                     ChangedFilesCount = item.ChangedFilesCount,
                     Tags = item.Tags ?? Array.Empty<string>()
@@ -2219,6 +2272,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             var targetSnapshotId = preferredSnapshotId > 0
                 ? preferredSnapshotId
                 : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
+            RebuildSnapshotKindFilters();
             RebuildSnapshotTriggerFilters();
             RebuildSnapshotTagFilters();
             ApplySnapshotHistoryFilters(targetSnapshotId, forceSnapshotFilesReload);
@@ -3020,6 +3074,34 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+    private void RebuildSnapshotKindFilters()
+    {
+        var selected = NormalizeSnapshotKindFilter(SelectedSnapshotKindFilter);
+        var kinds = _snapshotHistorySource
+            .Select(x => NormalizeSnapshotKindFilter(x.Kind))
+            .Where(x => x != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotKindFilters.Clear();
+        SnapshotKindFilters.Add("all");
+        foreach (var kind in kinds)
+            SnapshotKindFilters.Add(kind);
+
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SelectedSnapshotKindFilter = SnapshotKindFilters.Contains(selected, StringComparer.OrdinalIgnoreCase)
+                ? selected
+                : "all";
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+    }
+
     private void RebuildSnapshotTagFilters()
     {
         var selected = NormalizeSnapshotTagFilter(SelectedSnapshotTagFilter);
@@ -3088,6 +3170,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var directives = ParseSnapshotHistoryDirectives(SnapshotHistorySearchQuery.Trim());
         var textQuery = directives.TextQuery;
 
+        var kindFilter = NormalizeSnapshotKindFilter(SelectedSnapshotKindFilter);
+        if (kindFilter == "all" && !string.IsNullOrWhiteSpace(directives.KindFilter))
+            kindFilter = directives.KindFilter;
+
         var triggerFilter = NormalizeSnapshotTriggerFilter(SelectedSnapshotTriggerFilter);
         if (triggerFilter == "all" && !string.IsNullOrWhiteSpace(directives.TriggerFilter))
             triggerFilter = directives.TriggerFilter;
@@ -3106,10 +3192,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             filtered = filtered.Where(x =>
                 x.DisplayTitle.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.Kind.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.KindLabel.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
                 x.Trigger.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
                 x.Tags.Any(tag => tag.Contains(textQuery, StringComparison.OrdinalIgnoreCase)) ||
                 x.DisplayTime.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
         }
+
+        if (kindFilter != "all")
+            filtered = filtered.Where(x => string.Equals(NormalizeSnapshotKindFilter(x.Kind), kindFilter, StringComparison.OrdinalIgnoreCase));
 
         if (triggerFilter != "all")
             filtered = filtered.Where(x => string.Equals(NormalizeSnapshotTriggerFilter(x.Trigger), triggerFilter, StringComparison.OrdinalIgnoreCase));
@@ -4256,6 +4347,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 continue;
             }
 
+            if (lower.StartsWith("kind:", StringComparison.Ordinal))
+            {
+                var kind = NormalizeSnapshotKindFilter(normalized[5..]);
+                if (kind != "all")
+                    directives = directives with { KindFilter = kind };
+                continue;
+            }
+
             if (lower.StartsWith("tag:", StringComparison.Ordinal))
             {
                 var tag = NormalizeSnapshotTagFilter(normalized[4..]);
@@ -4360,6 +4459,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(normalized) || normalized == "all"
             ? "all"
             : normalized;
+    }
+
+    private static string NormalizeSnapshotKindFilter(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '_');
+        return normalized switch
+        {
+            "manual" => RepositorySnapshotKind.Manual,
+            "automatic" => RepositorySnapshotKind.Automatic,
+            "working" => RepositorySnapshotKind.Working,
+            _ => "all"
+        };
     }
 
     private static string NormalizeSnapshotTagFilter(string? value)

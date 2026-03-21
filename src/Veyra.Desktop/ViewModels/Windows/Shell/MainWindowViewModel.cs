@@ -1,12 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Observability;
+using Veyra.Application.DTOs;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Connectivity;
+using Veyra.Desktop.Services.Connectivity.Models;
+using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Onboarding;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -14,6 +20,7 @@ using Veyra.Desktop.ViewModels.Pages.Explorer;
 using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
 using Veyra.Desktop.ViewModels.Pages.Search;
 using Veyra.Desktop.ViewModels.Pages.Settings;
+using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -21,6 +28,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly ThemeManager _theme = ThemeManager.Instance;
     private readonly LocalizationManager _localization = LocalizationManager.Instance;
+    private readonly IConnectivityStatusService _connectivity;
+    private readonly IOperationJournalService _journal;
+    private readonly IWindowService _windows;
     private readonly ILogger<MainWindowViewModel> _log;
     private readonly OnboardingStateService _onboardingState;
     private bool _returnToAppSettingsFromRepositorySettings;
@@ -47,8 +57,33 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool _isShellBusy;
     [ObservableProperty] private string _shellBusyTitle = string.Empty;
     [ObservableProperty] private string _shellBusyDetail = string.Empty;
+    [ObservableProperty] private bool _showConnectivityBanner;
+    [ObservableProperty] private string _connectivityBannerText = string.Empty;
+    [ObservableProperty] private bool _showShellActivityStrip;
+    [ObservableProperty] private string _shellActivityText = string.Empty;
+    [ObservableProperty] private string _shellActivityDetailText = string.Empty;
+    [ObservableProperty] private string _shellActivityAccentColor = "#6EA8FF";
+    [ObservableProperty] private string _shellActivityBackgroundColor = "#1A6EA8FF";
+    [ObservableProperty] private string _shellActivityBadgeText = string.Empty;
+    [ObservableProperty] private bool _showShellActivityBadge;
+    private bool _isShellActivityDismissed;
+    private string _shellActivityStateKey = string.Empty;
+    private readonly HashSet<string> _dismissedShellActivityKeys = [];
 
     public bool CanGuidedTourGoBack => _guidedTourIndex > 0;
+    public bool ShowShellSyncCenterAction => HasCloudAccessInShell;
+    public string ConnectivityBannerAccentColor => _connectivity.Snapshot.State switch
+    {
+        ConnectivityState.InternetUnavailable => "#F59E0B",
+        ConnectivityState.CloudUnavailable => "#F59E0B",
+        _ => "#6EA8FF"
+    };
+    public string ConnectivityBannerBackgroundColor => _connectivity.Snapshot.State switch
+    {
+        ConnectivityState.InternetUnavailable => "#1AF59E0B",
+        ConnectivityState.CloudUnavailable => "#1AF59E0B",
+        _ => "#1A6EA8FF"
+    };
     public string GuidedTourNextLabel => _guidedTourIndex >= _guidedTourSteps.Count - 1
         ? Loc.T("tour.finish")
         : Loc.T("tour.next");
@@ -59,6 +94,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RepositorySettingsViewModel settings,
         GlobalSearchViewModel search,
         AppSettingsViewModel appSettings,
+        IConnectivityStatusService connectivity,
+        IOperationJournalService journal,
+        IWindowService windows,
         OnboardingStateService onboardingState,
         ILogger<MainWindowViewModel> log)
     {
@@ -67,6 +105,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Settings = settings;
         Search = search;
         AppSettings = appSettings;
+        _connectivity = connectivity;
+        _journal = journal;
+        _windows = windows;
         _onboardingState = onboardingState;
         _log = log;
 
@@ -90,13 +131,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
         AppSettings.ExperienceModeRefreshRequested += OnExperienceModeRefreshRequestedAsync;
         AppSettings.LanguageRefreshRequested += OnLanguageRefreshRequestedAsync;
+        Dashboard.PropertyChanged += OnChildCloudAccessChanged;
+        Settings.PropertyChanged += OnChildCloudAccessChanged;
+        AppSettings.PropertyChanged += OnChildCloudAccessChanged;
         _theme.ThemeChanged += OnThemeChanged;
         _localization.LanguageChanged += OnLanguageChanged;
+        _connectivity.StatusChanged += OnConnectivityStatusChanged;
         _onboardingState.FirstRunTourRequested += OnFirstRunTourRequested;
 
         CurrentPage = Dashboard;
         RefreshThemeState();
         RefreshLanguageState();
+        RefreshConnectivityState();
+    }
+
+    partial void OnCurrentPageChanged(object? value)
+    {
+        RefreshConnectivityState();
     }
 
     [RelayCommand]
@@ -180,7 +231,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Dashboard.LoadAsync();
                 CurrentPage = Dashboard;
             });
+        await RefreshShellActivityAsync();
         _isLoaded = true;
+        _ = RefreshConnectivityAsync();
         await TryStartPendingGuidedTourAsync();
     }
 
@@ -193,6 +246,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public Task ShowAppSettingsPageAsync()
         => OpenGlobalSettingsAsync();
 
+    public Task ShowCloudSyncHealthCenterAsync()
+        => OpenShellSyncHealthCenterAsync();
+
+    public Task ShowRepositorySettingsPageAsync(int repositoryId)
+        => OpenRepositorySettingsAsync(repositoryId);
+
     private async Task OpenRepositoryAsync(int repositoryId)
     {
         _log.LogInformation("Opening repository explorer. RepositoryId {RepositoryId}", repositoryId);
@@ -204,6 +263,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Explorer.LoadAsync(repositoryId);
                 CurrentPage = Explorer;
             });
+        await RefreshShellActivityAsync();
     }
 
     private async Task OpenRepositorySettingsAsync(int repositoryId)
@@ -218,6 +278,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Settings.LoadAsync(repositoryId);
                 CurrentPage = Settings;
             });
+        await RefreshShellActivityAsync();
     }
 
     private async Task OpenRepositorySettingsFromAppSettingsAsync(int repositoryId)
@@ -232,6 +293,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Settings.LoadAsync(repositoryId);
                 CurrentPage = Settings;
             });
+        await RefreshShellActivityAsync();
     }
 
     private async Task OpenRepositoryEntryFromSearchAsync(int repositoryId, string relativePath, bool isDirectory)
@@ -282,6 +344,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Explorer.LoadAsync(repositoryId);
                 CurrentPage = Explorer;
             });
+        await RefreshShellActivityAsync();
     }
 
     private void OnRepositoryDeleted()
@@ -325,6 +388,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await Dashboard.LoadAsync();
                 CurrentPage = Dashboard;
             });
+        await RefreshShellActivityAsync();
     }
 
     private async Task OnExperienceModeRefreshRequestedAsync(string modeCode)
@@ -381,7 +445,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLanguageState();
+        RefreshConnectivityState();
         RefreshGuidedTourLocalization();
+    }
+
+    private void OnConnectivityStatusChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            RefreshConnectivityState();
+            _ = RefreshShellActivityAsync();
+        });
     }
 
     private void RefreshThemeState()
@@ -396,6 +470,160 @@ public sealed partial class MainWindowViewModel : ObservableObject
         LanguageToggleLabel = string.IsNullOrWhiteSpace(code)
             ? "EN"
             : code.ToUpperInvariant();
+    }
+
+    private void RefreshConnectivityState()
+    {
+        if (!ShouldShowShellConnectivityBanner)
+        {
+            ShowConnectivityBanner = false;
+            ConnectivityBannerText = string.Empty;
+            OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
+            OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
+            return;
+        }
+
+        switch (_connectivity.Snapshot.State)
+        {
+            case ConnectivityState.InternetUnavailable:
+                ShowConnectivityBanner = true;
+                ConnectivityBannerText = Loc.T("connectivity.banner.internet_required");
+                break;
+            case ConnectivityState.CloudUnavailable:
+                ShowConnectivityBanner = true;
+                ConnectivityBannerText = Loc.T("connectivity.banner.cloud_unavailable");
+                break;
+            default:
+                ShowConnectivityBanner = false;
+                ConnectivityBannerText = string.Empty;
+                break;
+        }
+
+        OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
+        OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
+    }
+
+    private async Task RefreshShellActivityAsync()
+    {
+        try
+        {
+            var recent = await _journal.GetRecentAsync(3);
+            ApplyShellActivityState(recent);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Failed to refresh shell activity strip");
+            ApplyShellActivityState(Array.Empty<OperationJournalEntryDto>());
+        }
+    }
+
+    private void ApplyShellActivityState(IReadOnlyList<OperationJournalEntryDto> recentEntries)
+    {
+        var repositories = Dashboard.Repositories.ToList();
+        var running = repositories.Sum(repository => repository.QueueRunningCount);
+        var pending = repositories.Sum(repository => repository.QueuePendingCount);
+        var retries = repositories.Sum(repository => repository.QueueRetryCount);
+        var conflicts = repositories.Sum(repository => repository.QueueConflictCount);
+        var failures = repositories.Sum(repository => repository.QueueDeadLetterCount + repository.QueueFailedCount);
+        var issueRepositories = repositories.Count(repository =>
+            repository.QueueRetryCount > 0 ||
+            repository.QueueConflictCount > 0 ||
+            repository.QueueDeadLetterCount > 0 ||
+            repository.QueueFailedCount > 0);
+
+        if (running > 0)
+        {
+            ShowShellActivityStrip = ShouldShowShellActivity($"running:{running}:{pending}:{retries}:{conflicts}:{failures}");
+            ShellActivityText = Loc.F("main.shell_activity_running", running, pending);
+            ShellActivityDetailText = Loc.F("main.shell_activity_running_detail", retries, conflicts, failures);
+            ShellActivityAccentColor = "#38BDF8";
+            ShellActivityBackgroundColor = "#1638BDF8";
+            ShellActivityBadgeText = Loc.T("main.shell_activity_badge_running");
+            ShowShellActivityBadge = true;
+            return;
+        }
+
+        if (issueRepositories > 0)
+        {
+            ShowShellActivityStrip = ShouldShowShellActivity($"issues:{issueRepositories}:{retries}:{conflicts}:{failures}");
+            ShellActivityText = Loc.F("main.shell_activity_issues", issueRepositories);
+            ShellActivityDetailText = Loc.F("main.shell_activity_issues_detail", retries, conflicts, failures);
+            ShellActivityAccentColor = failures > 0 || conflicts > 0 ? "#F97316" : "#F59E0B";
+            ShellActivityBackgroundColor = failures > 0 || conflicts > 0 ? "#1AF97316" : "#1AF59E0B";
+            ShellActivityBadgeText = Loc.F("main.shell_activity_badge_issues", issueRepositories);
+            ShowShellActivityBadge = true;
+            return;
+        }
+
+        var lastEntry = recentEntries.FirstOrDefault();
+        if (lastEntry is not null)
+        {
+            var localized = UserFacingMessageLocalizer.TryLocalize(lastEntry.Message) ?? lastEntry.Message;
+            ShowShellActivityStrip = ShouldShowShellActivity(
+                $"last:{lastEntry.Level}:{lastEntry.Category}:{lastEntry.Action}:{localized}");
+            ShellActivityText = Loc.F("main.shell_activity_last", localized);
+            ShellActivityDetailText = Loc.F("main.shell_activity_last_detail", FormatRelativeTime(lastEntry.OccurredAtUtc));
+            ShellActivityAccentColor = "#4ADE80";
+            ShellActivityBackgroundColor = "#164ADE80";
+            ShellActivityBadgeText = string.Empty;
+            ShowShellActivityBadge = false;
+            return;
+        }
+
+        ShowShellActivityStrip = ShouldShowShellActivity("idle");
+        ShellActivityText = Loc.T("main.shell_activity_idle");
+        ShellActivityDetailText = Loc.T("main.shell_activity_idle_detail");
+        ShellActivityAccentColor = "#94A3B8";
+        ShellActivityBackgroundColor = "#1494A3B8";
+        ShellActivityBadgeText = string.Empty;
+        ShowShellActivityBadge = false;
+    }
+
+    private bool ShouldShowShellActivity(string stateKey)
+    {
+        _shellActivityStateKey = stateKey;
+        _isShellActivityDismissed = _dismissedShellActivityKeys.Contains(stateKey);
+
+        return !_isShellActivityDismissed;
+    }
+
+    [RelayCommand]
+    private void DismissShellActivityStrip()
+    {
+        if (!string.IsNullOrWhiteSpace(_shellActivityStateKey))
+            _dismissedShellActivityKeys.Add(_shellActivityStateKey);
+
+        _isShellActivityDismissed = true;
+        ShowShellActivityStrip = false;
+    }
+
+    private string FormatRelativeTime(DateTime timestampUtc)
+    {
+        var localTime = timestampUtc.Kind == DateTimeKind.Utc ? timestampUtc.ToLocalTime() : timestampUtc;
+        var delta = DateTime.Now - localTime;
+
+        if (delta.TotalSeconds < 45)
+            return Loc.T("dashboard.just_now");
+
+        if (delta.TotalMinutes < 60)
+            return Loc.F("dashboard.minutes_ago", Math.Max(1, (int)delta.TotalMinutes));
+
+        if (delta.TotalHours < 24)
+            return Loc.F("dashboard.hours_ago", Math.Max(1, (int)delta.TotalHours));
+
+        return Loc.F("dashboard.days_ago", Math.Max(1, (int)delta.TotalDays));
+    }
+
+    private async Task RefreshConnectivityAsync()
+    {
+        try
+        {
+            await _connectivity.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Connectivity refresh failed during shell load");
+        }
     }
 
     private void RefreshGuidedTourLocalization()
@@ -430,6 +658,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         await AppSettings.LoadAsync();
         AppSettings.SelectTabByKey(selectedSettingsTab);
+        await RefreshShellActivityAsync();
 
         if (ReferenceEquals(currentPage, Explorer) && explorerRepositoryId > 0)
         {
@@ -458,6 +687,79 @@ public sealed partial class MainWindowViewModel : ObservableObject
         CurrentPage = Dashboard;
     }
 
+    [RelayCommand]
+    private async Task OpenShellOperationJournalAsync()
+    {
+        await RunShellBusyActionAsync(
+            "operation_journal.loading_title",
+            "operation_journal.loading_detail",
+            async () =>
+            {
+                var owner = _windows.GetActiveWindow();
+                var window = _windows.Create<OperationJournalWindow>();
+                if (window.DataContext is not OperationJournalWindowViewModel vm)
+                    return;
+
+                await vm.LoadAsync();
+
+                if (owner is not null)
+                    await _windows.ShowDialogAsync(window, owner);
+                else
+                    _windows.Show(window);
+            },
+            ex => _log.LogError(ex, "Failed to open operation journal window from shell"));
+    }
+
+    [RelayCommand]
+    private async Task OpenShellOperationMonitorAsync()
+    {
+        await RunShellBusyActionAsync(
+            "app_settings.operation_monitor_loading_title",
+            "app_settings.operation_monitor_loading_detail",
+            () =>
+            {
+                var window = _windows.Create<OperationMonitorWindow>();
+                _windows.Show(window);
+                return Task.CompletedTask;
+            },
+            ex => _log.LogError(ex, "Failed to open operation monitor window from shell"));
+    }
+
+    [RelayCommand]
+    private async Task OpenShellSyncHealthCenterAsync()
+    {
+        await RunShellBusyActionAsync(
+            "app_settings.sync_health_center_loading_title",
+            "app_settings.sync_health_center_loading_detail",
+            async () =>
+            {
+                await AppSettings.ShowCloudSyncHealthCenterAsync();
+                await RefreshShellActivityAsync();
+            },
+            ex => _log.LogError(ex, "Failed to open sync health center from shell"));
+    }
+
+    private bool HasCloudAccessInShell
+        => AppSettings.HasActiveProfile || Dashboard.HasCloudAccess || Settings.HasCloudAccess;
+
+    private bool ShouldShowShellConnectivityBanner => false;
+
+    private void OnChildCloudAccessChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not nameof(RepositoryDashboardViewModel.HasCloudAccess)
+            and not nameof(RepositorySettingsViewModel.HasCloudAccess)
+            and not nameof(AppSettingsViewModel.HasActiveProfile))
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            RefreshConnectivityState();
+            OnPropertyChanged(nameof(ShowShellSyncCenterAction));
+        });
+    }
+
     private async Task RunShellBusyActionAsync(string titleKey, string detailKey, Func<Task> action)
     {
         if (IsShellBusy)
@@ -480,6 +782,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
             IsShellBusy = false;
             ShellBusyTitle = string.Empty;
             ShellBusyDetail = string.Empty;
+        }
+    }
+
+    private async Task RunShellBusyActionAsync(
+        string titleKey,
+        string detailKey,
+        Func<Task> action,
+        Action<Exception> onError)
+    {
+        try
+        {
+            await RunShellBusyActionAsync(titleKey, detailKey, action);
+        }
+        catch (Exception ex)
+        {
+            onError(ex);
         }
     }
 

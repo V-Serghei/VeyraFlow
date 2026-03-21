@@ -71,6 +71,14 @@ public sealed class LocalizedOptionTextConverter : IValueConverter
                 "startup_health_check" => "filter.option.startup_health_check",
                 _ => string.Empty
             },
+            "explorer.snapshot_kind" => normalized switch
+            {
+                "all" => "filter.option.all",
+                "manual" => "filter.option.manual",
+                "automatic" => "filter.option.automatic",
+                "working" => "filter.option.working",
+                _ => string.Empty
+            },
             "explorer.snapshot_change_kind" => normalized switch
             {
                 "all" => "filter.option.all",

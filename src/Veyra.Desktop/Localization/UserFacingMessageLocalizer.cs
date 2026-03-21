@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace Veyra.Desktop.Localization;
 
@@ -66,7 +70,10 @@ public static class UserFacingMessageLocalizer
             ["token format is invalid. sign in again."] = "ui_error.token_invalid_sign_in",
             ["cloud session expired. sign in again."] = "ui_error.cloud_session_expired",
             ["invalid bearer token"] = "ui_error.cloud_session_expired",
-            ["token expired"] = "ui_error.cloud_session_expired"
+            ["token expired"] = "ui_error.cloud_session_expired",
+            ["internet connection is required. connect to a network and try again."] = "ui_error.internet_required",
+            ["cloud service is temporarily unavailable. try again later."] = "ui_error.cloud_temporarily_unavailable",
+            ["offline sign-in is available only for profiles that already exist on this device."] = "ui_error.offline_profile_unavailable"
         };
 
     public static string LocalizeOrFallback(string? rawMessage, string fallbackKey, params object[] fallbackArgs)
@@ -106,6 +113,15 @@ public static class UserFacingMessageLocalizer
         }
 
         return LocalizeSingleMessage(lines[0]);
+    }
+
+    public static string LocalizeExceptionOrFallback(Exception ex, string fallbackKey, params object[] fallbackArgs)
+    {
+        var connectivity = TryLocalizeConnectivityException(ex);
+        if (!string.IsNullOrWhiteSpace(connectivity))
+            return connectivity;
+
+        return LocalizeOrFallback(ex.Message, fallbackKey, fallbackArgs);
     }
 
     private static string LocalizeSingleMessage(string message)
@@ -201,6 +217,65 @@ public static class UserFacingMessageLocalizer
             return Loc.T("ui_error.validation_failed");
 
         return message.Trim();
+    }
+
+    private static string? TryLocalizeConnectivityException(Exception ex)
+    {
+        if (TryGetSocketException(ex) is { } socket)
+        {
+            return socket.SocketErrorCode switch
+            {
+                SocketError.NetworkDown or
+                SocketError.NetworkUnreachable or
+                SocketError.HostDown or
+                SocketError.HostUnreachable or
+                SocketError.HostNotFound or
+                SocketError.TryAgain => Loc.T("ui_error.internet_required"),
+
+                SocketError.ConnectionRefused or
+                SocketError.ConnectionAborted or
+                SocketError.ConnectionReset or
+                SocketError.TimedOut => Loc.T("ui_error.cloud_temporarily_unavailable"),
+
+                _ => null
+            };
+        }
+
+        if (ex is HttpRequestException http && http.StatusCode is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout)
+            return Loc.T("ui_error.cloud_temporarily_unavailable");
+
+        if (ex is TimeoutException or TaskCanceledException)
+            return Loc.T("ui_error.cloud_temporarily_unavailable");
+
+        var message = ex.ToString();
+        if (message.Contains("No such host is known", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("network is unreachable", StringComparison.OrdinalIgnoreCase))
+        {
+            return Loc.T("ui_error.internet_required");
+        }
+
+        if (message.Contains("actively refused", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("connection refused", StringComparison.OrdinalIgnoreCase))
+        {
+            return Loc.T("ui_error.cloud_temporarily_unavailable");
+        }
+
+        return null;
+    }
+
+    private static SocketException? TryGetSocketException(Exception ex)
+    {
+        Exception? current = ex;
+        while (current is not null)
+        {
+            if (current is SocketException socket)
+                return socket;
+
+            current = current.InnerException;
+        }
+
+        return null;
     }
 
     private static string Normalize(string value)

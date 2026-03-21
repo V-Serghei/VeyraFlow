@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using FluentValidation;
 using Veyra.Application.DTOs;
 
@@ -44,6 +46,24 @@ public sealed class UpdateRepositoryConfigurationCommandValidator
             .When(x => x.RetentionPolicy.MaxTotalSizeBytes.HasValue)
             .WithMessage("Retention max size must be positive.");
 
+        RuleFor(x => x.RetentionPolicy.AutomaticCompactionWindowHours)
+            .GreaterThan(0)
+            .When(x => x.RetentionPolicy.AutomaticCompactionWindowHours.HasValue)
+            .WithMessage("Automatic compaction window must be positive.");
+
+        RuleFor(x => x.RetentionPolicy.AutomaticCompactionWindowHours)
+            .NotNull()
+            .When(x => x.RetentionPolicy.AutomaticCompactionEnabled)
+            .WithMessage("Automatic compaction requires a compaction window.");
+
+        RuleFor(x => x.RetentionPolicy.StorageMode)
+            .Must(mode => mode == RepositoryRetentionStorageModes.Delete || mode == RepositoryRetentionStorageModes.Archive)
+            .WithMessage("Retention storage mode is invalid.");
+
+        RuleFor(x => x.RetentionPolicy)
+            .Must(policy => !TargetsManualSnapshots(policy) || policy.AllowManualSnapshotCleanup)
+            .WithMessage("Manual snapshot cleanup requires an explicit unlock.");
+
         RuleFor(x => x.SyncConflictStrategy)
             .Must(v => RepositorySyncConflictStrategies.All.Contains(
                 RepositorySyncConflictStrategies.Normalize(v),
@@ -57,5 +77,12 @@ public sealed class UpdateRepositoryConfigurationCommandValidator
         RuleFor(x => x.SyncRetryBaseDelaySeconds)
             .InclusiveBetween(5, 600)
             .WithMessage("Sync retry base delay must be between 5 and 600 seconds.");
+    }
+
+    private static bool TargetsManualSnapshots(RepositoryRetentionPolicyDto policy)
+    {
+        return policy.TriggerFilters.Any(static value =>
+            string.Equals(value, "manual", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "all", StringComparison.OrdinalIgnoreCase));
     }
 }

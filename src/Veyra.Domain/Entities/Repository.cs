@@ -25,8 +25,14 @@ public class Repository
     public long? RetentionMaxTotalSizeBytes { get; set; }
     public string? RetentionTriggerFilter { get; set; }
     public int RetentionRunIntervalMinutes { get; set; } = 60;
+    public int? RetentionMaintenanceWindowStartHour { get; set; }
+    public int? RetentionMaintenanceWindowEndHour { get; set; }
     public DateTime? RetentionLastRunAt { get; set; }
     public string? RetentionLastStatus { get; set; }
+    public string RetentionStorageMode { get; set; } = "delete";
+    public bool RetentionAllowManualSnapshotCleanup { get; set; }
+    public bool RetentionAutomaticCompactionEnabled { get; set; }
+    public int? RetentionAutomaticCompactionWindowHours { get; set; }
 
     public string SyncConflictStrategy { get; set; } = DefaultSyncConflictStrategy;
     public int SyncRetryMaxAttempts { get; set; } = 5;

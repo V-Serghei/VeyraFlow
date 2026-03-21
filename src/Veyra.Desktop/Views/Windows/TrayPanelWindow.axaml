@@ -1,0 +1,330 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.Windows.TrayPanelWindow"
+        x:DataType="windows:TrayPanelWindowViewModel"
+        Width="396"
+        Height="522"
+        MinWidth="396"
+        MinHeight="522"
+        MaxWidth="396"
+        MaxHeight="522"
+        ShowInTaskbar="False"
+        CanResize="False"
+        SystemDecorations="None"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Foreground="{DynamicResource VeyraTextPrimaryBrush}">
+    <Border x:Name="PanelRoot"
+            Padding="14"
+            Background="{DynamicResource VeyraCanvasBrush}"
+            Opacity="0">
+        <Border.Transitions>
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.16"/>
+            </Transitions>
+        </Border.Transitions>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
+            <Border Grid.Row="0" Classes="toolbar" Padding="12,10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{loc:Tr tray.panel_title}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr tray.panel_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="&#xE711;"
+                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Classes="subtle icon"
+                            Command="{Binding CloseCommand}"
+                            ToolTip.Tip="{loc:Tr common.close}"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Classes="card"
+                    Padding="12"
+                    Background="{Binding ConnectivityBackgroundColor}"
+                    BorderBrush="{Binding ConnectivityAccentColor}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="&#xE783;"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               Foreground="{Binding ConnectivityAccentColor}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding ConnectivityText}"
+                               Foreground="{Binding ConnectivityAccentColor}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="2" Classes="metric-card">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0" Text="{loc:Tr tray.panel_status_title}" FontSize="12" FontWeight="SemiBold"/>
+                        <Border Grid.Column="1" Classes="badge" Padding="8,3">
+                            <TextBlock Text="{Binding LastUpdatedText}"
+                                       FontSize="10"
+                                       Classes="muted"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
+                    <TextBlock Text="{Binding StatusText}" Classes="muted" TextWrapping="Wrap"/>
+
+                    <StackPanel Spacing="6" IsVisible="{Binding HasRecentActions}">
+                        <TextBlock Text="{loc:Tr tray.panel_recent_title}" FontSize="11" FontWeight="SemiBold"/>
+                        <ItemsControl ItemsSource="{Binding RecentActions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="windows:TrayPanelRecentActionViewModel">
+                                    <Border Classes="card" Padding="8,6">
+                                        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                                            <TextBlock Text="&#xE823;"
+                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource VeyraTextSecondaryBrush}"
+                                                       VerticalAlignment="Top"/>
+                                            <TextBlock Text="{Binding WhenText}"
+                                                       Grid.Column="1"
+                                                       Classes="muted"
+                                                       FontSize="10"
+                                                       VerticalAlignment="Top"/>
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding Text}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="3"
+                    Classes="card"
+                    Padding="12"
+                    IsVisible="{Binding ShowCurrentActivity}"
+                    Background="{Binding CurrentActivityBackgroundColor}"
+                    BorderBrush="{Binding CurrentActivityAccentColor}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="&#xE823;"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               Foreground="{Binding CurrentActivityAccentColor}"
+                               VerticalAlignment="Center"/>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{loc:Tr tray.panel_activity_title}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{Binding CurrentActivityAccentColor}"/>
+                        <TextBlock Text="{Binding CurrentActivityText}"
+                                   Foreground="{Binding CurrentActivityAccentColor}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="4" Classes="card" Padding="12">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{loc:Tr tray.panel_navigation_title}" FontSize="12" FontWeight="SemiBold"/>
+                    <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                        <Button Grid.Row="0" Grid.Column="0" Command="{Binding OpenAppCommand}" Classes="primary" Content="{loc:Tr tray.menu.open_app}"/>
+                        <Button Grid.Row="0" Grid.Column="1" Command="{Binding OpenDashboardCommand}" Classes="subtle" Content="{loc:Tr tray.menu.open_dashboard}"/>
+                        <Button Grid.Row="1" Grid.Column="0" Command="{Binding OpenSearchCommand}" Classes="subtle" Content="{loc:Tr tray.menu.open_search}"/>
+                        <Button Grid.Row="1" Grid.Column="1" Command="{Binding OpenSettingsCommand}" Classes="subtle" Content="{loc:Tr tray.menu.open_settings}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="5" Classes="card" Padding="12">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{loc:Tr tray.panel_snapshot_title}" FontSize="12" FontWeight="SemiBold"/>
+                    <ComboBox ItemsSource="{Binding Repositories}"
+                              SelectedItem="{Binding SelectedRepository, Mode=TwoWay}"
+                              IsEnabled="{Binding HasRepositories}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="windows:TrayPanelRepositoryOptionViewModel">
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button Command="{Binding CreateSnapshotCommand}"
+                            Classes="primary"
+                            IsEnabled="{Binding HasRepositories}"
+                            Content="{loc:Tr tray.menu.create_snapshot}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="6"
+                    Classes="metric-card"
+                    IsVisible="{Binding HasSelectedRepository}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr tray.panel_repository_title}" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedRepositoryName}" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedRepositoryPath}"
+                                       Classes="muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+
+                        <Border Grid.Column="1" Classes="badge" Padding="8,3" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding SelectedRepositoryMetricsText}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"/>
+                        </Border>
+                    </Grid>
+
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <TextBlock Text="{Binding SelectedRepositoryLastSnapshotGlyph}"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       Foreground="{Binding SelectedRepositoryLastSnapshotAccentColor}"
+                                       VerticalAlignment="Top"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SelectedRepositoryLastSnapshotText}"
+                                       Foreground="{Binding SelectedRepositoryLastSnapshotAccentColor}"
+                                       TextWrapping="Wrap"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <TextBlock Text="{Binding SelectedRepositoryCloudSyncGlyph}"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       Foreground="{Binding SelectedRepositoryCloudSyncAccentColor}"
+                                       VerticalAlignment="Top"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SelectedRepositoryCloudSyncText}"
+                                       Foreground="{Binding SelectedRepositoryCloudSyncAccentColor}"
+                                       TextWrapping="Wrap"/>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <TextBlock Text="{Binding SelectedRepositoryQueueGlyph}"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       Foreground="{Binding SelectedRepositoryQueueAccentColor}"
+                                       VerticalAlignment="Top"/>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SelectedRepositoryQueueText}"
+                                       Foreground="{Binding SelectedRepositoryQueueAccentColor}"
+                                       TextWrapping="Wrap"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Spacing="6" IsVisible="{Binding ShowSelectedRepositoryProgress}">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                            <TextBlock Text="&#xE8A7;"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       Foreground="{Binding SelectedRepositoryProgressAccentColor}"
+                                       VerticalAlignment="Center"/>
+                            <ProgressBar Grid.Column="1"
+                                         Minimum="0"
+                                         Maximum="{Binding SelectedRepositoryProgressMaximum}"
+                                         Value="{Binding SelectedRepositoryProgressValue}"
+                                         Height="8"/>
+                        </Grid>
+                        <TextBlock Text="{Binding SelectedRepositoryProgressText}"
+                                   Foreground="{Binding SelectedRepositoryProgressAccentColor}"
+                                   FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="7"
+                    Classes="card"
+                    Padding="12"
+                    IsVisible="{Binding HasIssueItems}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="{loc:Tr tray.panel_issues_title}" FontSize="12" FontWeight="SemiBold"/>
+                        <Button Grid.Column="1"
+                                Command="{Binding OpenSyncHealthCenterCommand}"
+                                Classes="subtle compact"
+                                Content="{loc:Tr tray.panel_issues_open_center}"/>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding IssueItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="windows:TrayPanelIssueItemViewModel">
+                                <Border Classes="metric-card" Padding="8">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" RowDefinitions="Auto,Auto">
+                                        <TextBlock Text="{Binding Glyph}"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   Foreground="{Binding AccentColor}"
+                                                   VerticalAlignment="Top"/>
+                                        <StackPanel Grid.Column="1" Spacing="6">
+                                            <TextBlock Text="{Binding RepositoryName}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding SummaryText}"
+                                                       Foreground="{Binding AccentColor}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+
+                                            <WrapPanel Orientation="Horizontal" ItemHeight="30">
+                                                <Button Command="{Binding #PanelRoot.((windows:TrayPanelWindowViewModel)DataContext).RetryIssueCommand}"
+                                                        CommandParameter="{Binding .}"
+                                                        Classes="subtle compact"
+                                                        Margin="0,0,6,6"
+                                                        IsVisible="{Binding CanRetry}"
+                                                        Content="{loc:Tr tray.issue_action_retry}"/>
+                                                <Button Command="{Binding #PanelRoot.((windows:TrayPanelWindowViewModel)DataContext).CancelIssueCommand}"
+                                                        CommandParameter="{Binding .}"
+                                                        Classes="subtle compact"
+                                                        Margin="0,0,6,6"
+                                                        IsVisible="{Binding CanCancel}"
+                                                        Content="{loc:Tr tray.issue_action_cancel}"/>
+                                                <Button Command="{Binding #PanelRoot.((windows:TrayPanelWindowViewModel)DataContext).OpenIssueRepositorySettingsCommand}"
+                                                        CommandParameter="{Binding .}"
+                                                        Classes="subtle compact"
+                                                        Margin="0,0,6,6"
+                                                        Content="{loc:Tr common.settings}"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="8" Classes="card" Padding="12">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
+                    <TextBlock Grid.Row="0" Text="{loc:Tr tray.panel_cloud_title}" FontSize="12" FontWeight="SemiBold"/>
+                    <Button Grid.Row="1"
+                            Command="{Binding ToggleCloudPauseCommand}"
+                            IsEnabled="{Binding HasCloudAccess}"
+                            Classes="subtle"
+                            Content="{Binding CloudPauseButtonText}"/>
+
+                    <StackPanel Grid.Row="2" Spacing="8">
+                        <Button Command="{Binding ProcessCloudQueueCommand}"
+                                IsEnabled="{Binding CanRunCloudActions}"
+                                Classes="subtle"
+                                Content="{loc:Tr tray.menu.cloud_process_queue}"/>
+                        <Button Command="{Binding PushAllToCloudCommand}"
+                                IsEnabled="{Binding CanRunCloudActions}"
+                                Classes="subtle"
+                                Content="{loc:Tr tray.menu.cloud_push_all}"/>
+                        <Border Classes="metric-card"
+                                IsVisible="{Binding ShowCloudHint}"
+                                Background="{Binding ConnectivityBackgroundColor}"
+                                BorderBrush="{Binding ConnectivityAccentColor}">
+                            <TextBlock Text="{Binding CloudHintText}"
+                                       Foreground="{Binding ConnectivityAccentColor}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Button Grid.Row="3"
+                            Command="{Binding ExitCommand}"
+                            Classes="danger"
+                            Content="{loc:Tr tray.menu.exit}"/>
+                </Grid>
+            </Border>
+        </Grid>
+        </ScrollViewer>
+    </Border>
+</Window>

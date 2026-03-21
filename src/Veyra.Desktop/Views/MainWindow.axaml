@@ -14,8 +14,8 @@
         Background="{DynamicResource VeyraCanvasBrush}" Foreground="{DynamicResource VeyraTextPrimaryBrush}"
         WindowStartupLocation="CenterScreen">
 
-    <Grid RowDefinitions="Auto,*" Margin="16" RowSpacing="12">
-        <Border x:Name="MainToolbar" Grid.Row="0" Classes="toolbar" Padding="14,12">
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14" RowSpacing="8">
+        <Border x:Name="MainToolbar" Grid.Row="0" Classes="toolbar" Padding="12,10">
             <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                     <Border Classes="badge" Padding="10,6">
@@ -39,8 +39,8 @@
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button x:Name="MainSearchButton"
-                            MinWidth="96"
-                            Height="36"
+                            MinWidth="90"
+                            Height="34"
                             Command="{Binding OpenGlobalSearchCommand}"
                             ToolTip.Tip="{loc:Tr search.title}"
                             Classes="subtle responsive-icon">
@@ -53,8 +53,8 @@
                     </Button>
                     <Button
                             x:Name="MainLanguageButton"
-                            MinWidth="56"
-                            Height="36"
+                            MinWidth="52"
+                            Height="34"
                             FontWeight="SemiBold"
                             Command="{Binding ToggleLanguageCommand}"
                             ToolTip.Tip="{loc:Tr main.toggle_language}"
@@ -80,9 +80,101 @@
             </Grid>
         </Border>
 
-        <ContentControl x:Name="MainPageHost" Grid.Row="1" Content="{Binding CurrentPage}"/>
+        <Border Grid.Row="1"
+                Classes="card"
+                Padding="12,10"
+                Background="{Binding ConnectivityBannerBackgroundColor}"
+                BorderBrush="{Binding ConnectivityBannerAccentColor}"
+                IsVisible="{Binding ShowConnectivityBanner}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="&#xE783;"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="{Binding ConnectivityBannerAccentColor}"
+                           VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ConnectivityBannerText}"
+                           Foreground="{Binding ConnectivityBannerAccentColor}"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
 
-        <Border Grid.RowSpan="2"
+        <ContentControl x:Name="MainPageHost" Grid.Row="2" Content="{Binding CurrentPage}"/>
+
+        <Border Grid.Row="3"
+                Classes="card"
+                Padding="10,8"
+                IsVisible="{Binding ShowShellActivityStrip}"
+                Background="{Binding ShellActivityBackgroundColor}"
+                BorderBrush="{Binding ShellActivityAccentColor}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10">
+                <TextBlock Text="&#xE823;"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="{Binding ShellActivityAccentColor}"
+                           VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock Text="{Binding ShellActivityText}"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding ShellActivityAccentColor}"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ShellActivityDetailText}"
+                               FontSize="11"
+                               Foreground="{Binding ShellActivityAccentColor}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Border Grid.Column="2"
+                        Classes="badge"
+                        Padding="8,4"
+                        BorderBrush="{Binding ShellActivityAccentColor}"
+                        IsVisible="{Binding ShowShellActivityBadge}">
+                    <TextBlock Text="{Binding ShellActivityBadgeText}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding ShellActivityAccentColor}"/>
+                </Border>
+
+                <Button Grid.Column="3"
+                        Command="{Binding OpenShellSyncHealthCenterCommand}"
+                        Classes="subtle responsive-icon compact"
+                        IsVisible="{Binding ShowShellSyncCenterAction}">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xEA39;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_sync_center}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="4"
+                        Command="{Binding OpenShellOperationJournalCommand}"
+                        Classes="subtle responsive-icon compact">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_journal}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="5"
+                        Command="{Binding OpenShellOperationMonitorCommand}"
+                        Classes="subtle responsive-icon compact">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE9D2;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_monitor}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="6"
+                        Command="{Binding DismissShellActivityStripCommand}"
+                        Classes="subtle icon compact"
+                        Content="&#xE711;"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.RowSpan="4"
                 Classes="loading-overlay"
                 IsVisible="{Binding IsShellBusy}"
                 ZIndex="40">
@@ -100,7 +192,7 @@
         </Border>
 
         <Grid x:Name="GuidedTourOverlayRoot"
-              Grid.RowSpan="2"
+              Grid.RowSpan="4"
               IsVisible="{Binding IsGuidedTourVisible}"
               Background="#B30B1018"
               ZIndex="50">
