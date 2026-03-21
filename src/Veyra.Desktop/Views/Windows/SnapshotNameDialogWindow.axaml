@@ -1,0 +1,991 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.Windows.SnapshotNameDialogWindow"
+        x:Name="Root"
+        x:DataType="windows:SnapshotNameDialogWindowViewModel"
+        Width="1180"
+        Height="760"
+        MinWidth="860"
+        MinHeight="580"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="Full"
+        CanResize="True"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Foreground="{DynamicResource VeyraTextPrimaryBrush}"
+        Title="{loc:Tr snapshot_dialog.window_title}">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="16" RowSpacing="12">
+        <Border Grid.Row="0" Classes="dialog-hero">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+                <StackPanel Grid.Row="0" Spacing="4">
+                    <TextBlock Text="{loc:Tr snapshot_dialog.title}" FontSize="30" FontWeight="SemiBold"/>
+                    <TextBlock Classes="muted"
+                               Text="{loc:Tr snapshot_dialog.subtitle}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnDefinitions="130,*" ColumnSpacing="10" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="{loc:Tr snapshot_dialog.snapshot_name}" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    <TextBox Grid.Column="1"
+                             Text="{Binding SnapshotName, Mode=TwoWay}"
+                             Watermark="{loc:Tr snapshot_dialog.snapshot_name_placeholder}"/>
+                </Grid>
+
+                <Grid Grid.Row="2" ColumnDefinitions="130,*" ColumnSpacing="10" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="{loc:Tr snapshot_dialog.snapshot_tags}" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBox Text="{Binding SnapshotTagsInput, Mode=TwoWay}"
+                                 Watermark="{loc:Tr snapshot_dialog.snapshot_tags_placeholder}"/>
+                        <TextBlock Text="{Binding SnapshotTagsSummary}"
+                                   Classes="muted"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Grid.Row="3"
+                           Text="{Binding ErrorMessage}"
+                           Foreground="{DynamicResource VeyraDangerBrush}"
+                           FontWeight="SemiBold"
+                           IsVisible="{Binding HasErrorMessage}"
+                           TextWrapping="Wrap"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnDefinitions="320,8,*" ColumnSpacing="0">
+            <Border Grid.Column="0" Classes="dialog-shell" MinWidth="240">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                        <TextBlock Grid.Row="0" Text="{loc:Tr snapshot_dialog.changed_files}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="1" Classes="muted" Text="{Binding ChangedFilesCountLabel}"/>
+
+                        <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="8">
+                            <TextBlock Grid.Row="0"
+                                       Text="{loc:Tr snapshot_dialog.no_changed_files}"
+                                       Classes="muted"
+                                       IsVisible="{Binding HasNoChangedFiles}"/>
+
+                            <ListBox Grid.Row="1"
+                                     Classes="clean-list"
+                                     ItemsSource="{Binding ChangedFiles}"
+                                     SelectedItem="{Binding SelectedChangedFile, Mode=TwoWay}"
+                                     IsVisible="{Binding HasChangedFiles}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="windows:SnapshotPendingFileItemViewModel">
+                                        <Border Classes="list-item">
+                                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="4">
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.85"/>
+
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                           Text="{Binding RelativePath}"
+                                                           Classes="muted"
+                                                           FontSize="11"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"/>
+
+            <Border Grid.Column="2" Classes="dialog-shell" Margin="12,0,0,0" MinWidth="360">
+                    <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{loc:Tr explorer.selected_file}" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SelectedChangedFileTitle}" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SelectedChangedFilePath}" Classes="muted" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <Border Grid.Column="1"
+                                    Classes="badge"
+                                    CornerRadius="9"
+                                    Padding="10,6"
+                                    VerticalAlignment="Top"
+                                    IsVisible="{Binding IsImagePreview, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                <TextBlock Text="{Binding SelectedChangedFileHint}" FontSize="11" TextWrapping="Wrap" MaxWidth="260"/>
+                            </Border>
+                        </Grid>
+
+                        <Grid Grid.Row="1"
+                              ColumnDefinitions="Auto,*"
+                              ColumnSpacing="8"
+                              VerticalAlignment="Center"
+                              IsVisible="{Binding IsImagePreview, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                            <TextBlock Grid.Column="0" Text="{loc:Tr snapshot_dialog.diff_summary}" FontWeight="SemiBold"/>
+                            <TextBlock Grid.Column="1" Text="{Binding PreviewSummary}" Classes="muted" TextWrapping="Wrap"/>
+                        </Grid>
+
+                        <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="8" VerticalAlignment="Center" IsVisible="{Binding IsTextPreview}">
+                            <Border Grid.Column="0" Background="{DynamicResource VeyraDiffAddBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.added}" Foreground="{DynamicResource VeyraDiffAddFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                            </Border>
+                            <Border Grid.Column="1" Background="{DynamicResource VeyraDiffRemoveBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.removed}" Foreground="{DynamicResource VeyraDiffRemoveFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                            </Border>
+                            <Border Grid.Column="2" Background="{DynamicResource VeyraDiffModifiedBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.modified}" Foreground="{DynamicResource VeyraDiffModifiedFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                            </Border>
+                            <Border Grid.Column="3" Background="{DynamicResource VeyraDiffContextBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr diff.context}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                            </Border>
+                            <Border Grid.Column="4" Background="{DynamicResource VeyraDiffContextBgBrush}" CornerRadius="8" Padding="8,4">
+                                <TextBlock Text="{loc:Tr snapshot_dialog.scroll_synced}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                            </Border>
+                            <Button Grid.Column="6"
+                                    Classes="subtle responsive-icon"
+                                    Command="{Binding ToggleWrapModeCommand}"
+                                    ToolTip.Tip="{loc:Tr compare.tooltip_toggle_wrap}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE8A9;"/>
+                                        <TextBlock Classes="button-label" Text="{Binding WrapToggleLabel}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                        </Grid>
+
+                        <Grid Grid.Row="3" RowDefinitions="Auto,*" RowSpacing="8">
+                            <TextBlock Grid.Row="0" Text="{loc:Tr common.preview}" FontWeight="SemiBold" FontSize="16"/>
+
+                            <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsTextPreview}">
+                                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                        <Border Grid.Column="0" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="8,4">
+                                            <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
+                                        </Border>
+                                        <Border Grid.Column="1" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="8,4">
+                                            <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
+                                        </Border>
+                                    </Grid>
+
+                                    <Border Grid.Row="1"
+                                            Background="{DynamicResource VeyraDiffPinnedBgBrush}"
+                                            BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="8,4"
+                                            IsVisible="{Binding HasPinnedHunkHeader}">
+                                        <TextBlock Text="{Binding PinnedHunkHeader}"
+                                                   FontFamily="Cascadia Code,Consolas,Monospace"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource VeyraDiffPinnedFgBrush}"/>
+                                    </Border>
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                        <ScrollViewer x:Name="LeftDiffScrollViewer"
+                                                      Grid.Column="0"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Auto"
+                                                      ScrollChanged="OnLeftDiffScrollChanged">
+                                            <ItemsControl ItemsSource="{Binding PreviewRows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="windows:SnapshotDiffRowItemViewModel">
+                                                        <StackPanel Spacing="4" Margin="0,0,0,4">
+                                                            <Border IsVisible="{Binding IsHunkHeader}"
+                                                                    Background="{DynamicResource VeyraDiffHunkBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="8"
+                                                                    Padding="8,4">
+                                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding HunkHeader}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"
+                                                                               FontWeight="SemiBold"
+                                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                                    <Button Grid.Column="1"
+                                                                            Content="{loc:Tr snapshot_dialog.pin}"
+                                                                            Classes="subtle"
+                                                                            Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).PinHunkHeaderCommand}"
+                                                                            CommandParameter="{Binding}"/>
+                                                                </Grid>
+                                                            </Border>
+
+                                                            <Border IsVisible="{Binding IsContextFoldRow}"
+                                                                    Background="{DynamicResource VeyraDiffFoldBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffFoldBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="8"
+                                                                    Padding="8,4">
+                                                                <Button Content="{Binding ContextFoldLabel}"
+                                                                        HorizontalAlignment="Left"
+                                                                        Classes="subtle"
+                                                                        Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).ExpandContextFoldCommand}"
+                                                                        CommandParameter="{Binding}"/>
+                                                            </Border>
+
+                                                            <Border IsVisible="{Binding IsContentRow}"
+                                                                    Classes="diff-side"
+                                                                    Background="{Binding LeftBackground}" ClipToBounds="True">
+                                                                <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding LeftGutter}"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding LeftMarker}"
+                                                                               Foreground="{Binding LeftMarkerForeground}"
+                                                                               FontWeight="Bold"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding KindLabel}"
+                                                                               Foreground="{DynamicResource VeyraDiffMarkerBrush}"
+                                                                               FontSize="10"
+                                                                               FontWeight="SemiBold"
+                                                                               VerticalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="3"
+                                                                               Text="{Binding LeftText}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"
+                                                                               TextWrapping="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+
+                                        <ScrollViewer x:Name="RightDiffScrollViewer"
+                                                      Grid.Column="1"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Auto"
+                                                      ScrollChanged="OnRightDiffScrollChanged">
+                                            <ItemsControl ItemsSource="{Binding PreviewRows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="windows:SnapshotDiffRowItemViewModel">
+                                                        <StackPanel Spacing="4" Margin="0,0,0,4">
+                                                            <Border IsVisible="{Binding IsHunkHeader}"
+                                                                    Background="{DynamicResource VeyraDiffHunkBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="8"
+                                                                    Padding="8,4">
+                                                                <TextBlock Text="{Binding HunkHeader}"
+                                                                           FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                           FontSize="12"
+                                                                           FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                            </Border>
+
+                                                            <Border IsVisible="{Binding IsContextFoldRow}"
+                                                                    Background="{DynamicResource VeyraDiffFoldBgBrush}"
+                                                                    BorderBrush="{DynamicResource VeyraDiffFoldBorderBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="8"
+                                                                    Padding="8,4">
+                                                                <TextBlock Text="{Binding ContextFoldLabel}"
+                                                                           Classes="muted"
+                                                                           FontSize="11"/>
+                                                            </Border>
+
+                                                            <Border IsVisible="{Binding IsContentRow}"
+                                                                    Classes="diff-side"
+                                                                    Background="{Binding RightBackground}" ClipToBounds="True">
+                                                                <Grid ColumnDefinitions="58,16,30,*" ColumnSpacing="6">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding RightGutter}"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding RightMarker}"
+                                                                               Foreground="{Binding RightMarkerForeground}"
+                                                                               FontWeight="Bold"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding KindLabel}"
+                                                                               Foreground="{DynamicResource VeyraDiffMarkerBrush}"
+                                                                               FontSize="10"
+                                                                               FontWeight="SemiBold"
+                                                                               VerticalAlignment="Center"/>
+                                                                    <TextBlock Grid.Column="3"
+                                                                               Text="{Binding RightText}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"
+                                                                               TextWrapping="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).IsWrapEnabled, Converter={x:Static conv:BoolToTextWrappingConverter.Instance}}"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsBinaryPreview}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,8">
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding Label}"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Value}"
+                                                               TextWrapping="Wrap"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+
+                            <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsAudioPreview}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                      <StackPanel Spacing="12">
+                                          <TextBlock Text="{loc:Tr compare.audio_waveform}"
+                                                     FontWeight="SemiBold"
+                                                     FontSize="14"/>
+
+                                          <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto"
+                                                ColumnSpacing="8">
+                                              <Button Grid.Column="0"
+                                                      Classes="subtle"
+                                                      Command="{Binding PlayBeforeAudioCommand}">
+                                                  <TextBlock Text="{loc:Tr compare.audio_play_before}"/>
+                                              </Button>
+                                              <Button Grid.Column="1"
+                                                      Classes="subtle"
+                                                      Command="{Binding PlayAfterAudioCommand}">
+                                                  <TextBlock Text="{loc:Tr compare.audio_play_after}"/>
+                                              </Button>
+                                              <Button Grid.Column="2"
+                                                      Classes="subtle"
+                                                      Command="{Binding PlayDifferenceAudioCommand}">
+                                                  <TextBlock Text="{loc:Tr compare.audio_play_difference}"/>
+                                              </Button>
+                                              <Button Grid.Column="3"
+                                                      Classes="subtle"
+                                                      Command="{Binding StopAudioPlaybackCommand}">
+                                                  <TextBlock Text="{loc:Tr compare.audio_play_stop}"/>
+                                              </Button>
+                                              <TextBlock Grid.Column="5"
+                                                         Text="{Binding AudioPlaybackStatus}"
+                                                         Classes="muted"
+                                                         VerticalAlignment="Center"
+                                                         IsVisible="{Binding HasAudioPlaybackStatus}"/>
+                                          </Grid>
+
+                                          <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                  BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10"
+                                                IsVisible="{Binding HasAudioWaveformPreview}">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          MaxHeight="320">
+                                                <Image Source="{Binding AudioWaveformPreview}"
+                                                       Stretch="None"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Top"/>
+                                            </ScrollViewer>
+                                        </Border>
+
+                                        <TextBlock Text="{loc:Tr compare.audio_preview_unavailable}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasAudioWaveformPreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                        <TextBlock Text="{loc:Tr compare.audio_spectrogram}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"
+                                                   IsVisible="{Binding HasAudioSpectrogramPreview}"/>
+
+                                        <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10"
+                                                IsVisible="{Binding HasAudioSpectrogramPreview}">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          MaxHeight="300">
+                                                <Image Source="{Binding AudioSpectrogramPreview}"
+                                                       Stretch="None"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Top"/>
+                                            </ScrollViewer>
+                                        </Border>
+
+                                        <TextBlock Text="{loc:Tr compare.audio_spectral_delta}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="13"
+                                                   IsVisible="{Binding HasAudioSpectralDeltaPreview}"/>
+
+                                        <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10"
+                                                IsVisible="{Binding HasAudioSpectralDeltaPreview}">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          MaxHeight="220">
+                                                <Image Source="{Binding AudioSpectralDeltaPreview}"
+                                                       Stretch="None"
+                                                       HorizontalAlignment="Left"
+                                                       VerticalAlignment="Top"/>
+                                            </ScrollViewer>
+                                        </Border>
+
+                                        <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10">
+                                            <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding Label}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding Value}"
+                                                                       TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Border>
+
+                                        <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="{loc:Tr compare.audio_changed_segments}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13"/>
+
+                                                 <ItemsControl ItemsSource="{Binding AudioChangedSegments}"
+                                                               IsVisible="{Binding HasAudioChangedSegments}">
+                                                     <ItemsControl.ItemTemplate>
+                                                         <DataTemplate x:DataType="windows:AudioChangedSegmentItemViewModel">
+                                                             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto"
+                                                                   ColumnSpacing="10"
+                                                                   Margin="0,0,0,6">
+                                                                 <TextBlock Grid.Column="0"
+                                                                            Text="{Binding SegmentLabel}"
+                                                                           FontWeight="SemiBold"
+                                                                           Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding RangeLabel}"
+                                                                           TextWrapping="Wrap"/>
+                                                                <TextBlock Grid.Column="2"
+                                                                           Text="{Binding DurationLabel}"
+                                                                           Classes="muted"/>
+                                                                 <TextBlock Grid.Column="3"
+                                                                            Text="{Binding IntensityLabel}"
+                                                                            Classes="muted"/>
+                                                                 <Button Grid.Column="4"
+                                                                         Classes="subtle"
+                                                                         Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).PlayBeforeAudioSegmentCommand}"
+                                                                         CommandParameter="{Binding}">
+                                                                     <TextBlock Text="{loc:Tr common.before}"/>
+                                                                 </Button>
+                                                                 <Button Grid.Column="5"
+                                                                         Classes="subtle"
+                                                                         Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).PlayAfterAudioSegmentCommand}"
+                                                                         CommandParameter="{Binding}">
+                                                                     <TextBlock Text="{loc:Tr common.after}"/>
+                                                                 </Button>
+                                                                 <Button Grid.Column="6"
+                                                                         Classes="subtle"
+                                                                         Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).LoopAudioSegmentCommand}"
+                                                                         CommandParameter="{Binding}">
+                                                                     <TextBlock Text="{loc:Tr compare.audio_loop_segment}"/>
+                                                                 </Button>
+                                                             </Grid>
+                                                         </DataTemplate>
+                                                     </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <TextBlock Text="{loc:Tr compare.audio_changed_segments_none}"
+                                                           Classes="muted"
+                                                           IsVisible="{Binding HasAudioChangedSegments, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+
+                                                        <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">
+                                <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" RowSpacing="10">
+                                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding ImageDiffCompactSummary}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12"/>
+                                                <TextBlock Text="{Binding ImageDiffCompactStateText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+
+                                        <Button Grid.Column="1"
+                                                Classes="subtle compact responsive-icon"
+                                                Command="{Binding ToggleShowImageDiffDetailsCommand}"
+                                                ToolTip.Tip="{Binding ImageDiffDetailsToggleLabel}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="i"/>
+                                                    <TextBlock Classes="button-label" Text="{Binding ImageDiffDetailsToggleLabel}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+
+                                        <Button Grid.Column="2"
+                                                Classes="subtle compact responsive-icon"
+                                                Command="{Binding ToggleShowImageDiffSettingsCommand}"
+                                                ToolTip.Tip="{Binding ImageDiffSettingsToggleLabel}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE713;"/>
+                                                    <TextBlock Classes="button-label" Text="{Binding ImageDiffSettingsToggleLabel}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                    </Grid>
+
+                                    <Border Grid.Row="1"
+                                            Classes="popover-panel"
+                                            HorizontalAlignment="Right"
+                                            MaxWidth="560"
+                                            IsVisible="{Binding ShowImageDiffSettings}">
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="{loc:Tr compare.image_diff_settings_title}" FontWeight="SemiBold"/>
+
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{loc:Tr compare.image_mode}" Classes="muted" FontSize="11"/>
+                                                <Border Classes="segmented-control">
+                                                    <ItemsControl ItemsSource="{Binding ImageDiffModes}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <WrapPanel Orientation="Horizontal" ItemWidth="140"/>
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="windows:ImageDiffModeOptionViewModel">
+                                                                <ToggleButton Classes="segmented"
+                                                                              Content="{Binding Label}"
+                                                                              IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                                              Command="{Binding #Root.((windows:SnapshotNameDialogWindowViewModel)DataContext).SelectImageDiffModeCommand}"
+                                                                              CommandParameter="{Binding}"/>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </Border>
+                                            </StackPanel>
+
+                                            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                                                <StackPanel Grid.Column="0" Spacing="4">
+                                                    <TextBlock Text="{loc:Tr compare.image_sensitivity}" Classes="muted" FontSize="11"/>
+                                                    <Slider Minimum="1"
+                                                            Maximum="100"
+                                                            Value="{Binding ImageDiffSensitivity}"
+                                                            TickFrequency="5"
+                                                            IsSnapToTickEnabled="False"/>
+                                                    <TextBlock Text="{Binding ImageSensitivityLabel}" Classes="muted" FontSize="11"/>
+                                                </StackPanel>
+
+                                                <StackPanel Grid.Column="1" Spacing="4" IsVisible="{Binding IsSplitImageDiffMode}">
+                                                    <TextBlock Text="{loc:Tr compare.image_split}" Classes="muted" FontSize="11"/>
+                                                    <Slider Minimum="0"
+                                                            Maximum="100"
+                                                            Value="{Binding ComparisonSplitPercent}"/>
+                                                    <TextBlock Text="{Binding SplitPositionLabel}" Classes="muted" FontSize="11"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <WrapPanel Orientation="Horizontal">
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,8,8"
+                                                        Command="{Binding ToggleShowImageDiffRegionBoxesCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE81E;"/>
+                                                            <TextBlock Classes="button-label" Text="{Binding ImageRegionBoxesLabel}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,8,8"
+                                                        Command="{Binding ToggleShowSourceImagePanelsCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE7B3;"/>
+                                                            <TextBlock Classes="button-label" Text="{Binding SourceImagePanelsLabel}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                                <Button Classes="subtle compact responsive-icon"
+                                                        Margin="0,0,0,8"
+                                                        Command="{Binding ResetImageDiffSettingsCommand}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.reset_diff_settings}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Row="2"
+                                            Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="8"
+                                            IsVisible="{Binding HasAnyImagePreview}">
+                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" VerticalAlignment="Center">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock Text="{Binding OverlayImageCaption}"
+                                                                   FontWeight="SemiBold"
+                                                                   FontSize="12"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{loc:Tr compare.zoom_hint}"
+                                                               Classes="muted"
+                                                               FontSize="11"/>
+                                                </StackPanel>
+
+                                                <Button Grid.Column="1"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Click="OnZoomOutOverlayImageClicked"
+                                                        ToolTip.Tip="{loc:Tr compare.zoom_out}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="-"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_out}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                    <TextBlock Text="{loc:Tr compare.zoom}" Classes="muted" FontSize="11" VerticalAlignment="Center"/>
+                                                    <Slider x:Name="OverlayZoomSlider"
+                                                            Width="180"
+                                                            Minimum="1"
+                                                            Maximum="500"
+                                                            Value="100"
+                                                            TickFrequency="10"
+                                                            ValueChanged="OnOverlayZoomSliderValueChanged"/>
+                                                    <TextBlock x:Name="OverlayZoomValueText"
+                                                               Width="52"
+                                                               Text="100%"
+                                                               HorizontalAlignment="Right"
+                                                               VerticalAlignment="Center"
+                                                               FontWeight="SemiBold"/>
+                                                </StackPanel>
+
+                                                <Button Grid.Column="3"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Click="OnZoomInOverlayImageClicked"
+                                                        ToolTip.Tip="{loc:Tr compare.zoom_in}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="+"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_in}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+
+                                                <Button Grid.Column="4"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Click="OnFitOverlayImageToViewClicked"
+                                                        ToolTip.Tip="{loc:Tr compare.zoom_fit}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE9A6;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_fit}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+
+                                                <Button Grid.Column="5"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Click="OnResetOverlayImageToHundredClicked"
+                                                        ToolTip.Tip="{loc:Tr compare.zoom_reset}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="100"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_reset}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+
+                                                <Button Grid.Column="6"
+                                                        Classes="subtle compact responsive-icon"
+                                                        Click="OnOpenDetachedImagePreviewClicked"
+                                                        ToolTip.Tip="{loc:Tr compare.open_detached_preview}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE740;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.open_detached_preview}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </Grid>
+
+                                            <ScrollViewer x:Name="OverlayImageScrollViewer"
+                                                          Grid.Row="1"
+                                                          Focusable="True"
+                                                          HorizontalScrollBarVisibility="Auto"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          PointerPressed="OnOverlayImagePointerPressed"
+                                                          PointerMoved="OnOverlayImagePointerMoved"
+                                                          PointerReleased="OnOverlayImagePointerReleased"
+                                                          PointerCaptureLost="OnOverlayImagePointerCaptureLost"
+                                                          KeyDown="OnOverlayImageKeyDown"
+                                                          KeyUp="OnOverlayImageKeyUp"
+                                                          LostFocus="OnOverlayImageLostFocus"
+                                                          SizeChanged="OnOverlayImageViewportSizeChanged">
+                                                <Grid x:Name="OverlayImageViewportHost"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Top"
+                                                      ClipToBounds="True">
+                                                    <Grid x:Name="OverlayImageHost"
+                                                          HorizontalAlignment="Left"
+                                                          VerticalAlignment="Top"
+                                                          ClipToBounds="True">
+                                                        <Image x:Name="OverlayImageControl"
+                                                               Source="{Binding OverlayImagePreview}"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Left"
+                                                               VerticalAlignment="Top"/>
+                                                        <Image x:Name="OverlaySplitBaseImageControl"
+                                                               Source="{Binding RightImagePreview}"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Left"
+                                                               VerticalAlignment="Top"
+                                                               IsVisible="False"/>
+                                                        <Border x:Name="OverlaySplitRevealHost"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Top"
+                                                                ClipToBounds="True"
+                                                                IsVisible="False">
+                                                            <Image x:Name="OverlaySplitRevealImageControl"
+                                                                   Source="{Binding LeftImagePreview}"
+                                                                   Stretch="Uniform"
+                                                                   HorizontalAlignment="Left"
+                                                                   VerticalAlignment="Top"/>
+                                                        </Border>
+                                                        <Border x:Name="OverlaySplitDivider"
+                                                                Width="2"
+                                                                Background="{DynamicResource VeyraInfoBrush}"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Stretch"
+                                                                IsVisible="False"
+                                                                IsHitTestVisible="False"/>
+                                                        <Image x:Name="OverlayPeekBeforeImageControl"
+                                                               Source="{Binding LeftImagePreview}"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Left"
+                                                               VerticalAlignment="Top"
+                                                               IsVisible="False"
+                                                               IsHitTestVisible="False"/>
+                                                    </Grid>
+                                                </Grid>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Grid.Row="2"
+                                               Text="{loc:Tr compare.image_preview_unavailable}"
+                                               Classes="muted"
+                                               IsVisible="{Binding HasNoImagePreviews}"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Top"/>
+
+                                    <Border Grid.Row="3"
+                                            Background="{DynamicResource VeyraCanvasBrush}"
+                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="10"
+                                            IsVisible="{Binding ShowSourceImagePanelsSection}">
+                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                            <TextBlock Grid.Row="0" Text="{loc:Tr compare.image_sources}" FontWeight="SemiBold"/>
+                                            <Grid Grid.Row="1" ColumnDefinitions="*,8,*" ColumnSpacing="0">
+                                                <Border Grid.Column="0" Background="{DynamicResource VeyraCanvasBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
+                                                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                                        <TextBlock Grid.Row="0" Text="{Binding LeftImageCaption}" FontWeight="SemiBold"/>
+                                                        <ScrollViewer Grid.Row="1"
+                                                                      HorizontalScrollBarVisibility="Auto"
+                                                                      VerticalScrollBarVisibility="Auto"
+                                                                      MaxHeight="240">
+                                                            <Image Source="{Binding LeftImagePreview}"
+                                                                   Stretch="Uniform"
+                                                                   HorizontalAlignment="Left"
+                                                                   VerticalAlignment="Top"/>
+                                                        </ScrollViewer>
+                                                    </Grid>
+                                                </Border>
+
+                                                <GridSplitter Grid.Column="1"
+                                                              Width="8"
+                                                              Background="{DynamicResource VeyraSplitBrush}"
+                                                              ResizeDirection="Columns"
+                                                              ResizeBehavior="PreviousAndNext"
+                                                              HorizontalAlignment="Stretch"
+                                                              VerticalAlignment="Stretch"/>
+
+                                                <Border Grid.Column="2" Background="{DynamicResource VeyraCanvasBrush}" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" BorderThickness="1" CornerRadius="10" Padding="8">
+                                                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                                        <TextBlock Grid.Row="0" Text="{Binding RightImageCaption}" FontWeight="SemiBold"/>
+                                                        <ScrollViewer Grid.Row="1"
+                                                                      HorizontalScrollBarVisibility="Auto"
+                                                                      VerticalScrollBarVisibility="Auto"
+                                                                      MaxHeight="240">
+                                                            <Image Source="{Binding RightImagePreview}"
+                                                                   Stretch="Uniform"
+                                                                   HorizontalAlignment="Left"
+                                                                   VerticalAlignment="Top"/>
+                                                        </ScrollViewer>
+                                                    </Grid>
+                                                </Border>
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+
+                                    <Border Grid.Row="4"
+                                            Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="10"
+                                            IsVisible="{Binding ShowImageDiffDetails}">
+                                        <StackPanel Spacing="12">
+                                            <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                            <TextBlock Grid.Column="0"
+                                                                       Text="{Binding Label}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                            <TextBlock Grid.Column="1"
+                                                                       Text="{Binding Value}"
+                                                                       TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <Border Grid.Row="1" Classes="diff-surface" IsVisible="{Binding HasNoPreviewContent}">
+                                <TextBlock Text="{loc:Tr snapshot_dialog.select_file_for_preview}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"/>
+                            </Border>
+
+                            <Border Grid.RowSpan="2"
+                                    Classes="loading-overlay"
+                                    IsVisible="{Binding IsPreviewLoading}">
+                                <Border Classes="loading-card"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Width="340"
+                                        MaxWidth="400">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Text="{Binding LoadingTitle}"
+                                                   FontSize="18"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                        <TextBlock Text="{Binding LoadingDetail}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"
+                                                   HorizontalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                        <ProgressBar Minimum="0"
+                                                     Maximum="100"
+                                                     Height="10"
+                                                     Value="{Binding LoadingProgressValue}"
+                                                     IsIndeterminate="{Binding IsLoadingProgressIndeterminate}"/>
+                                        <TextBlock Text="{Binding LoadingProgressLabel}"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right"
+                                                   IsVisible="{Binding HasDeterminateLoadingProgress}"/>
+                                    </StackPanel>
+                                </Border>
+                            </Border>
+                        </Grid>
+                    </Grid>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="2"
+                Classes="dialog-shell"
+                Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                BorderBrush="{DynamicResource VeyraBorderBrush}"
+                Padding="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding ChangedFilesCountLabel}"
+                           VerticalAlignment="Center"
+                           Classes="muted"/>
+
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Spacing="8">
+                    <Button Width="132" Classes="subtle responsive-icon" Command="{Binding CancelCommand}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.cancel}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button Width="164"
+                            Classes="primary responsive-icon"
+                            Command="{Binding SaveCommand}"
+                            IsEnabled="{Binding CanSave}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE74E;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr snapshot_dialog.save_snapshot}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+
+
+

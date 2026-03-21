@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
+             x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeIntroView"
+             d:DataContext="{d:DesignInstance vm:WelcomeIntroViewModel, IsDesignTimeCreatable=True}"
+             x:DataType="vm:WelcomeIntroViewModel">
+
+    <Grid ColumnDefinitions="*,8,360" Margin="16" ColumnSpacing="0">
+        <Border Grid.Column="0" Classes="sidebar" Padding="24" Margin="0,0,12,0" MinWidth="360">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="12" VerticalAlignment="Center">
+                    <TextBlock Text="{loc:Tr app.brand}" FontSize="34" FontWeight="Bold" Foreground="{DynamicResource VeyraInfoBrush}"/>
+                    <TextBlock Text="{Binding Title}" Classes="h1" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding Subtitle}" Classes="muted" TextWrapping="Wrap" MaxWidth="520"/>
+
+                <Border Classes="card" Padding="14" Margin="0,8,0,0">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{loc:Tr welcome.what_works}" Classes="label"/>
+                        <TextBlock Text="{loc:Tr welcome.feature_repo}"/>
+                        <TextBlock Text="{loc:Tr welcome.feature_scan}"/>
+                        <TextBlock Text="{loc:Tr welcome.feature_history}"/>
+                    </StackPanel>
+                </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <GridSplitter Grid.Column="1"
+                      Width="8"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Columns"
+                      ResizeBehavior="PreviousAndNext"/>
+
+        <Border Grid.Column="2" Classes="panel" Padding="24" MinWidth="280">
+            <StackPanel Spacing="14" VerticalAlignment="Center">
+                <TextBlock Text="{loc:Tr welcome.get_started}" Classes="h2"/>
+                <TextBlock Text="{loc:Tr welcome.get_started_hint}" Classes="muted" TextWrapping="Wrap"/>
+
+                <Button Content="{loc:Tr welcome.start}" Height="40" Command="{Binding StartCommand}" Classes="primary"/>
+                <Button Content="{loc:Tr welcome.about}" Height="40" Command="{Binding LearnMoreCommand}" Classes="subtle"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
+

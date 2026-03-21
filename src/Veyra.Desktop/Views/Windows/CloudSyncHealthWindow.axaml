@@ -1,0 +1,212 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.Settings"
+        x:Class="Veyra.Desktop.Views.Windows.CloudSyncHealthWindow"
+        x:DataType="vm:CloudSyncHealthWindowViewModel"
+        x:Name="Root"
+        Width="1260"
+        MinWidth="980"
+        Height="820"
+        MinHeight="680"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr app_settings.sync_health_center_title}">
+
+    <Grid>
+        <Border Classes="dialog-shell" Margin="16" Padding="18">
+            <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="14">
+                <Border Grid.Row="0" Classes="hero">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_center_title}" Classes="h2"/>
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_center_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="{loc:Tr common.close}"
+                                Command="{Binding CloseCommand}"
+                                Classes="subtle"/>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Classes="filter-sheet">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding SummaryText}"
+                                   Classes="muted"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center"/>
+
+                        <Button Grid.Column="1"
+                                Command="{Binding Source.OpenOperationMonitorCommand}"
+                                Classes="subtle compact responsive-icon">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE9D9;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr app_settings.sync_health_open_monitor}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+
+                        <Button Grid.Column="2"
+                                Command="{Binding RefreshCommand}"
+                                Classes="subtle compact responsive-icon"
+                                IsEnabled="{Binding Source.IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <WrapPanel Grid.Row="2" Orientation="Horizontal" ItemWidth="210" ItemHeight="108">
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_metric_total}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding IssueCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_metric_conflicts}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding ConflictIssuesCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_metric_auth}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding AuthIssuesCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_metric_retry}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding RetryIssuesCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.sync_health_metric_stalled}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding StalledIssuesCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <Grid Grid.Row="3">
+                    <TextBlock Text="{loc:Tr app_settings.repository_sync_health_empty}"
+                               Classes="muted"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasIssues, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                    <ScrollViewer IsVisible="{Binding HasIssues}" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Source.RepositorySyncIssues}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="settings:AppRepositorySyncIssueItemViewModel">
+                                    <Border Classes="card" Padding="12" Margin="0,0,0,10">
+                                        <StackPanel Spacing="8">
+                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15"/>
+                                                    <TextBlock Text="{Binding IssueCategoryText}" Classes="muted"/>
+                                                </StackPanel>
+                                                <Border Grid.Column="1" Classes="badge" VerticalAlignment="Top">
+                                                    <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"/>
+                                                </Border>
+                                                <Border Grid.Column="2" Classes="badge" VerticalAlignment="Top">
+                                                    <TextBlock Text="{Binding ConflictStrategyText}" FontSize="11" FontWeight="SemiBold"/>
+                                                </Border>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                                <TextBlock Grid.Column="0" Text="{loc:Tr repo_settings.queue}" Opacity="0.8"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding QueueText}" TextWrapping="Wrap"/>
+                                            </Grid>
+
+                                            <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                                <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_last_sync}" Opacity="0.8"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding LastSyncText}" TextWrapping="Wrap"/>
+                                            </Grid>
+
+                                            <StackPanel Spacing="6" IsVisible="{Binding HasProgress}">
+                                                <Grid ColumnDefinitions="170,*,Auto" ColumnSpacing="10">
+                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_progress_label}" Opacity="0.8"/>
+                                                    <ProgressBar Grid.Column="1"
+                                                                 Minimum="0"
+                                                                 Maximum="100"
+                                                                 Height="10"
+                                                                 Value="{Binding ProgressPercent}"/>
+                                                    <TextBlock Grid.Column="2"
+                                                               Text="{Binding ProgressText}"
+                                                               VerticalAlignment="Center"
+                                                               FontWeight="SemiBold"/>
+                                                </Grid>
+
+                                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.repository_sync_health_eta_label}" Opacity="0.8"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding EtaText}" TextWrapping="Wrap"/>
+                                                </Grid>
+                                            </StackPanel>
+
+                                            <Border Classes="metric-card" IsVisible="{Binding HasRecommendation}">
+                                                <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.sync_health_recommendation_label}" Opacity="0.8"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding RecommendationText}" TextWrapping="Wrap"/>
+                                                </Grid>
+                                            </Border>
+
+                                            <Border Padding="12,8"
+                                                    Background="{DynamicResource VeyraDiffContextBgBrush}"
+                                                    BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="12"
+                                                    IsVisible="{Binding HasStall}">
+                                                <TextBlock Text="{Binding StallText}"
+                                                           Foreground="{DynamicResource VeyraWarningBrush}"
+                                                           FontWeight="SemiBold"
+                                                           TextWrapping="Wrap"/>
+                                            </Border>
+
+                                            <TextBlock Text="{Binding ErrorText}"
+                                                       Foreground="{DynamicResource VeyraWarningBrush}"
+                                                       TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasError}"/>
+
+                                            <WrapPanel Orientation="Horizontal">
+                                                <Button Content="{loc:Tr app_settings.repository_sync_health_cancel_now}"
+                                                        Classes="subtle compact"
+                                                        Margin="0,0,8,8"
+                                                        IsEnabled="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                        Command="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.CancelRepositorySyncIssueCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                                <Button Content="{loc:Tr app_settings.repository_sync_health_retry_now}"
+                                                        Classes="primary compact"
+                                                        Margin="0,0,8,8"
+                                                        IsEnabled="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                        Command="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.RetryRepositorySyncIssueCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                                <Button Content="{loc:Tr app_settings.repository_sync_health_open_settings}"
+                                                        Classes="subtle compact"
+                                                        Margin="0,0,8,8"
+                                                        IsEnabled="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                        Command="{Binding #Root.((vm:CloudSyncHealthWindowViewModel)DataContext).Source.OpenRepositorySyncIssueSettingsCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

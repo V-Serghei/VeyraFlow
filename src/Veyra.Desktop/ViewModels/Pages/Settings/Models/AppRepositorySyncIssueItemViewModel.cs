@@ -1,0 +1,26 @@
+namespace Veyra.Desktop.ViewModels.Pages.Settings;
+
+public sealed record AppRepositorySyncIssueItemViewModel(
+    int RepositoryId,
+    string Name,
+    string StatusText,
+    string QueueText,
+    string LastSyncText,
+    bool HasProgress,
+    int ProgressCurrent,
+    int ProgressTotal,
+    double ProgressPercent,
+    string ProgressText,
+    string EtaText,
+    string ElapsedText,
+    string FinishAtText,
+    string LastProgressUpdateText,
+    string StallText,
+    bool HasStall,
+    string ErrorText,
+    bool HasError,
+    string IssueCategoryCode,
+    string IssueCategoryText,
+    string ConflictStrategyText,
+    string RecommendationText,
+    bool HasRecommendation);

@@ -1,0 +1,351 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+             xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.Search"
+             x:Class="Veyra.Desktop.Views.Pages.Search.GlobalSearchView"
+             x:Name="Root"
+             x:DataType="vm:GlobalSearchViewModel"
+             Background="{DynamicResource VeyraCanvasBrush}">
+
+    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12" Margin="18">
+        <Border Grid.Row="0" Classes="hero" Padding="18">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+                <Button Grid.Column="0"
+                        Content="{loc:Tr common.back}"
+                        Command="{Binding BackCommand}"
+                        Classes="subtle"/>
+
+                <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="{loc:Tr search.title}" Classes="h2"/>
+                    <TextBlock Text="{loc:Tr search.subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <TextBlock Grid.Column="2"
+                           VerticalAlignment="Center"
+                           Text="{Binding LastUpdatedText}"
+                           Classes="muted"/>
+
+                <Button Grid.Column="3"
+                        Classes="subtle responsive-icon"
+                        Command="{Binding RefreshCommand}"
+                        IsEnabled="{Binding CanRefresh}">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Classes="filter-sheet">
+            <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding SearchQuery, Mode=TwoWay}"
+                             Watermark="{loc:Tr search.search_placeholder}"/>
+
+                    <Button Grid.Column="1"
+                            Content="{loc:Tr search.clear_filters}"
+                            Command="{Binding ClearFiltersCommand}"
+                            Classes="subtle"/>
+                </Grid>
+
+                <WrapPanel Orientation="Horizontal">
+                    <StackPanel Width="220" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_repository}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding RepositoryFilters}"
+                                  SelectedItem="{Binding SelectedRepositoryFilter, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:GlobalSearchRepositoryFilterOptionViewModel">
+                                    <TextBlock Text="{Binding Label}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Width="190" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_tracked_format}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding TrackedFormatFilters}"
+                                  SelectedItem="{Binding SelectedTrackedFormatFilter, Mode=TwoWay}"/>
+                    </StackPanel>
+
+                    <StackPanel Width="160" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_entry_type}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding EntryTypeFilters}"
+                                  SelectedItem="{Binding SelectedEntryTypeFilter, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Width="150" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_extension}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding ExtensionFilters}"
+                                  SelectedItem="{Binding SelectedExtensionFilter, Mode=TwoWay}"/>
+                    </StackPanel>
+
+                    <StackPanel Width="190" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_modified_window}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding ModifiedWindowFilters}"
+                                  SelectedItem="{Binding SelectedModifiedWindowFilter, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Width="170" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_snapshot_tag}" Classes="label"/>
+                        <ComboBox ItemsSource="{Binding SnapshotTagFilters}"
+                                  SelectedItem="{Binding SelectedSnapshotTagFilter, Mode=TwoWay}">
+                            <ComboBox.SelectionBoxItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
+                                </DataTemplate>
+                            </ComboBox.SelectionBoxItemTemplate>
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Width="140" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_min_size_mb}" Classes="label"/>
+                        <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0"/>
+                    </StackPanel>
+
+                    <StackPanel Width="140" Spacing="4" Margin="0,0,12,12">
+                        <TextBlock Text="{loc:Tr search.filter_max_size_mb}" Classes="label"/>
+                        <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0"/>
+                    </StackPanel>
+                </WrapPanel>
+
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="{DynamicResource VeyraInfoBrush}"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding HasStatusMessage}"/>
+
+                <TextBlock Text="{Binding ErrorMessage}"
+                           Foreground="{DynamicResource VeyraWarningBrush}"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding HasErrorMessage}"/>
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="2" ColumnDefinitions="0.92*,1.18*" ColumnSpacing="14">
+            <Grid RowDefinitions="0.52*,0.48*" RowSpacing="14">
+                <Border Classes="card" Padding="12">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                        <StackPanel Grid.Row="0" Spacing="2">
+                            <TextBlock Text="{loc:Tr search.repositories_section_title}" Classes="section-title"/>
+                            <TextBlock Text="{Binding RepositoryResultsSummary}" Classes="muted" FontSize="12"/>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1">
+                            <TextBlock Text="{loc:Tr search.empty_repositories}"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasRepositoryResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                            <ScrollViewer IsVisible="{Binding HasRepositoryResults}"
+                                          VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding RepositoryResults}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:GlobalSearchRepositoryResultItemViewModel">
+                                            <Border Classes="card" Padding="12" Margin="0,0,0,10">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                        <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr common.open}"
+                                                                Classes="subtle"
+                                                                Command="{Binding #Root.((vm:GlobalSearchViewModel)DataContext).OpenRepositoryCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                        <Button Grid.Column="2"
+                                                                Content="{loc:Tr common.settings}"
+                                                                Classes="subtle"
+                                                                Command="{Binding #Root.((vm:GlobalSearchViewModel)DataContext).OpenRepositorySettingsCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                    </Grid>
+
+                                                    <TextBlock Text="{Binding DirectoryPath}" Classes="muted" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" IsVisible="{Binding HasDescription}"/>
+                                                    <TextBlock Text="{Binding FormatsText}" Classes="muted" TextWrapping="Wrap" IsVisible="{Binding HasFormats}"/>
+
+                                                    <WrapPanel Orientation="Horizontal">
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding MetricsText}"/>
+                                                        </Border>
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding StatusText}"/>
+                                                        </Border>
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding LastScannedText}"/>
+                                                        </Border>
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Classes="card" Padding="12">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                        <StackPanel Grid.Row="0" Spacing="2">
+                            <TextBlock Text="{loc:Tr search.snapshots_section_title}" Classes="section-title"/>
+                            <TextBlock Text="{Binding SnapshotResultsSummary}" Classes="muted" FontSize="12"/>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1">
+                            <TextBlock Text="{loc:Tr search.empty_snapshots}"
+                                       Classes="muted"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasSnapshotResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                            <ScrollViewer IsVisible="{Binding HasSnapshotResults}"
+                                          VerticalScrollBarVisibility="Auto">
+                                <ItemsControl ItemsSource="{Binding SnapshotResults}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:GlobalSearchSnapshotResultItemViewModel">
+                                            <Border Classes="card" Padding="12" Margin="0,0,0,10">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                        <StackPanel Grid.Column="0" Spacing="4">
+                                                            <TextBlock Text="{Binding RepositoryName}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap" IsVisible="{Binding HasTitle}"/>
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr common.open}"
+                                                                Classes="primary"
+                                                                Command="{Binding #Root.((vm:GlobalSearchViewModel)DataContext).OpenSnapshotCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                    </Grid>
+
+                                                    <WrapPanel Orientation="Horizontal">
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding TriggerText}"/>
+                                                        </Border>
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding ChangedFilesText}"/>
+                                                        </Border>
+                                                        <Border Classes="badge" Margin="0,0,8,6">
+                                                            <TextBlock Text="{Binding CreatedText}"/>
+                                                        </Border>
+                                                    </WrapPanel>
+
+                                                    <TextBlock Text="{Binding TagsText}"
+                                                               Classes="muted"
+                                                               TextWrapping="Wrap"
+                                                               IsVisible="{Binding HasTags}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="1" Classes="card" Padding="12">
+                <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                    <StackPanel Grid.Row="0" Spacing="2">
+                        <TextBlock Text="{loc:Tr search.files_section_title}" Classes="section-title"/>
+                        <TextBlock Text="{Binding FileResultsSummary}" Classes="muted" FontSize="12"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1">
+                        <TextBlock Text="{loc:Tr search.empty_files}"
+                                   Classes="muted"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding HasFileResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                        <ScrollViewer IsVisible="{Binding HasFileResults}"
+                                      VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding FileResults}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:GlobalSearchFileResultItemViewModel">
+                                        <Border Classes="card" Padding="12" Margin="0,0,0,10">
+                                            <StackPanel Spacing="8">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <StackPanel Grid.Column="0" Spacing="4">
+                                                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{Binding RelativePath}" Classes="muted" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1"
+                                                            Content="{loc:Tr common.open}"
+                                                            Classes="primary"
+                                                            Command="{Binding #Root.((vm:GlobalSearchViewModel)DataContext).OpenEntryCommand}"
+                                                            CommandParameter="{Binding .}"/>
+                                                </Grid>
+
+                                                <TextBlock Text="{Binding ParentPath}" Classes="muted" TextWrapping="Wrap" IsVisible="{Binding HasParentPath}"/>
+
+                                                <WrapPanel Orientation="Horizontal">
+                                                    <Border Classes="badge" Margin="0,0,8,6">
+                                                        <TextBlock Text="{Binding RepositoryBadgeText}"/>
+                                                    </Border>
+                                                    <Border Classes="badge" Margin="0,0,8,6">
+                                                        <TextBlock Text="{Binding KindText}"/>
+                                                    </Border>
+                                                    <Border Classes="badge" Margin="0,0,8,6" IsVisible="{Binding HasExtension}">
+                                                        <TextBlock Text="{Binding ExtensionText}"/>
+                                                    </Border>
+                                                    <Border Classes="badge" Margin="0,0,8,6">
+                                                        <TextBlock Text="{Binding SizeText}"/>
+                                                    </Border>
+                                                    <Border Classes="badge" Margin="0,0,8,6">
+                                                        <TextBlock Text="{Binding ModifiedText}"/>
+                                                    </Border>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <Border Classes="loading-overlay"
+                Margin="18"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="340"
+                    MaxWidth="460">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding LoadingOverlayTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding LoadingOverlayDetail}" Classes="muted" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding LoadingStatusText}" Classes="muted" TextWrapping="Wrap"
+                               IsVisible="{Binding LoadingStatusText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</UserControl>

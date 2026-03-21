@@ -1,0 +1,178 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.MainWindow"
+        x:DataType="windows:MainWindowViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="{loc:Tr main.window_title}"
+        Width="1280" Height="820"
+        MinWidth="980" MinHeight="640"
+        Background="{DynamicResource VeyraCanvasBrush}" Foreground="{DynamicResource VeyraTextPrimaryBrush}"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,*" Margin="16" RowSpacing="12">
+        <Border x:Name="MainToolbar" Grid.Row="0" Classes="toolbar" Padding="14,12">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Classes="badge" Padding="10,6">
+                        <TextBlock Text="&#x25C8;"
+                                   FontSize="16"
+                                   Foreground="{DynamicResource VeyraAccentBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{loc:Tr main.product_name}" FontSize="17" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr main.product_subtitle}" Classes="muted hide-on-narrow" FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Classes="muted hide-on-narrow"
+                           Text="{loc:Tr app.brand}"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="MainSearchButton"
+                            MinWidth="96"
+                            Height="36"
+                            Command="{Binding OpenGlobalSearchCommand}"
+                            ToolTip.Tip="{loc:Tr search.title}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE721;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.open_search}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button
+                            x:Name="MainLanguageButton"
+                            MinWidth="56"
+                            Height="36"
+                            FontWeight="SemiBold"
+                            Command="{Binding ToggleLanguageCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_language}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE909;"/>
+                                <TextBlock Classes="button-label" Text="{Binding LanguageToggleLabel}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainThemeButton"
+                            Content="{Binding ThemeToggleGlyph}"
+                            Command="{Binding ToggleThemeCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_theme}"
+                            Classes="subtle icon"/>
+                    <Button x:Name="MainGlobalSettingsButton"
+                            Content="&#xE713;"
+                            ToolTip.Tip="{loc:Tr common.settings}"
+                            Command="{Binding OpenGlobalSettingsCommand}"
+                            Classes="subtle icon"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ContentControl x:Name="MainPageHost" Grid.Row="1" Content="{Binding CurrentPage}"/>
+
+        <Border Grid.RowSpan="2"
+                Classes="loading-overlay"
+                IsVisible="{Binding IsShellBusy}"
+                ZIndex="40">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding ShellBusyTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding ShellBusyDetail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <Grid x:Name="GuidedTourOverlayRoot"
+              Grid.RowSpan="2"
+              IsVisible="{Binding IsGuidedTourVisible}"
+              Background="#B30B1018"
+              ZIndex="50">
+            <Canvas x:Name="GuidedTourCanvas">
+                <Border x:Name="GuidedTourHighlight"
+                        Width="0"
+                        Height="0"
+                        IsVisible="False"
+                        BorderThickness="2"
+                        BorderBrush="{DynamicResource VeyraAccentBrush}"
+                        Background="#14000000"
+                        CornerRadius="18"/>
+
+                <Border x:Name="GuidedTourBubble"
+                        Width="360"
+                        MaxWidth="360"
+                        Classes="card guided-tour-bubble"
+                        Padding="18">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{Binding GuidedTourStepText}"
+                                       Classes="muted"
+                                       FontSize="11"/>
+                            <TextBlock Text="{Binding GuidedTourTitle}"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding GuidedTourDescription}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <Button Command="{Binding GuidedTourBackCommand}"
+                                    IsEnabled="{Binding CanGuidedTourGoBack}"
+                                    Margin="0,0,8,8"
+                                    Classes="subtle responsive-icon"
+                                    ToolTip.Tip="{loc:Tr common.back}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE72B;"/>
+                                        <TextBlock Classes="button-label" Text="{loc:Tr common.back}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
+                            <Button Command="{Binding GuidedTourSkipCommand}"
+                                    Margin="0,0,8,8"
+                                    Classes="subtle responsive-icon"
+                                    ToolTip.Tip="{loc:Tr common.close}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                        <TextBlock Classes="button-label" Text="{loc:Tr tour.skip}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
+                            <Button Command="{Binding GuidedTourNextCommand}"
+                                    Margin="0,0,0,8"
+                                    Classes="primary responsive-icon">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE72A;"/>
+                                        <TextBlock Classes="button-label" Text="{Binding GuidedTourNextLabel}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </Canvas>
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,17 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:desktop="clr-namespace:Veyra.Desktop"
+             xmlns:fa="using:FluentAvalonia.Styling"
+             x:Class="Veyra.Desktop.App"
+             RequestedThemeVariant="Default">
+
+    <Application.DataTemplates>
+        <desktop:ViewLocator/>
+    </Application.DataTemplates>
+
+    <Application.Styles>
+        <fa:FluentAvaloniaTheme />
+        <StyleInclude Source="avares://Veyra.Desktop/Styles/Controls.axaml"/>
+    </Application.Styles>
+
+</Application>

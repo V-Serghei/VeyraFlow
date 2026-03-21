@@ -1,0 +1,22 @@
+[package]
+name = "veyra_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+blake3 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zstd = "0.13"
+
+[build-dependencies]
+cbindgen = "0.27"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

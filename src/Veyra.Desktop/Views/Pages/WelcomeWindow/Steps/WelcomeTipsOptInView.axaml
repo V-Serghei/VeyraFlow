@@ -1,0 +1,83 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+             x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeTipsOptInView"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
+             d:DataContext="{d:DesignInstance vm:WelcomeTipsOptInViewModel, IsDesignTimeCreatable=True}"
+             x:DataType="vm:WelcomeTipsOptInViewModel">
+    <Grid Margin="16" ColumnDefinitions="*,8,360" ColumnSpacing="0">
+        <Border Grid.Column="0" Classes="sidebar" Padding="24" Margin="0,0,12,0" MinWidth="360">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="10">
+                <TextBlock Text="{loc:Tr welcome.tips_title}" Classes="h1"/>
+                <TextBlock Text="{loc:Tr welcome.tips_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+
+                <Border Classes="card" Padding="14" Margin="0,6,0,0">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{loc:Tr welcome.tips_include}" Classes="label"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_context}"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_errors}"/>
+                        <TextBlock Text="{loc:Tr welcome.tip_actions}"/>
+                    </StackPanel>
+                </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <GridSplitter Grid.Column="1"
+                      Width="8"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      ResizeDirection="Columns"
+                      ResizeBehavior="PreviousAndNext"/>
+
+        <Border Grid.Column="2" Classes="panel" Padding="24" MinWidth="280">
+            <StackPanel Spacing="14" VerticalAlignment="Center">
+                <TextBlock Text="{loc:Tr welcome.learning_mode}" Classes="h2"/>
+                <TextBlock Text="{loc:Tr welcome.learning_mode_hint}" Classes="muted"/>
+
+                <Border Classes="card" Padding="14">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="{loc:Tr welcome.experience_mode_title}" Classes="label"/>
+
+                        <Border Classes="metric-card" Padding="12">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                <RadioButton Grid.Column="0"
+                                             GroupName="experience-mode"
+                                             IsChecked="{Binding IsBasicModeSelected, Mode=TwoWay}"/>
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock Text="{loc:Tr experience.option.basic}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{loc:Tr experience.option.basic.description}" Classes="muted" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Classes="metric-card" Padding="12">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                <RadioButton Grid.Column="0"
+                                             GroupName="experience-mode"
+                                             IsChecked="{Binding IsProfessionalModeSelected, Mode=TwoWay}"/>
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock Text="{loc:Tr experience.option.professional}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{loc:Tr experience.option.professional.description}" Classes="muted" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnDefinitions="*,Auto" Margin="0,8,0,0">
+                    <TextBlock Grid.Column="0" Text="{loc:Tr welcome.enable_tips}" VerticalAlignment="Center"/>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding EnableTips, Mode=TwoWay}"/>
+                </Grid>
+
+                <TextBlock Text="{loc:Tr welcome.enable_tips_hint}" Classes="muted" TextWrapping="Wrap"/>
+
+                <Button Content="{loc:Tr common.continue}" Height="40" Command="{Binding ContinueCommand}" Classes="primary"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>
+
