@@ -14,6 +14,7 @@ using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Storage;
@@ -22,12 +23,14 @@ namespace Veyra.Desktop.ViewModels.Windows;
 
 public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 {
-    private readonly IMediator _mediator;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly IWindowService _windows;
     private readonly ILogger<CreateRepositoryWindowViewModel> _log;
     private readonly IRepositoryRetentionDefaultsApplier _retentionDefaultsApplier;
+    private readonly List<RepositoryBusyFileDto> _retryableBusyFiles = [];
 
     private int _stepIndex;
+    private int _createdRepositoryId;
     private string? _lastProgressLogSignature;
 
     public event Action? RequestClose;
@@ -83,9 +86,17 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     public int TrackedFolderCount => string.IsNullOrWhiteSpace(DirectoryPath) ? 0 : 1;
     public bool HasProgressLog => ProgressLogItems.Count > 0;
     public bool ShowDeterminateProgressValue => ProgressPercent > 0;
+    public bool ShowAnimatedActivity => IsBusy;
     public string ProgressDisplayText => ShowDeterminateProgressValue
         ? $"{ProgressPercent}%"
         : Loc.T("create_repo.in_progress");
+    public bool ShowCreateSuccessBanner => IsCompleted && !HasRetryableBusyFiles;
+    public bool HasRetryableBusyFiles => _retryableBusyFiles.Count > 0;
+    public bool HasRetryableBusyFilesPreview => !string.IsNullOrWhiteSpace(RetryableBusyFilesPreview);
+    public string RetryableBusyFilesSummary => HasRetryableBusyFiles
+        ? Loc.F("create_repo.warning_busy_files_body", _retryableBusyFiles.Count)
+        : string.Empty;
+    public string RetryableBusyFilesPreview => BuildBusyFilesPreview();
 
     public ObservableCollection<RepositoryFormatOptionViewModel> Formats { get; } = [];
     public ObservableCollection<FormatCategoryItemViewModel> FormatCategories { get; } = [];
@@ -97,14 +108,15 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     public IAsyncRelayCommand BrowseDirectoryCommand { get; }
     public IRelayCommand AddCustomFormatCommand { get; }
     public IRelayCommand<FormatCategoryItemViewModel?> ToggleFormatCategoryCommand { get; }
+    public IAsyncRelayCommand RetryUnavailableFilesCommand { get; }
 
     public CreateRepositoryWindowViewModel(
-        IMediator mediator,
+        IServiceScopeExecutor scopeExecutor,
         IWindowService windows,
         IRepositoryRetentionDefaultsApplier retentionDefaultsApplier,
         ILogger<CreateRepositoryWindowViewModel> log)
     {
-        _mediator = mediator;
+        _scopeExecutor = scopeExecutor;
         _windows = windows;
         _retentionDefaultsApplier = retentionDefaultsApplier;
         _log = log;
@@ -115,6 +127,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         BrowseDirectoryCommand = new AsyncRelayCommand(BrowseDirectoryAsync, () => !IsBusy);
         AddCustomFormatCommand = new RelayCommand(AddCustomFormat, () => !IsBusy);
         ToggleFormatCategoryCommand = new RelayCommand<FormatCategoryItemViewModel?>(ToggleFormatCategory, _ => !IsBusy);
+        RetryUnavailableFilesCommand = new AsyncRelayCommand(RetryUnavailableFilesAsync, CanRetryUnavailableFiles);
 
         LocalizationManager.Instance.LanguageChanged += (_, _) =>
         {
@@ -183,7 +196,13 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         RefreshCommands();
     }
 
-    partial void OnIsBusyChanged(bool value) => RefreshCommands();
+    partial void OnIsBusyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowAnimatedActivity));
+        RefreshCommands();
+    }
+    partial void OnIsCompletedChanged(bool value)
+        => OnPropertyChanged(nameof(ShowCreateSuccessBanner));
     partial void OnCustomFormatChanged(string value) => RefreshCommands();
 
     private void RefreshCommands()
@@ -193,6 +212,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         BrowseDirectoryCommand.NotifyCanExecuteChanged();
         AddCustomFormatCommand.NotifyCanExecuteChanged();
         ToggleFormatCategoryCommand.NotifyCanExecuteChanged();
+        RetryUnavailableFilesCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(NextButtonText));
     }
 
@@ -321,6 +341,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             IsBusy = true;
             IsCompleted = false;
             ErrorMessage = null;
+            _createdRepositoryId = 0;
             ProgressPercent = 0;
             ProgressMessage = Loc.T("create_repo.progress_start");
             FilesProcessed = 0;
@@ -329,6 +350,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             TrackedFilesPreviewCount = 0;
             IsProgressIndeterminate = true;
             _lastProgressLogSignature = null;
+            SetRetryableBusyFiles(Array.Empty<RepositoryBusyFileDto>());
             ProgressLogItems.Clear();
             OnPropertyChanged(nameof(HasProgressLog));
             AppendProgressLog(Loc.T("create_repo.progress_start"), 0);
@@ -342,38 +364,17 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 Loc.F("create_repo.progress_counting_files_result", previewMetrics.TotalFiles, previewMetrics.TrackedFiles),
                 previewMetrics.TotalFiles);
 
-            var progress = new Progress<RepositoryCreationProgressDto>(p =>
-            {
-                ProgressMessage = p.Message;
-                FilesProcessed = p.FilesProcessed;
-                FilesTotal = p.FilesTotal;
+            var progress = new Progress<RepositoryCreationProgressDto>(ApplyCreationProgress);
 
-                var trackedFiles = Math.Max(p.FilesProcessed, p.FilesTotal);
-                if (trackedFiles > TrackedFilesPreviewCount)
-                    TrackedFilesPreviewCount = trackedFiles;
-
-                if (TryGetReliableProgressPercent(p, out var nextPercent))
-                {
-                    if (nextPercent < ProgressPercent)
-                        nextPercent = ProgressPercent;
-
-                    ProgressPercent = nextPercent;
-                    IsProgressIndeterminate = false;
-                }
-                else
-                {
-                    IsProgressIndeterminate = true;
-                }
-
-                AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
-            });
-
-            var result = await _mediator.Send(new CreateRepositoryWithFormatsCommand(
+            var command = new CreateRepositoryWithFormatsCommand(
                 RepositoryName,
                 Description,
                 DirectoryPath,
                 SelectedFormats.ToList(),
-                progress));
+                progress);
+
+            var result = await _scopeExecutor.ExecuteAsync<IMediator, Veyra.Application.Common.Results.OperationResult<RepositoryCreationOutcomeDto>>(
+                (mediator, token) => mediator.Send(command, token));
 
             if (!result.Success)
             {
@@ -384,19 +385,107 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 return;
             }
 
-            if (result.Value is int repositoryId)
-                await _retentionDefaultsApplier.ApplyToRepositoryAsync(repositoryId);
+            if (result.Value is null || result.Value.RepositoryId <= 0)
+            {
+                ErrorMessage = Loc.T("create_repo.error_create_failed");
+                ProgressMessage = Loc.T("create_repo.error_progress_label");
+                IsProgressIndeterminate = false;
+                AppendProgressLog(ErrorMessage, FilesFoundCount);
+                return;
+            }
+
+            _createdRepositoryId = result.Value.RepositoryId;
+            await _retentionDefaultsApplier.ApplyToRepositoryAsync(_createdRepositoryId);
+            SetRetryableBusyFiles(result.Value.BusyFilesSafe);
 
             ProgressPercent = 100;
-            ProgressMessage = Loc.T("create_repo.success_progress_label");
+            ProgressMessage = result.Value.HasBusyFiles
+                ? Loc.F("create_repo.warning_busy_files_progress_label", result.Value.BusyFilesCount)
+                : Loc.T("create_repo.success_progress_label");
             IsProgressIndeterminate = false;
             IsCompleted = true;
-            AppendProgressLog(Loc.T("create_repo.success_progress_label"), FilesFoundCount);
+            AppendProgressLog(
+                result.Value.HasBusyFiles
+                    ? Loc.F("create_repo.warning_busy_files_log", result.Value.BusyFilesCount)
+                    : Loc.T("create_repo.success_progress_label"),
+                FilesFoundCount);
             RefreshCommands();
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to create repository in wizard");
+            ErrorMessage = Loc.T("create_repo.error_unhandled");
+            ProgressMessage = Loc.T("create_repo.error_progress_label");
+            IsProgressIndeterminate = false;
+            AppendProgressLog(ErrorMessage, FilesFoundCount);
+        }
+        finally
+        {
+            IsBusy = false;
+            IsProgressIndeterminate = false;
+            RefreshCommands();
+        }
+    }
+
+    private async Task RetryUnavailableFilesAsync()
+    {
+        if (!CanRetryUnavailableFiles())
+            return;
+
+        try
+        {
+            IsBusy = true;
+            IsCompleted = false;
+            ErrorMessage = null;
+            ProgressPercent = 0;
+            ProgressMessage = Loc.T("create_repo.retry_start");
+            IsProgressIndeterminate = true;
+            AppendProgressLog(Loc.T("create_repo.retry_start"), FilesFoundCount);
+            await Task.Yield();
+
+            var progress = new Progress<RepositoryScanProgressDto>(p =>
+                ApplyCreationProgress(new RepositoryCreationProgressDto(
+                    p.Stage,
+                    p.Percent,
+                    p.FilesProcessed,
+                    p.FilesTotal,
+                    p.Message)));
+
+            var command = new ScanRepositoryCommand(
+                _createdRepositoryId,
+                progress,
+                new RepositoryScanOptionsDto(
+                    SaveFileVersions: true,
+                    TriggerOverride: "retry_busy_files"));
+
+            var result = await _scopeExecutor.ExecuteAsync<IMediator, Veyra.Application.Common.Results.OperationResult<RepositoryScanResultDto>>(
+                (mediator, token) => mediator.Send(command, token));
+
+            if (!result.Success || result.Value is null)
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "create_repo.error_create_failed");
+                ProgressMessage = Loc.T("create_repo.error_progress_label");
+                IsProgressIndeterminate = false;
+                AppendProgressLog(ErrorMessage, FilesFoundCount);
+                return;
+            }
+
+            SetRetryableBusyFiles(result.Value.BusyFilesSafe);
+            ProgressPercent = 100;
+            ProgressMessage = result.Value.HasBusyFiles
+                ? Loc.F("create_repo.warning_busy_files_progress_label", result.Value.BusyFilesCount)
+                : Loc.T("create_repo.retry_success_progress_label");
+            IsProgressIndeterminate = false;
+            IsCompleted = true;
+            AppendProgressLog(
+                result.Value.HasBusyFiles
+                    ? Loc.F("create_repo.warning_busy_files_log", result.Value.BusyFilesCount)
+                    : Loc.T("create_repo.retry_success_progress_label"),
+                FilesFoundCount);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to retry unavailable files for repository {RepositoryId}", _createdRepositoryId);
             ErrorMessage = Loc.T("create_repo.error_unhandled");
             ProgressMessage = Loc.T("create_repo.error_progress_label");
             IsProgressIndeterminate = false;
@@ -515,6 +604,63 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
         percent = 0;
         return false;
+    }
+
+    private bool CanRetryUnavailableFiles()
+        => !IsBusy && _createdRepositoryId > 0 && HasRetryableBusyFiles;
+
+    private void ApplyCreationProgress(RepositoryCreationProgressDto p)
+    {
+        ProgressMessage = p.Message;
+        FilesProcessed = p.FilesProcessed;
+        FilesTotal = p.FilesTotal;
+
+        var trackedFiles = Math.Max(p.FilesProcessed, p.FilesTotal);
+        if (trackedFiles > TrackedFilesPreviewCount)
+            TrackedFilesPreviewCount = trackedFiles;
+
+        if (TryGetReliableProgressPercent(p, out var nextPercent))
+        {
+            if (nextPercent < ProgressPercent)
+                nextPercent = ProgressPercent;
+
+            ProgressPercent = nextPercent;
+            IsProgressIndeterminate = false;
+        }
+        else
+        {
+            IsProgressIndeterminate = true;
+        }
+
+        AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
+    }
+
+    private void SetRetryableBusyFiles(IReadOnlyCollection<RepositoryBusyFileDto> busyFiles)
+    {
+        _retryableBusyFiles.Clear();
+        _retryableBusyFiles.AddRange(busyFiles);
+        OnPropertyChanged(nameof(HasRetryableBusyFiles));
+        OnPropertyChanged(nameof(HasRetryableBusyFilesPreview));
+        OnPropertyChanged(nameof(RetryableBusyFilesSummary));
+        OnPropertyChanged(nameof(RetryableBusyFilesPreview));
+        OnPropertyChanged(nameof(ShowCreateSuccessBanner));
+        RefreshCommands();
+    }
+
+    private string BuildBusyFilesPreview()
+    {
+        if (_retryableBusyFiles.Count == 0)
+            return string.Empty;
+
+        var preview = _retryableBusyFiles
+            .Take(3)
+            .Select(file => file.FullPath)
+            .ToList();
+
+        if (_retryableBusyFiles.Count > preview.Count)
+            preview.Add(Loc.F("create_repo.warning_busy_files_more", _retryableBusyFiles.Count - preview.Count));
+
+        return string.Join(Environment.NewLine, preview);
     }
 
     private static async Task<(int TotalFiles, int TrackedFiles)> CountDirectoryMetricsAsync(

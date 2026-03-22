@@ -2,14 +2,21 @@ namespace Veyra.Application.DTOs;
 
 public sealed record SnapshotSaveResultDto(
     bool SnapshotCreated,
-    bool NoChangesDetected)
+    bool NoChangesDetected,
+    IReadOnlyList<RepositoryBusyFileDto>? BusyFiles = null)
 {
-    public static SnapshotSaveResultDto Created()
-        => new(true, false);
+    public IReadOnlyList<RepositoryBusyFileDto> BusyFilesSafe { get; } =
+        BusyFiles ?? Array.Empty<RepositoryBusyFileDto>();
+
+    public int BusyFilesCount => BusyFilesSafe.Count;
+    public bool HasBusyFiles => BusyFilesCount > 0;
+
+    public static SnapshotSaveResultDto Created(IReadOnlyList<RepositoryBusyFileDto>? busyFiles = null)
+        => new(true, false, busyFiles);
 
     public static SnapshotSaveResultDto NoChanges()
-        => new(false, true);
+        => new(false, true, Array.Empty<RepositoryBusyFileDto>());
 
     public static SnapshotSaveResultDto Skipped()
-        => new(false, false);
+        => new(false, false, Array.Empty<RepositoryBusyFileDto>());
 }

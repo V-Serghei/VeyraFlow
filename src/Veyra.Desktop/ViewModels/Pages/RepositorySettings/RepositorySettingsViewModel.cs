@@ -25,6 +25,7 @@ using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Connectivity.Models;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Storage;
@@ -41,7 +42,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private const string SafeDefaultRetentionTriggerFilter = "automatic";
     private static readonly TimeSpan CloudSyncStatusRefreshInterval = TimeSpan.FromSeconds(2);
 
-    private readonly IMediator _mediator;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly IWindowService _windows;
     private readonly IRepositoryCloudSyncOrchestrator _cloudSync;
     private readonly ICloudSyncService _cloudSyncService;
@@ -166,7 +167,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     ];
 
     public RepositorySettingsViewModel(
-        IMediator mediator,
+        IServiceScopeExecutor scopeExecutor,
         IWindowService windows,
         IRepositoryCloudSyncOrchestrator cloudSync,
         ICloudSyncService cloudSyncService,
@@ -177,7 +178,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         ISensitiveActionGuard sensitiveActionGuard,
         ILogger<RepositorySettingsViewModel> log)
     {
-        _mediator = mediator;
+        _scopeExecutor = scopeExecutor;
         _windows = windows;
         _cloudSync = cloudSync;
         _cloudSyncService = cloudSyncService;
@@ -337,14 +338,14 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             _log.LogInformation("Loading repository settings. RepositoryId {RepositoryId}", repositoryId);
             await Task.Yield();
 
-            var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId));
+            var repo = await SendMediatorAsync(new GetRepositoryDetailQuery(repositoryId));
             if (repo is null)
             {
                 ErrorMessage = Loc.T("repo_settings.error_not_found");
                 return;
             }
 
-            var allFormats = await _mediator.Send(new GetTrackedExtensionsQuery());
+            var allFormats = await SendMediatorAsync(new GetTrackedExtensionsQuery());
             HasCloudAccess = (await _userProfiles.GetActiveProfileAsync()) is not null;
 
             RepositoryId = repo.Id;
@@ -570,7 +571,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var syncRetryDelay = ParseIntOrDefault(SyncRetryBaseDelaySeconds, 30, 5, 600);
             var strategy = RepositorySyncConflictStrategies.Normalize(SyncConflictStrategy);
 
-            var result = await _mediator.Send(new UpdateRepositoryConfigurationCommand(
+            var result = await SendMediatorAsync(new UpdateRepositoryConfigurationCommand(
                 RepositoryId,
                 RepositoryName,
                 Description,
@@ -890,7 +891,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             IsLoading = true;
             ErrorMessage = null;
 
-            await _mediator.Send(new DeleteRepositoryCommand(RepositoryId));
+            await SendMediatorAsync(new DeleteRepositoryCommand(RepositoryId));
             RepositoryDeleted?.Invoke();
         }
         catch (Exception ex)
@@ -1445,7 +1446,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 IsRetentionProgressIndeterminate = false;
             });
 
-            var result = await _mediator.Send(
+            var result = await SendMediatorAsync(
                 new RunRepositoryRetentionCommand(
                     RepositoryId,
                     dryRun,
@@ -2048,7 +2049,10 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         try
         {
             var repositoryId = RepositoryId;
-            var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId), ct);
+            if (IsLoading)
+                return;
+
+            var repo = await SendMediatorAsync(new GetRepositoryDetailQuery(repositoryId), ct);
             if (repo is null || RepositoryId != repositoryId)
                 return;
 
@@ -2078,6 +2082,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             ConnectivityState.CloudUnavailable => Loc.T("ui_error.cloud_temporarily_unavailable"),
             _ => null
         };
+
+    private Task<TResponse> SendMediatorAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct = default)
+        => _scopeExecutor.ExecuteAsync<IMediator, TResponse>((mediator, token) => mediator.Send(request, token), ct);
+
+    private Task SendMediatorAsync(IRequest request, CancellationToken ct = default)
+        => _scopeExecutor.ExecuteAsync<IMediator>((mediator, token) => mediator.Send(request, token), ct);
 
     private static string FormatNeverOrDate(DateTime? value)
         => value is null

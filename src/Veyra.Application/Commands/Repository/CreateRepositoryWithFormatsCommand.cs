@@ -10,4 +10,4 @@ public sealed record CreateRepositoryWithFormatsCommand(
     string DirectoryPath,
     IReadOnlyCollection<string> Formats,
     IProgress<RepositoryCreationProgressDto>? Progress = null)
-    : IRequest<OperationResult<int>>;
+    : IRequest<OperationResult<RepositoryCreationOutcomeDto>>;

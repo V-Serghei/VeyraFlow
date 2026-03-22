@@ -124,7 +124,7 @@
                                 <ProgressBar Classes="loading-progress"
                                              Height="4"
                                              IsIndeterminate="True"
-                                             IsVisible="{Binding IsProgressIndeterminate}"/>
+                                             IsVisible="{Binding ShowAnimatedActivity}"/>
                             </StackPanel>
 
                             <Border Classes="metric-card">
@@ -179,10 +179,31 @@
                                 </Grid>
                             </Border>
 
-                            <Border Classes="card" BorderBrush="{DynamicResource VeyraSuccessBrush}" Background="{DynamicResource VeyraDiffAddBgBrush}" IsVisible="{Binding IsCompleted}">
+                            <Border Classes="card" BorderBrush="{DynamicResource VeyraSuccessBrush}" Background="{DynamicResource VeyraDiffAddBgBrush}" IsVisible="{Binding ShowCreateSuccessBanner}">
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="{loc:Tr create_repo.success_banner_title}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
                                     <TextBlock Text="{loc:Tr create_repo.success_banner_body}" TextWrapping="Wrap" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card"
+                                    BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                    IsVisible="{Binding HasRetryableBusyFiles}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="{loc:Tr create_repo.warning_busy_files_title}"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesSummary}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesPreview}"
+                                               TextWrapping="Wrap"
+                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                               FontSize="12"
+                                               IsVisible="{Binding HasRetryableBusyFilesPreview}"/>
+                                    <Button Content="{loc:Tr create_repo.retry_unavailable_files}"
+                                            Command="{Binding RetryUnavailableFilesCommand}"
+                                            HorizontalAlignment="Left"
+                                            Classes="primary"/>
                                 </StackPanel>
                             </Border>
 
@@ -225,7 +246,7 @@
                         <ProgressBar Classes="loading-progress"
                                      Height="4"
                                      IsIndeterminate="True"
-                                     IsVisible="{Binding IsProgressIndeterminate}"/>
+                                     IsVisible="{Binding ShowAnimatedActivity}"/>
                     </StackPanel>
                     <TextBlock Text="{Binding ProgressDisplayText}"
                                FontWeight="SemiBold"

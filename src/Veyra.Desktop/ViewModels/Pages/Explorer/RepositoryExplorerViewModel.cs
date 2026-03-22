@@ -20,6 +20,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Services.Storage;
@@ -37,6 +38,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private const int ExplorerFilterDebounceMs = 100;
 
     private readonly IMediator _mediator;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly IWindowService _windows;
     private readonly ILogger<RepositoryExplorerViewModel> _log;
     private readonly IRepositoryFsEventQueueService _fsEventQueue;
@@ -84,6 +86,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private bool _suppressFileVersionsCollectionChanged;
     private bool _suppressComparableVersionsCollectionChanged;
     private SnapshotHistoryWindow? _snapshotHistoryWindow;
+
+    private enum ScanExecutionOutcome
+    {
+        Completed,
+        Deferred,
+        Failed
+    }
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -452,12 +461,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     public RepositoryExplorerViewModel(
         IMediator mediator,
+        IServiceScopeExecutor scopeExecutor,
         IWindowService windows,
         ILogger<RepositoryExplorerViewModel> log,
         IRepositoryFsEventQueueService fsEventQueue,
         IRepositoryExplorerFilterStore filterStore)
     {
         _mediator = mediator;
+        _scopeExecutor = scopeExecutor;
         _windows = windows;
         _log = log;
         _fsEventQueue = fsEventQueue;
@@ -1708,7 +1719,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         VersionActionMessage = Loc.F("explorer.diff_ready_message", beforeVersion.VersionName, afterVersion.VersionName, value.AddedLines, value.RemovedLines);
     }
 
-    private async Task<bool> ExecuteScanAsync(
+    private async Task<ScanExecutionOutcome> ExecuteScanAsync(
         bool saveFileVersions,
         string triggerOverride,
         string fallbackMessage,
@@ -1718,13 +1729,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         IReadOnlyList<string>? snapshotTags = null)
     {
         if (RepositoryId == 0)
-            return false;
+            return ScanExecutionOutcome.Failed;
 
         if (!await _scanGate.WaitAsync(0))
         {
             if (showErrors)
                 ErrorMessage = Loc.T("explorer.error_scan_already_running");
-            return false;
+            return ScanExecutionOutcome.Deferred;
         }
 
         var success = false;
@@ -1750,20 +1761,30 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     ScanMessage = p.Message;
             });
 
-            var result = await _mediator.Send(new ScanRepositoryCommand(
+            var command = new ScanRepositoryCommand(
                 RepositoryId,
                 progress,
                 new RepositoryScanOptionsDto(
                     SaveFileVersions: saveFileVersions,
                     TriggerOverride: triggerOverride,
                     SnapshotTitle: snapshotTitle,
-                    SnapshotTags: snapshotTags)));
+                    SnapshotTags: snapshotTags));
+
+            var result = await _scopeExecutor.ExecuteAsync<IMediator, OperationResult<RepositoryScanResultDto>>(
+                (mediator, token) => mediator.Send(command, token));
 
             if (!result.Success)
             {
                 if (showErrors)
                     ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "explorer.error_scan_finished_with_error");
-                return false;
+                return ScanExecutionOutcome.Failed;
+            }
+
+            if (result.Value?.SkippedBecauseScanInProgress == true)
+            {
+                if (showErrors)
+                    ErrorMessage = Loc.T("explorer.error_scan_already_running");
+                return ScanExecutionOutcome.Deferred;
             }
 
             if (result.Value?.SnapshotCreated == true)
@@ -1773,7 +1794,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 VersionActionMessage = successMessage;
 
             success = true;
-            return true;
+            return ScanExecutionOutcome.Completed;
         }
         catch (Exception ex)
         {
@@ -1785,7 +1806,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             if (showErrors)
                 ErrorMessage = Loc.T("explorer.error_scan_failed");
-            return false;
+            return ScanExecutionOutcome.Failed;
         }
         finally
         {
@@ -2843,22 +2864,24 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         _lastLiveSyncUtc = DateTime.UtcNow;
 
-        var success = await ExecuteScanAsync(
+        var scanOutcome = await ExecuteScanAsync(
             saveFileVersions: _autoCaptureFileVersions,
             triggerOverride: _autoCaptureFileVersions ? "auto_snapshot_live_watcher" : "sync_live_watcher",
             fallbackMessage: Loc.T("explorer.scan.syncing_file_changes"),
             showErrors: false,
             successMessage: null);
 
-        if (success)
+        if (scanOutcome == ScanExecutionOutcome.Completed)
             await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = string.Empty);
-        else if (manualTrigger)
+        else if (scanOutcome == ScanExecutionOutcome.Failed && manualTrigger)
             await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_scan_failed"));
 
         try
         {
-            if (success)
+            if (scanOutcome == ScanExecutionOutcome.Completed)
                 await _fsEventQueue.CompleteAsync(RepositoryId, lease.ItemIds);
+            else if (scanOutcome == ScanExecutionOutcome.Deferred)
+                await _fsEventQueue.RequeueAsync(RepositoryId, lease.ItemIds, "live_sync_scan_deferred");
             else
                 await _fsEventQueue.RequeueAsync(RepositoryId, lease.ItemIds, "live_sync_scan_failed");
         }
@@ -2872,7 +2895,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await RefreshLiveSyncIndicatorsAsync();
 
         if (IsLiveSyncActive && await _fsEventQueue.HasPendingAsync(RepositoryId))
-            ArmLiveSyncTimer(success ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
+            ArmLiveSyncTimer(scanOutcome == ScanExecutionOutcome.Completed ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
     }
 
     private async Task RefreshLiveSyncIndicatorsAsync(CancellationToken ct = default)
@@ -2901,7 +2924,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             {
                 LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_root_missing");
             }
-            else if (string.IsNullOrWhiteSpace(LiveSyncLastIssue) && !string.IsNullOrWhiteSpace(status.LastError))
+            else if (string.IsNullOrWhiteSpace(LiveSyncLastIssue)
+                     && !string.IsNullOrWhiteSpace(status.LastError)
+                     && !IsBenignLiveSyncQueueError(status.LastError))
             {
                 LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", status.LastError);
             }
@@ -2924,6 +2949,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             }
         }
     }
+
+    private static bool IsBenignLiveSyncQueueError(string? error)
+        => string.Equals(error, "live_sync_scan_deferred", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(error, "live_sync_scan_in_progress", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> NormalizeTrackedExtensions(IEnumerable<string> values)
     {

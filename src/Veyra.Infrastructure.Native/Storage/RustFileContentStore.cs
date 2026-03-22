@@ -257,7 +257,7 @@ internal sealed class RustFileContentStore : IFileContentStore
             fullPath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite | FileShare.Delete,
             bufferSize: DefaultChunkSize,
             useAsync: true);
 

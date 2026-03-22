@@ -265,8 +265,13 @@ public sealed class SnapshotSchedulerService(
                         SaveFileVersions: autoCaptureFileVersions),
                     ct);
 
-                if (autoCaptureFileVersions && result.SnapshotCreated)
+                if (autoCaptureFileVersions && result.SnapshotCreated && !result.HasBusyFiles)
                     await cloudSync.TryPushLatestSnapshotAsync(repositoryId, ct);
+                else if (autoCaptureFileVersions && result.HasBusyFiles)
+                    log.LogWarning(
+                        "Skipping cloud push for scheduled scan because snapshot has busy-file warnings. RepositoryId {RepositoryId}. BusyFiles {BusyFiles}",
+                        repositoryId,
+                        result.BusyFilesCount);
 
                 return;
             }

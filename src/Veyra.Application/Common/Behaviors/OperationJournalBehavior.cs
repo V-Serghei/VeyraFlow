@@ -91,6 +91,8 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
 
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
             await journal.AppendAsync(
                 new Application.DTOs.OperationJournalEntryDto(
                     Id: 0,
@@ -102,7 +104,11 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                     Username: username,
                     Message: message,
                     Details: details),
-                ct);
+                timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            log.LogDebug("Operation journal append timed out for {Action}", action);
         }
         catch (Exception ex)
         {
@@ -113,7 +119,8 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
     private static bool ShouldJournal(Type requestType)
     {
         var ns = requestType.Namespace ?? string.Empty;
-        return ns.StartsWith("Veyra.Application.Commands.", StringComparison.Ordinal);
+        return ns.StartsWith("Veyra.Application.Commands.", StringComparison.Ordinal)
+               && !string.Equals(requestType.Name, "ScanRepositoryCommand", StringComparison.Ordinal);
     }
 
     private static string ResolveCategory(Type requestType)

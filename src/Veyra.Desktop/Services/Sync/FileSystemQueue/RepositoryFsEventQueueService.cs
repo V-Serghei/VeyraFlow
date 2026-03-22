@@ -168,21 +168,34 @@ public sealed class RepositoryFsEventQueueService(
             var state = await LoadStateAsync(ct);
             var now = DateTime.UtcNow;
             var ids = itemIds.ToHashSet();
+            var normalizedError = string.IsNullOrWhiteSpace(error) ? null : error.Trim();
+            var isDeferredReason = IsDeferredRequeueReason(normalizedError);
 
             foreach (var item in state.Items.Where(x => x.RepositoryId == repositoryId && ids.Contains(x.Id)))
             {
                 item.Status = FsEventStatus.Pending;
                 item.UpdatedAtUtc = now;
                 item.RetryCount++;
-                item.LastError = string.IsNullOrWhiteSpace(error) ? null : error;
+                item.LastError = isDeferredReason ? null : normalizedError;
             }
 
             await SaveStateAsync(state, ct);
-            log.LogWarning(
-                "FS event lease requeued. RepositoryId {RepositoryId}. RequeuedItems {RequeuedItems}. Error {Error}",
-                repositoryId,
-                itemIds.Count,
-                error ?? "(none)");
+            if (isDeferredReason)
+            {
+                log.LogInformation(
+                    "FS event lease deferred. RepositoryId {RepositoryId}. RequeuedItems {RequeuedItems}. Reason {Reason}",
+                    repositoryId,
+                    itemIds.Count,
+                    normalizedError ?? "(none)");
+            }
+            else
+            {
+                log.LogWarning(
+                    "FS event lease requeued. RepositoryId {RepositoryId}. RequeuedItems {RequeuedItems}. Error {Error}",
+                    repositoryId,
+                    itemIds.Count,
+                    normalizedError ?? "(none)");
+            }
         }
         finally
         {
@@ -277,6 +290,10 @@ public sealed class RepositoryFsEventQueueService(
         Directory.CreateDirectory(root);
         return Path.Combine(root, "repository-fs-event-queue.json");
     }
+
+    private static bool IsDeferredRequeueReason(string? error)
+        => string.Equals(error, "live_sync_scan_deferred", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(error, "live_sync_scan_in_progress", StringComparison.OrdinalIgnoreCase);
 
     private async Task<RepositoryFsEventQueueState> LoadStateAsync(CancellationToken ct)
     {

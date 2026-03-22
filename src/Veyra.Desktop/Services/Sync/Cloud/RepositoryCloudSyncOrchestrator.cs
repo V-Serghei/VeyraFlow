@@ -380,7 +380,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                     prepared.Formats),
                 ct);
 
-            if (!createResult.Success || createResult.Value <= 0)
+            if (!createResult.Success || createResult.Value?.RepositoryId <= 0)
             {
                 log.LogWarning(
                     "Cloud restore created files but repository bootstrap failed. Name {Name}. Path {Path}. Error {Error}",
@@ -390,9 +390,11 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 continue;
             }
 
+            var restoredRepositoryId = createResult.Value!.RepositoryId;
+
             await mediator.Send(
                 new ScanRepositoryCommand(
-                    createResult.Value,
+                    restoredRepositoryId,
                     Progress: null,
                     new RepositoryScanOptionsDto(
                         SaveFileVersions: true,
