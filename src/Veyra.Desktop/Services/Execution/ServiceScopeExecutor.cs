@@ -13,11 +13,13 @@ public sealed class ServiceScopeExecutor(IServiceScopeFactory scopeFactory) : IS
         where TService : notnull
     {
         ArgumentNullException.ThrowIfNull(operation);
-
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<TService>();
-        ct.ThrowIfCancellationRequested();
-        return await operation(service, ct);
+        return await Task.Run(async () =>
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetRequiredService<TService>();
+            ct.ThrowIfCancellationRequested();
+            return await operation(service, ct).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 
     public async Task ExecuteAsync<TService>(
@@ -26,10 +28,12 @@ public sealed class ServiceScopeExecutor(IServiceScopeFactory scopeFactory) : IS
         where TService : notnull
     {
         ArgumentNullException.ThrowIfNull(operation);
-
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetRequiredService<TService>();
-        ct.ThrowIfCancellationRequested();
-        await operation(service, ct);
+        await Task.Run(async () =>
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetRequiredService<TService>();
+            ct.ThrowIfCancellationRequested();
+            await operation(service, ct).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

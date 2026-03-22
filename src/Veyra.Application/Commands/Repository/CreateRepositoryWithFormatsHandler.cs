@@ -13,15 +13,15 @@ public sealed class CreateRepositoryWithFormatsHandler(
     IRepositoryScanner scanner,
     INativeSetupApplier native,
     ILogger<CreateRepositoryWithFormatsHandler> log)
-    : IRequestHandler<CreateRepositoryWithFormatsCommand, OperationResult<int>>
+    : IRequestHandler<CreateRepositoryWithFormatsCommand, OperationResult<RepositoryCreationOutcomeDto>>
 {
-    public async Task<OperationResult<int>> Handle(CreateRepositoryWithFormatsCommand request, CancellationToken ct)
+    public async Task<OperationResult<RepositoryCreationOutcomeDto>> Handle(CreateRepositoryWithFormatsCommand request, CancellationToken ct)
     {
         try
         {
             var path = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                return OperationResult<int>.Fail("Specified directory does not exist.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("Specified directory does not exist.");
 
             var name = string.IsNullOrWhiteSpace(request.Name)
                 ? Path.GetFileName(path.TrimEnd('\\', '/'))
@@ -29,7 +29,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             var formats = NormalizeFormats(request.Formats);
             if (formats.Count == 0)
-                return OperationResult<int>.Fail("No tracking formats were selected.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("No tracking formats were selected.");
 
             log.LogInformation(
                 "Creating repository. Name {Name}. Path {Path}. Formats {FormatCount}",
@@ -51,7 +51,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
             var repo = allRepos.FirstOrDefault(r => PathEquals(r.DirectoryPath, path));
 
             if (repo is null)
-                return OperationResult<int>.Fail("Failed to create repository for the selected directory.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("Failed to create repository for the selected directory.");
 
             await repositories.UpdateRepositoryAsync(repo.Id, name, request.Description, ct);
 
@@ -115,7 +115,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
                     p.Message));
             });
 
-            await scanner.ScanRepositoryAsync(
+            var scanResult = await scanner.ScanRepositoryAsync(
                 repo.Id,
                 scanProgress,
                 new RepositoryScanOptionsDto(
@@ -125,7 +125,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
-                Math.Max(reportedPercent, 99),
+                Math.Clamp(reportedPercent, 1, 99),
                 lastFilesProcessed,
                 lastFilesTotal,
                 "Applying system configuration"));
@@ -139,13 +139,27 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 lastFilesTotal,
                 "Repository created"));
 
-            log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
-            return OperationResult<int>.Ok(repo.Id);
+            if (scanResult.HasBusyFiles)
+            {
+                log.LogWarning(
+                    "Repository created with busy-file warnings. RepositoryId {RepositoryId}. BusyFiles {BusyFiles}",
+                    repo.Id,
+                    scanResult.BusyFilesCount);
+            }
+            else
+            {
+                log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
+            }
+
+            return OperationResult<RepositoryCreationOutcomeDto>.Ok(
+                new RepositoryCreationOutcomeDto(
+                    repo.Id,
+                    scanResult.BusyFilesSafe));
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Failed to create repository with formats for {Path}", request.DirectoryPath);
-            return OperationResult<int>.Fail(ex.Message);
+            return OperationResult<RepositoryCreationOutcomeDto>.Fail(ex.Message);
         }
     }
 

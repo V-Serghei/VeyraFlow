@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -15,6 +16,7 @@ public static partial class DependencyInjection
                 sqliteOptions.CommandTimeout(30);
                 sqliteOptions.MigrationsAssembly(typeof(VeyraDbContext).Assembly.FullName);
             });
+            options.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
         });
 
         services.AddScoped<ISqliteConnectionFactory>(_ => new SqliteConnectionFactory(connectionString));

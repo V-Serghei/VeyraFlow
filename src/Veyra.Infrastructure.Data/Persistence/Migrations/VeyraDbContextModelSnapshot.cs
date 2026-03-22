@@ -151,10 +151,11 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("BlockHashBlake3")
+                    b.Property<string>("BlockStorageKey")
                         .IsRequired()
                         .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasColumnName("BlockHashBlake3");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
@@ -181,7 +182,7 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BlockHashBlake3");
+                    b.HasIndex("BlockStorageKey");
 
                     b.HasIndex("FileVersionId", "Sequence")
                         .IsUnique();
@@ -496,6 +497,19 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(true);
 
+                    b.Property<bool>("RetentionAllowManualSnapshotCleanup")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("RetentionAutomaticCompactionEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("RetentionAutomaticCompactionWindowHours")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("RetentionEnabled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
@@ -507,6 +521,12 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<string>("RetentionLastStatus")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("RetentionMaintenanceWindowEndHour")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RetentionMaintenanceWindowStartHour")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("RetentionMaxAgeDays")
                         .HasColumnType("INTEGER");
@@ -521,6 +541,13 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(60);
+
+                    b.Property<string>("RetentionStorageMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("delete");
 
                     b.Property<string>("RetentionTriggerFilter")
                         .HasMaxLength(512)
@@ -574,6 +601,16 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ArchiveFilePath")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ArchiveFileSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -585,6 +622,11 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.Property<int>("FileEntries")
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -616,6 +658,8 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("RepositoryId", "CreatedAt");
+
+                    b.HasIndex("RepositoryId", "IsArchived", "CreatedAt");
 
                     b.HasIndex("RepositoryId", "IsDeleted", "CreatedAt");
 

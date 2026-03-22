@@ -87,7 +87,7 @@ public sealed class ScanRepositoryHandlerTests
             return Task.CompletedTask;
         }
 
-        public Task<int> RestoreRepositoriesFromCloudAsync(CancellationToken ct = default)
+        public Task<int> RestoreRepositoriesFromCloudAsync(string? targetRootDirectory = null, CancellationToken ct = default)
             => Task.FromResult(0);
 
         public Task ProcessPendingQueueAsync(CancellationToken ct = default)

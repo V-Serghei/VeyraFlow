@@ -13,7 +13,7 @@
     <Grid x:Name="ExplorerRootGrid" RowDefinitions="Auto,Auto,*" Margin="12" RowSpacing="8">
         <Border Grid.Row="0" Classes="hero">
             <Grid x:Name="ExplorerHeroGrid" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" VerticalAlignment="Center">
-                <Button x:Name="ExplorerBackButton" Grid.Column="0" Command="{Binding BackCommand}" Classes="subtle responsive-icon" ToolTip.Tip="{loc:Tr common.back}">
+                <Button x:Name="ExplorerBackButton" Grid.Column="0" Command="{Binding BackCommand}" Classes="subtle responsive-icon">
                     <Button.Content>
                         <StackPanel Classes="button-content">
                             <TextBlock Classes="button-icon" Text="&#xE72B;"/>
@@ -37,8 +37,7 @@
                            HorizontalAlignment="Right"
                            VerticalAlignment="Center"
                            Margin="0,2,0,0">
-                        <Button ToolTip.Tip="{loc:Tr explorer.tooltip_rescan}"
-                                Command="{Binding RescanCommand}"
+                        <Button Command="{Binding RescanCommand}"
                                 Classes="subtle compact responsive-icon"
                                 Margin="0,0,8,8"
                                 IsEnabled="{Binding CanRunScanActions}">
@@ -53,8 +52,7 @@
                                 Command="{Binding CreateSnapshotCommand}"
                                 Classes="primary compact responsive-icon"
                                 Margin="0,0,8,8"
-                                IsEnabled="{Binding CanCreateSnapshot}"
-                                ToolTip.Tip="{loc:Tr explorer.create_snapshot}">
+                                IsEnabled="{Binding CanCreateSnapshot}">
                             <Button.Content>
                                 <StackPanel Classes="button-content">
                                     <TextBlock Classes="button-icon" Text="&#xE710;"/>
@@ -66,8 +64,7 @@
                                 Command="{Binding ShowSnapshotHistoryCommand}"
                                 Classes="subtle compact responsive-icon"
                                 Margin="0,0,8,8"
-                                IsEnabled="{Binding CanRunScanActions}"
-                                ToolTip.Tip="{loc:Tr explorer.snapshot_history}">
+                                IsEnabled="{Binding CanRunScanActions}">
                             <Button.Content>
                                 <StackPanel Classes="button-content">
                                     <TextBlock Classes="button-icon" Text="&#xE81C;"/>
@@ -78,8 +75,7 @@
                         <Button x:Name="ExplorerOpenSettingsButton"
                                 Command="{Binding OpenSettingsCommand}"
                                 Classes="subtle compact responsive-icon"
-                                Margin="0,0,0,8"
-                                ToolTip.Tip="{loc:Tr common.settings}">
+                                Margin="0,0,0,8">
                             <Button.Content>
                                 <StackPanel Classes="button-content">
                                     <TextBlock Classes="button-icon" Text="&#xE713;"/>
@@ -145,20 +141,18 @@
                               ResizeBehavior="PreviousAndNext"/>
 
                 <Border x:Name="ExplorerCenterPanel" Grid.Column="2" Classes="panel" Margin="10,0" MinWidth="280">
-                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
                         <Border Grid.Row="0" Classes="filter-sheet">
                             <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
                                 <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
                                     <TextBox Grid.Column="0"
                                              Text="{Binding SearchQuery, Mode=TwoWay}"
                                              Classes="compact"
-                                             Watermark="{loc:Tr explorer.search_current_folder}"
-                                             ToolTip.Tip="{loc:Tr explorer.search_tokens_hint}"/>
+                                             Watermark="{loc:Tr explorer.search_current_folder}"/>
 
                                     <Button Grid.Column="1"
                                             Classes="subtle compact responsive-icon"
-                                            Command="{Binding ToggleExplorerFiltersCommand}"
-                                            ToolTip.Tip="{loc:Tr explorer.toggle_filters}">
+                                            Command="{Binding ToggleExplorerFiltersCommand}">
                                         <StackPanel Classes="button-content">
                                             <TextBlock Classes="button-icon" Text="&#xE71C;"/>
                                             <TextBlock Classes="button-label" Text="{Binding ExplorerFilterButtonLabel}"/>
@@ -173,135 +167,7 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="1" Classes="filter-sheet" IsVisible="{Binding IsExplorerFiltersVisible}">
-                            <StackPanel Spacing="14">
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.advanced_filters}" Classes="section-title"/>
-                                        <TextBlock Text="{loc:Tr explorer.filters_hint}" Classes="muted" FontSize="12"/>
-                                    </StackPanel>
-
-                                    <Button Grid.Column="1"
-                                            Content="{loc:Tr explorer.clear_filters}"
-                                            Command="{Binding ClearAdvancedFiltersCommand}"
-                                            Classes="subtle"
-                                            VerticalAlignment="Top"/>
-                                </Grid>
-
-                                <WrapPanel Orientation="Horizontal" Margin="0,0,0,2">
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
-                                        <TextBlock Text="{loc:Tr explorer.filter_type}" Classes="label"/>
-                                        <ComboBox ItemsSource="{Binding EntryTypeFilters}"
-                                                  Classes="compact"
-                                                  SelectedItem="{Binding SelectedEntryTypeFilter, Mode=TwoWay}">
-                                            <ComboBox.SelectionBoxItemTemplate>
-                                                <DataTemplate x:DataType="x:String">
-                                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
-                                                </DataTemplate>
-                                            </ComboBox.SelectionBoxItemTemplate>
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate x:DataType="x:String">
-                                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
-                                        <TextBlock Text="{loc:Tr explorer.filter_extension}" Classes="label"/>
-                                                <ComboBox ItemsSource="{Binding ExtensionFilters}"
-                                                          Classes="compact"
-                                                          SelectedItem="{Binding SelectedExtensionFilter, Mode=TwoWay}">
-                                                    <ComboBox.SelectionBoxItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding .}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.SelectionBoxItemTemplate>
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding .}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                    </StackPanel>
-
-                                    <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
-                                        <TextBlock Text="{loc:Tr explorer.filter_modified}" Classes="label"/>
-                                        <ComboBox ItemsSource="{Binding ModifiedWindowFilters}"
-                                                  Classes="compact"
-                                                  SelectedItem="{Binding SelectedModifiedWindowFilter, Mode=TwoWay}">
-                                            <ComboBox.SelectionBoxItemTemplate>
-                                                <DataTemplate x:DataType="x:String">
-                                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
-                                                </DataTemplate>
-                                            </ComboBox.SelectionBoxItemTemplate>
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate x:DataType="x:String">
-                                                    <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                    </StackPanel>
-
-                                    <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
-                                        <TextBlock Text="{loc:Tr explorer.filter_min_size_mb}" Classes="label"/>
-                                        <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
-                                    </StackPanel>
-
-                                    <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
-                                        <TextBlock Text="{loc:Tr explorer.filter_max_size_mb}" Classes="label"/>
-                                        <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
-                                    </StackPanel>
-                                </WrapPanel>
-
-                                <Border Classes="metric-card">
-                                    <StackPanel Spacing="12">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Text="{loc:Tr explorer.saved_filters}" Classes="section-title"/>
-                                            <TextBlock Text="{loc:Tr explorer.saved_filters_hint}" Classes="muted" FontSize="12"/>
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="10">
-                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                                                <TextBox Grid.Column="0"
-                                                         Text="{Binding SavedExplorerFilterName, Mode=TwoWay}"
-                                                         Classes="compact"
-                                                         Watermark="{loc:Tr explorer.saved_filter_name}"/>
-                                                <Button Grid.Column="1"
-                                                        Content="{loc:Tr explorer.save_filter}"
-                                                        Command="{Binding SaveCurrentExplorerFilterCommand}"
-                                                        Classes="compact"/>
-                                            </Grid>
-
-                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                                                <ComboBox Grid.Column="0"
-                                                          Classes="compact"
-                                                          ItemsSource="{Binding SavedExplorerFilters}"
-                                                          SelectedItem="{Binding SelectedExplorerSavedFilter, Mode=TwoWay}">
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="explorer:RepositoryExplorerSavedFilterViewModel">
-                                                            <TextBlock Text="{Binding Name}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                                <Button Grid.Column="1"
-                                                        Content="{loc:Tr common.apply}"
-                                                        Classes="compact"
-                                                        Command="{Binding ApplyExplorerSavedFilterCommand}"
-                                                        CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
-                                                <Button Grid.Column="2"
-                                                        Content="{loc:Tr common.delete}"
-                                                        Classes="danger compact"
-                                                        Command="{Binding DeleteExplorerSavedFilterCommand}"
-                                                        CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
-                                            </Grid>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </Border>
-
-                        <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="6">
+                        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="6">
                             <Grid x:Name="ExplorerItemsHeaderGrid" Grid.Row="0" ColumnDefinitions="36,3.2*,1*,0.9*,1*" Margin="0,2,0,2" ColumnSpacing="8" Classes="explorer-file-grid">
                                     <TextBlock Grid.Column="1" Text="{loc:Tr common.name}" Classes="label"/>
                                     <TextBlock Grid.Column="2" Text="{loc:Tr common.type}" Classes="label"/>
@@ -341,7 +207,151 @@
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
-                        </Grid>
+                            </Grid>
+
+                            <Border Classes="overlay-backdrop"
+                                    Grid.RowSpan="2"
+                                    IsVisible="{Binding IsExplorerFiltersVisible}"
+                                    PointerPressed="OnExplorerFiltersBackdropPressed"/>
+
+                            <Border Classes="popover-panel"
+                                    Grid.RowSpan="2"
+                                    Width="430"
+                                    MaxWidth="430"
+                                    Margin="0,0,0,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    IsVisible="{Binding IsExplorerFiltersVisible}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              MaxHeight="620">
+                                    <StackPanel Spacing="14">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{loc:Tr explorer.advanced_filters}" Classes="section-title"/>
+                                                <TextBlock Text="{loc:Tr explorer.filters_hint}" Classes="muted" FontSize="12"/>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Content="{loc:Tr explorer.clear_filters}"
+                                                    Command="{Binding ClearAdvancedFiltersCommand}"
+                                                    Classes="subtle"
+                                                    VerticalAlignment="Top"/>
+                                        </Grid>
+
+                                        <WrapPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_type}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding EntryTypeFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedEntryTypeFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_extension}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding ExtensionFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedExtensionFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding .}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding .}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_modified}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding ModifiedWindowFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedModifiedWindowFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_min_size_mb}" Classes="label"/>
+                                                <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
+                                            </StackPanel>
+
+                                            <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_max_size_mb}" Classes="label"/>
+                                                <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
+                                            </StackPanel>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card">
+                                            <StackPanel Spacing="12">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{loc:Tr explorer.saved_filters}" Classes="section-title"/>
+                                                    <TextBlock Text="{loc:Tr explorer.saved_filters_hint}" Classes="muted" FontSize="12"/>
+                                                </StackPanel>
+
+                                                <StackPanel Spacing="10">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                        <TextBox Grid.Column="0"
+                                                                 Text="{Binding SavedExplorerFilterName, Mode=TwoWay}"
+                                                                 Classes="compact"
+                                                                 Watermark="{loc:Tr explorer.saved_filter_name}"/>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr explorer.save_filter}"
+                                                                Command="{Binding SaveCurrentExplorerFilterCommand}"
+                                                                Classes="compact"/>
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                                        <ComboBox Grid.Column="0"
+                                                                  Classes="compact"
+                                                                  ItemsSource="{Binding SavedExplorerFilters}"
+                                                                  SelectedItem="{Binding SelectedExplorerSavedFilter, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:RepositoryExplorerSavedFilterViewModel">
+                                                                    <TextBlock Text="{Binding Name}"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr common.apply}"
+                                                                Classes="compact"
+                                                                Command="{Binding ApplyExplorerSavedFilterCommand}"
+                                                                CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                                        <Button Grid.Column="2"
+                                                                Content="{loc:Tr common.delete}"
+                                                                Classes="danger compact"
+                                                                Command="{Binding DeleteExplorerSavedFilterCommand}"
+                                                                CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
                     </Grid>
                 </Border>
 
@@ -352,710 +362,318 @@
                               ResizeDirection="Columns"
                               ResizeBehavior="PreviousAndNext"/>
 
-                <Border x:Name="ExplorerDetailsPanel" Grid.Column="4" Classes="panel" Margin="10,0,0,0" MinWidth="240">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="{loc:Tr explorer.pending_changes}" Classes="section-title"/>
-                            <TextBlock Classes="muted" Text="{Binding LastSnapshotLabel}"/>
-                            <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.88" TextWrapping="Wrap"/>
-                            <ListBox Classes="clean-list"
-                                     ItemsSource="{Binding PendingChanges}"
-                                     MaxHeight="230"
-                                     IsVisible="{Binding HasPendingChanges}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate x:DataType="explorer:RepositoryPendingChangeViewModel">
-                                        <Border Classes="card">
-                                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
-                                                <TextBlock Grid.Row="0" Grid.Column="0"
-                                                           Text="{Binding ChangeKindLabel}"
-                                                           Foreground="{Binding ChangeKindColor}"
-                                                           FontWeight="SemiBold"/>
-                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.78"/>
-                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                                                           Text="{Binding RelativePath}"
-                                                           Opacity="0.72"
-                                                           FontSize="11"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-
-                            <TextBlock Text="{loc:Tr explorer.no_pending_changes}" Opacity="0.72" IsVisible="{Binding HasNoPendingChanges}"/>
-
-                            <Button
-                                    Command="{Binding ShowSnapshotHistoryCommand}"
-                                    Classes="subtle compact responsive-icon"
-                                    HorizontalAlignment="Stretch"
-                                    Padding="12,10"
-                                    ToolTip.Tip="{loc:Tr explorer.open_snapshot_history}">
-                                <Button.Content>
-                                    <StackPanel Classes="button-content">
-                                        <TextBlock Classes="button-icon" Text="&#xE81C;"/>
-                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.open_snapshot_history}"/>
-                                    </StackPanel>
-                                </Button.Content>
-                            </Button>
-
-                            <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
-
-                            <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
-                                <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
-                                <TextBlock Classes="muted" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
-                                <TextBlock Text="{Binding SelectedItem.Type}" Opacity="0.84"/>
-                                <TextBlock Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.84"/>
-                                <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}" Opacity="0.84"/>
-
-                                <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,4"/>
-
-                                <Border Classes="metric-card">
-                                    <StackPanel Spacing="10">
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                                            <StackPanel Spacing="2">
-                                                <TextBlock Text="{loc:Tr explorer.compare_in_window}" FontWeight="SemiBold"/>
-                                                <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-                                            </StackPanel>
-
-                                            <Button Grid.Column="1"
-                                                    Command="{Binding CompareSelectedVersionsCommand}"
-                                                    IsEnabled="{Binding CanCompareSelectedVersionPair}"
-                                                    Classes="primary responsive-icon"
-                                                    VerticalAlignment="Top"
-                                                    ToolTip.Tip="{loc:Tr explorer.compare_in_window}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE8AB;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.compare_in_window}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
-                                            <StackPanel Grid.Column="0" Spacing="4">
-                                                <TextBlock Text="{loc:Tr explorer.left_version}" Opacity="0.8" FontSize="11"/>
-                                                <ComboBox ItemsSource="{Binding FileVersions}"
-                                                          SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                            </StackPanel>
-
-                                            <Button Grid.Column="1"
-                                                    Content="&#xE8AB;"
-                                                    Classes="subtle icon"
-                                                    VerticalAlignment="Bottom"
-                                                    ToolTip.Tip="{loc:Tr common.swap}"
-                                                    Command="{Binding SwapCompareVersionsCommand}"
-                                                    IsEnabled="{Binding CanSwapCompareVersions}"/>
-
-                                            <StackPanel Grid.Column="2" Spacing="4">
-                                                <TextBlock Text="{loc:Tr explorer.right_version}" Opacity="0.8" FontSize="11"/>
-                                                <ComboBox ItemsSource="{Binding FileVersions}"
-                                                          SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                            <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                            </StackPanel>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                            <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
-                                <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
-                                    <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72"/>
-                                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                <Border x:Name="ExplorerDetailsPanel" Grid.Column="4" Classes="panel" Margin="10,0,0,0" MinWidth="280">
+                    <Grid RowDefinitions="Auto,12,*" RowSpacing="0">
+                        <Border Grid.Row="0" Classes="card" Padding="12">
+                            <StackPanel Spacing="10">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr explorer.pending_changes}" Classes="section-title"/>
+                                    <TextBlock Classes="muted" Text="{Binding LastSnapshotLabel}"/>
+                                    <TextBlock Text="{Binding PendingChangesSummary}" Opacity="0.88" TextWrapping="Wrap"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding VersionPanelError}"
-                                           Foreground="{DynamicResource VeyraDangerBrush}"
-                                           TextWrapping="Wrap"
-                                           IsVisible="{Binding HasVersionPanelError}"/>
-                                <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}" Opacity="0.72" IsVisible="{Binding HasNoFileVersions}"/>
 
                                 <ListBox Classes="clean-list"
-                                         ItemsSource="{Binding VisibleFileVersions}"
-                                         SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
-                                         MaxHeight="200">
+                                         ItemsSource="{Binding PendingChanges}"
+                                         MaxHeight="220"
+                                         IsVisible="{Binding HasPendingChanges}">
                                     <ListBox.ItemTemplate>
-                                        <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                            <Border Classes="card" Padding="8">
-                                                <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
-                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
-                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
-                                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
+                                        <DataTemplate x:DataType="explorer:RepositoryPendingChangeViewModel">
+                                            <Border Classes="card">
+                                                <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="2">
+                                                    <TextBlock Grid.Row="0" Grid.Column="0"
+                                                               Text="{Binding ChangeKindLabel}"
+                                                               Foreground="{Binding ChangeKindColor}"
+                                                               FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Opacity="0.78"/>
+                                                    <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                               Text="{Binding RelativePath}"
+                                                               Opacity="0.72"
+                                                               FontSize="11"
+                                                               TextTrimming="CharacterEllipsis"/>
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
                                 </ListBox>
 
-                                <Button Content="{Binding FileVersionsToggleLabel}" Command="{Binding ToggleFileVersionsViewCommand}" Classes="subtle" IsVisible="{Binding CanToggleFileVersionsView}"/>
+                                <TextBlock Text="{loc:Tr explorer.no_pending_changes}"
+                                           Opacity="0.72"
+                                           IsVisible="{Binding HasNoPendingChanges}"/>
 
-                                <Border Classes="card" Padding="8" IsVisible="{Binding HasSelectedVersion}">
-                                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="3" ColumnSpacing="8">
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Opacity="0.7"/>
-                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Opacity="0.7"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Opacity="0.7"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Opacity="0.7"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
-                                    </Grid>
-                                </Border>
-
-                                <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
-                                           Foreground="{DynamicResource VeyraWarningBrush}"
-                                           TextWrapping="Wrap"
-                                           IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
-
-                                <StackPanel x:Name="ExplorerRestoreActionsPanel" Orientation="Horizontal" Spacing="6">
-                                    <Button
-                                            Command="{Binding RestoreVersionAsCopyCommand}"
-                                            IsEnabled="{Binding CanRestoreSelectedVersion}"
-                                            Classes="subtle responsive-icon"
-                                            ToolTip.Tip="{loc:Tr explorer.restore_as_copy}">
-                                        <Button.Content>
-                                            <StackPanel Classes="button-content">
-                                                <TextBlock Classes="button-icon" Text="&#xE8C8;"/>
-                                                <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_as_copy}"/>
-                                            </StackPanel>
-                                        </Button.Content>
-                                    </Button>
-                                    <Button
-                                            Command="{Binding RestoreVersionOverwriteCommand}"
-                                            IsEnabled="{Binding CanRestoreSelectedVersion}"
-                                            Classes="responsive-icon"
-                                            ToolTip.Tip="{loc:Tr explorer.restore_overwrite}">
-                                        <Button.Content>
-                                            <StackPanel Classes="button-content">
-                                                <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
-                                                <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_overwrite}"/>
-                                            </StackPanel>
-                                        </Button.Content>
-                                    </Button>
-                                </StackPanel>
-
-                                <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
-                                    <StackPanel Classes="loading-state">
-                                        <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding VersionActionProgressDetail}"
-                                                   Classes="muted"
-                                                   TextWrapping="Wrap"/>
-                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <TextBlock Text="{Binding VersionActionMessage}"
-                                           TextWrapping="Wrap"
-                                           Opacity="0.9"
-                                           IsVisible="{Binding HasVersionActionMessage}"/>
-                            </StackPanel>
-
-                            <TextBlock Text="{loc:Tr explorer.select_file_from_index}"
-                                       Opacity="0.72"
-                                       IsVisible="{Binding HasNoSelectedItem}"
-                                       TextWrapping="Wrap"/>
-
-                            <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,6"/>
-
-                            <Border Classes="card" Padding="12" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
-                                <StackPanel Spacing="10">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
-                                        <TextBlock Classes="muted"
-                                                   Text="{loc:Tr explorer.repository_tools_hint}"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap"/>
-                                    </StackPanel>
-
-                                    <Button Content="{loc:Tr explorer.fix_missing_data}"
-                                            ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}"
-                                            AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
-                                            Command="{Binding RepairRepositoryDataCommand}"
-                                            IsEnabled="{Binding CanRunMaintenanceActions}"
-                                            Classes="subtle compact"
-                                            HorizontalAlignment="Stretch"/>
-                                    <Button Content="{loc:Tr explorer.rebuild_index}"
-                                            ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}"
-                                            AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
-                                            Command="{Binding ReindexRepositoryDataCommand}"
-                                            IsEnabled="{Binding CanRunMaintenanceActions}"
-                                            Classes="subtle compact"
-                                            HorizontalAlignment="Stretch"/>
-                                    <Button Content="{loc:Tr explorer.repair_links}"
-                                            ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}"
-                                            AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
-                                            Command="{Binding RelinkRepositoryDataCommand}"
-                                            IsEnabled="{Binding CanRunMaintenanceActions}"
-                                            Classes="subtle compact"
-                                            HorizontalAlignment="Stretch"/>
-
-                                    <Border Classes="metric-card" IsVisible="{Binding IsMaintenanceRunning}">
-                                        <StackPanel Classes="loading-state">
-                                            <TextBlock Text="{Binding MaintenanceProgressTitle}" FontWeight="SemiBold"/>
-                                            <TextBlock Text="{Binding MaintenanceProgressDetail}"
-                                                       Classes="muted"
-                                                       FontSize="11"
-                                                       TextWrapping="Wrap"/>
-                                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                <Button Command="{Binding ShowSnapshotHistoryCommand}"
+                                        Classes="subtle compact responsive-icon"
+                                        HorizontalAlignment="Stretch"
+                                        Padding="12,10">
+                                    <Button.Content>
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE81C;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr explorer.open_snapshot_history}"/>
                                         </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Border>
-            </Grid>
-
-            <Border IsVisible="{Binding IsSnapshotHistoryMenuOpen}"
-                    Classes="overlay-backdrop"
-                    Padding="24">
-                <Border Classes="dialog-shell"
-                        MaxWidth="1700"
-                        MinHeight="760"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Padding="18"
-                        CornerRadius="16">
-                    <Grid RowDefinitions="Auto,*" RowSpacing="14">
-                        <Border Grid.Row="0" Classes="hero">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="{loc:Tr explorer.snapshot_history}" Classes="h2"/>
-                                    <TextBlock Classes="muted"
-                                               Text="{loc:Tr explorer.snapshot_history_hint}"
-                                               FontSize="12"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-
-                                <Button Grid.Column="1"
-                                        Content="{loc:Tr common.close}"
-                                        Command="{Binding CloseSnapshotHistoryMenuCommand}"
-                                        Classes="subtle"
-                                        VerticalAlignment="Top"/>
-                            </Grid>
+                                    </Button.Content>
+                                </Button>
+                            </StackPanel>
                         </Border>
 
-                        <Grid x:Name="SnapshotHistoryLayoutGrid" Grid.Row="1" ColumnDefinitions="1.02*,6,1.12*,6,1.16*" ColumnSpacing="0">
-                            <Border x:Name="SnapshotHistoryCommitsPanel" Grid.Column="0" Classes="card" Padding="14">
-                                <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
-                                    <TextBlock Grid.Row="0" Text="{loc:Tr explorer.commits}" Classes="section-title"/>
-
-                                    <Border Grid.Row="1" Classes="filter-sheet" Padding="12">
-                                        <StackPanel Spacing="10">
-                                            <TextBox Text="{Binding SnapshotHistorySearchQuery, Mode=TwoWay}"
-                                                     Classes="compact"
-                                                     Watermark="{loc:Tr explorer.search_commits}"/>
-                                            <WrapPanel Orientation="Horizontal">
-                                                <ComboBox Width="160"
-                                                          Margin="0,0,8,8"
-                                                          Classes="compact"
-                                                          ItemsSource="{Binding SnapshotTriggerFilters}"
-                                                          SelectedItem="{Binding SelectedSnapshotTriggerFilter, Mode=TwoWay}">
-                                                    <ComboBox.SelectionBoxItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_trigger}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.SelectionBoxItemTemplate>
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_trigger}"/>
-                                                           </DataTemplate>
-                                                       </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                                <ComboBox Width="150"
-                                                          Margin="0,0,8,8"
-                                                          Classes="compact"
-                                                          ItemsSource="{Binding SnapshotTagFilters}"
-                                                          SelectedItem="{Binding SelectedSnapshotTagFilter, Mode=TwoWay}">
-                                                    <ComboBox.SelectionBoxItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.SelectionBoxItemTemplate>
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=search.snapshot_tag}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                                <TextBox Width="112"
-                                                         Margin="0,0,8,8"
-                                                         Classes="compact"
-                                                         Text="{Binding SnapshotHistoryMinChangedFiles, Mode=TwoWay}"
-                                                         Watermark="{loc:Tr explorer.min_changed_files}"/>
-                                                <Button Margin="0,0,8,8"
-                                                         Content="{loc:Tr explorer.clear_filters}"
-                                                         Command="{Binding ClearSnapshotHistoryFiltersCommand}"
-                                                         Classes="subtle compact"/>
-                                            </WrapPanel>
+                        <ScrollViewer Grid.Row="2"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Spacing="12">
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasSelectedItem}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
+                                            <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock Classes="muted" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
                                         </StackPanel>
-                                    </Border>
 
-                                    <StackPanel Grid.Row="2"
-                                                Spacing="6"
-                                                IsVisible="{Binding IsSnapshotHistoryLoading}">
-                                        <TextBlock Text="{loc:Tr explorer.loading_commits}"
-                                                   Classes="muted"/>
-                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                    </StackPanel>
+                                        <Grid ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.type}" Classes="label"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.Type}" Opacity="0.84" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.84" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.modified}" Classes="label"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedItem.ModifiedDisplay}" Opacity="0.84" TextWrapping="Wrap"/>
+                                        </Grid>
 
-                                    <Grid Grid.Row="3">
-                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                                      HorizontalScrollBarVisibility="Disabled"
-                                                      IsVisible="{Binding HasSnapshotHistory}">
-                                             <ListBox Classes="clean-list"
-                                                      ItemsSource="{Binding SnapshotHistory}"
-                                                      SelectedItem="{Binding SelectedSnapshot, Mode=TwoWay}">
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="explorer:RepositorySnapshotHistoryEntryViewModel">
-                                                        <Border Padding="10" Background="Transparent" BorderThickness="0">
-                                                       <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="4">
-                                                           <TextBlock Grid.Row="0" Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                           <TextBlock Grid.Row="1" Text="{Binding DisplayTime}" Classes="muted" FontSize="11"/>
-                                                           <TextBlock Grid.Row="2" Text="{Binding ChangedFilesLabel}" Classes="muted" FontSize="11"/>
-                                                           <TextBlock Grid.Row="3" Text="{Binding TagsLabel}" Classes="muted" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasTags}"/>
-                                                       </Grid>
-                                                   </Border>
-                                               </DataTemplate>
-                                                </ListBox.ItemTemplate>
-                                            </ListBox>
-                                        </ScrollViewer>
+                                        <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,2"/>
 
-                                        <TextBlock Text="{loc:Tr explorer.no_commits}"
-                                                   Classes="muted"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   IsVisible="{Binding HasNoSnapshotHistory}"/>
-                                    </Grid>
-                                </Grid>
-                            </Border>
+                                        <Border Classes="metric-card">
+                                            <StackPanel Spacing="10">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{loc:Tr explorer.compare_in_window}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                </StackPanel>
 
-                            <GridSplitter x:Name="SnapshotHistoryLeftSplitter" Grid.Column="1"
-                                          Width="6"
-                                          HorizontalAlignment="Stretch"
-                                          VerticalAlignment="Stretch"
-                                          ResizeDirection="Columns"
-                                          ResizeBehavior="PreviousAndNext"/>
+                                                <Button Command="{Binding CompareSelectedVersionsCommand}"
+                                                        IsEnabled="{Binding CanCompareSelectedVersionPair}"
+                                                        Classes="primary responsive-icon"
+                                                        HorizontalAlignment="Stretch">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE8AB;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr explorer.compare_in_window}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
 
-                            <Border x:Name="SnapshotHistoryFilesPanel" Grid.Column="2" Classes="card" Padding="14" Margin="14,0">
-                                <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="10">
-                                    <TextBlock Grid.Row="0" Text="{loc:Tr explorer.files_in_selected_commit}" Classes="section-title"/>
-
-                                    <Border Grid.Row="1" Classes="filter-sheet" Padding="12">
-                                        <StackPanel Spacing="10">
-                                            <TextBox Text="{Binding SnapshotFilesSearchQuery, Mode=TwoWay}"
-                                                     Classes="compact"
-                                                     Watermark="{loc:Tr explorer.search_commit_files}"/>
-                                            <WrapPanel Orientation="Horizontal">
-                                                <ComboBox Width="160"
-                                                          Margin="0,0,8,8"
-                                                          Classes="compact"
-                                                          ItemsSource="{Binding SnapshotFileChangeKindFilters}"
-                                                          SelectedItem="{Binding SelectedSnapshotFileChangeKindFilter, Mode=TwoWay}">
-                                                    <ComboBox.SelectionBoxItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_change_kind}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.SelectionBoxItemTemplate>
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.snapshot_change_kind}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                                <ComboBox Width="140"
-                                                          Margin="0,0,8,8"
-                                                          Classes="compact"
-                                                          ItemsSource="{Binding SnapshotFileExtensionFilters}"
-                                                          SelectedItem="{Binding SelectedSnapshotFileExtensionFilter, Mode=TwoWay}">
-                                                    <ComboBox.SelectionBoxItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding .}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.SelectionBoxItemTemplate>
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="x:String">
-                                                            <TextBlock Text="{Binding .}"/>
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                                <TextBox Width="112"
-                                                         Margin="0,0,8,8"
-                                                         Classes="compact"
-                                                         Text="{Binding SnapshotFilesMinSizeDeltaKb, Mode=TwoWay}"
-                                                         Watermark="{loc:Tr explorer.min_delta_kb}"/>
-                                                <Button Margin="0,0,8,8"
-                                                         Content="{loc:Tr explorer.clear_filters}"
-                                                         Command="{Binding ClearSnapshotFilesFiltersCommand}"
-                                                         Classes="subtle compact"/>
-                                            </WrapPanel>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <StackPanel Grid.Row="2" Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.select_commit_for_changes}"
-                                                   Classes="muted"
-                                                   IsVisible="{Binding HasNoSelectedSnapshot}"/>
-                                        <TextBlock Text="{loc:Tr explorer.loading_changed_files}"
-                                                   Classes="muted"
-                                                   IsVisible="{Binding IsSnapshotFilesLoading}"/>
-                                        <ProgressBar Classes="loading-progress"
-                                                     IsIndeterminate="True"
-                                                     IsVisible="{Binding IsSnapshotFilesLoading}"/>
-                                    </StackPanel>
-
-                                    <Grid Grid.Row="3">
-                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                                      HorizontalScrollBarVisibility="Disabled"
-                                                      IsVisible="{Binding HasSnapshotFiles}">
-                                             <ListBox Classes="clean-list"
-                                                      ItemsSource="{Binding SnapshotFiles}"
-                                                      SelectedItem="{Binding SelectedSnapshotFile, Mode=TwoWay}">
-                                                <ListBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="explorer:RepositorySnapshotFileChangeViewModel">
-                                                        <Border Padding="10" Background="Transparent" BorderThickness="0">
-                                                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="4">
-                                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ChangeKindLabel}" FontWeight="SemiBold"/>
-                                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDeltaLabel}" Classes="muted"/>
-                                                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
-                                                                           Text="{Binding RelativePath}"
-                                                                           Classes="muted"
-                                                                           FontSize="11"
-                                                                           TextTrimming="CharacterEllipsis"/>
-                                                            </Grid>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </ListBox.ItemTemplate>
-                                            </ListBox>
-                                        </ScrollViewer>
-
-                                        <TextBlock Text="{loc:Tr explorer.no_changed_files_in_commit}"
-                                                   Classes="muted"
-                                                   VerticalAlignment="Center"
-                                                   HorizontalAlignment="Center"
-                                                   IsVisible="{Binding HasNoSnapshotFiles}"/>
-                                    </Grid>
-                                </Grid>
-                            </Border>
-
-                            <GridSplitter x:Name="SnapshotHistoryRightSplitter" Grid.Column="3"
-                                          Width="6"
-                                          HorizontalAlignment="Stretch"
-                                          VerticalAlignment="Stretch"
-                                          ResizeDirection="Columns"
-                                          ResizeBehavior="PreviousAndNext"/>
-
-                            <Border x:Name="SnapshotHistoryVersionsPanel" Grid.Column="4" Classes="card" Padding="14">
-                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
-                                    <StackPanel Grid.Row="0" Spacing="4">
-                                        <TextBlock Text="{loc:Tr explorer.version_controls}" Classes="section-title"/>
-                                        <TextBlock Text="{loc:Tr explorer.select_file_for_version_controls}"
-                                                   Classes="muted"
-                                                   FontSize="12"
-                                                   IsVisible="{Binding HasNoSelectedItem}"/>
-                                    </StackPanel>
-
-                                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                        <StackPanel Spacing="10" IsVisible="{Binding HasSelectedItem}">
-                                            <Border Classes="metric-card">
-                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="92,*" RowSpacing="6" ColumnSpacing="10">
-                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.name}" Classes="label"/>
-                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
-
-                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.path}" Classes="label"/>
-                                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" Classes="muted" TextWrapping="Wrap"/>
-
-                                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.type}" Classes="label"/>
-                                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedItem.Type}"/>
-
-                                                    <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" ColumnDefinitions="92,*,92,*" ColumnSpacing="10">
-                                                        <TextBlock Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
-                                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.SizeDisplay}"/>
-                                                        <TextBlock Grid.Column="2" Text="{loc:Tr common.modified}" Classes="label"/>
-                                                        <TextBlock Grid.Column="3" Text="{Binding SelectedItem.ModifiedDisplay}"/>
-                                                    </Grid>
-                                                </Grid>
-                                            </Border>
-
-                                            <Border Classes="filter-sheet" Padding="12">
                                                 <StackPanel Spacing="8">
-                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                                                        <TextBlock Text="{loc:Tr explorer.file_versions}" FontWeight="SemiBold"/>
-                                                        <Button Grid.Column="1"
-                                                                Content="{Binding FileVersionsToggleLabel}"
-                                                                Command="{Binding ToggleFileVersionsViewCommand}"
-                                                                Classes="subtle compact"
-                                                                IsVisible="{Binding CanToggleFileVersionsView}"/>
-                                                    </Grid>
-
-                                                    <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
-                                                        <TextBlock Text="{loc:Tr explorer.loading_versions}" Classes="muted"/>
-                                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{loc:Tr explorer.left_version}" Classes="label"/>
+                                                        <ComboBox ItemsSource="{Binding FileVersions}"
+                                                                  SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding VersionPanelError}"
-                                                               Foreground="{DynamicResource VeyraDangerBrush}"
-                                                               TextWrapping="Wrap"
-                                                               IsVisible="{Binding HasVersionPanelError}"/>
-                                                    <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}" Classes="muted" IsVisible="{Binding HasNoFileVersions}"/>
 
-                                                     <ListBox Classes="clean-list"
-                                                              ItemsSource="{Binding VisibleFileVersions}"
-                                                              SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
-                                                              MaxHeight="220">
-                                                         <ListBox.ItemTemplate>
-                                                             <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                                 <Border Padding="8" Background="Transparent" BorderThickness="0">
-                                                                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                                                                         <TextBlock Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
-                                                                         <TextBlock Grid.Column="1" Text="{Binding CreatedAtDisplay}" Classes="muted"/>
-                                                                         <TextBlock Grid.Column="2" Text="{Binding SizeDisplay}" Classes="muted"/>
-                                                                    </Grid>
-                                                                </Border>
-                                                            </DataTemplate>
-                                                        </ListBox.ItemTemplate>
-                                                    </ListBox>
+                                                    <Button Content="&#xE8AB;"
+                                                            Classes="subtle icon"
+                                                            HorizontalAlignment="Center"
+                                                            Command="{Binding SwapCompareVersionsCommand}"
+                                                            IsEnabled="{Binding CanSwapCompareVersions}"/>
+
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{loc:Tr explorer.right_version}" Classes="label"/>
+                                                        <ComboBox ItemsSource="{Binding FileVersions}"
+                                                                  SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                    </StackPanel>
                                                 </StackPanel>
-                                            </Border>
-
-                                            <Border Classes="metric-card">
-                                                <StackPanel Spacing="10">
-                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                                                        <StackPanel Spacing="4">
-                                                            <TextBlock Text="{loc:Tr explorer.version_compare}" FontWeight="SemiBold"/>
-                                                            <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" TextWrapping="Wrap"/>
-                                                        </StackPanel>
-
-                                                        <Button Grid.Column="1"
-                                                                Command="{Binding CompareSelectedVersionsCommand}"
-                                                                IsEnabled="{Binding CanCompareSelectedVersionPair}"
-                                                                Classes="primary responsive-icon"
-                                                                VerticalAlignment="Top"
-                                                                ToolTip.Tip="{loc:Tr explorer.compare_in_window}">
-                                                            <Button.Content>
-                                                                <StackPanel Classes="button-content">
-                                                                    <TextBlock Classes="button-icon" Text="&#xE8AB;"/>
-                                                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.compare_in_window}"/>
-                                                                </StackPanel>
-                                                            </Button.Content>
-                                                        </Button>
-                                                    </Grid>
-
-                                                    <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
-                                                        <StackPanel Grid.Column="0" Spacing="4">
-                                                            <TextBlock Text="{loc:Tr explorer.left_version}" Classes="label"/>
-                                                            <ComboBox Classes="compact"
-                                                                      ItemsSource="{Binding FileVersions}"
-                                                                      SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
-                                                                <ComboBox.ItemTemplate>
-                                                                    <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                                    </DataTemplate>
-                                                                </ComboBox.ItemTemplate>
-                                                            </ComboBox>
-                                                        </StackPanel>
-
-                                                        <Button Grid.Column="1"
-                                                                Content="&#xE8AB;"
-                                                                Classes="subtle icon"
-                                                                VerticalAlignment="Bottom"
-                                                                ToolTip.Tip="{loc:Tr common.swap}"
-                                                                Command="{Binding SwapCompareVersionsCommand}"
-                                                                IsEnabled="{Binding CanSwapCompareVersions}"/>
-
-                                                        <StackPanel Grid.Column="2" Spacing="4">
-                                                            <TextBlock Text="{loc:Tr explorer.right_version}" Classes="label"/>
-                                                            <ComboBox Classes="compact"
-                                                                      ItemsSource="{Binding FileVersions}"
-                                                                      SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
-                                                                <ComboBox.ItemTemplate>
-                                                                    <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
-                                                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
-                                                                    </DataTemplate>
-                                                                </ComboBox.ItemTemplate>
-                                                            </ComboBox>
-                                                        </StackPanel>
-                                                    </Grid>
-                                                </StackPanel>
-                                            </Border>
-
-                                            <Border Classes="card" Padding="10" IsVisible="{Binding HasSelectedVersion}">
-                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="100,*" RowSpacing="4" ColumnSpacing="8">
-                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Classes="label"/>
-                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
-                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Classes="label"/>
-                                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}"/>
-                                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
-                                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}"/>
-                                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Classes="label"/>
-                                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}"/>
-                                                </Grid>
-                                            </Border>
-
-                                            <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
-                                                       Foreground="{DynamicResource VeyraWarningBrush}"
-                                                       TextWrapping="Wrap"
-                                                       IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
-
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Button
-                                                        Command="{Binding RestoreVersionAsCopyCommand}"
-                                                        IsEnabled="{Binding CanRestoreSelectedVersion}"
-                                                        Classes="subtle responsive-icon"
-                                                        ToolTip.Tip="{loc:Tr explorer.restore_as_copy}">
-                                                    <Button.Content>
-                                                        <StackPanel Classes="button-content">
-                                                            <TextBlock Classes="button-icon" Text="&#xE8C8;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_as_copy}"/>
-                                                        </StackPanel>
-                                                    </Button.Content>
-                                                </Button>
-                                                <Button
-                                                        Command="{Binding RestoreVersionOverwriteCommand}"
-                                                        IsEnabled="{Binding CanRestoreSelectedVersion}"
-                                                        Classes="responsive-icon"
-                                                        ToolTip.Tip="{loc:Tr explorer.restore_overwrite}">
-                                                    <Button.Content>
-                                                        <StackPanel Classes="button-content">
-                                                            <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_overwrite}"/>
-                                                        </StackPanel>
-                                                    </Button.Content>
-                                                </Button>
                                             </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
 
-                                            <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
-                                                <StackPanel Classes="loading-state">
-                                                    <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
-                                                    <TextBlock Text="{Binding VersionActionProgressDetail}"
-                                                               Classes="muted"
-                                                               TextWrapping="Wrap"/>
-                                                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                                </StackPanel>
-                                            </Border>
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasSelectedItem}">
+                                    <StackPanel Spacing="10">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{loc:Tr explorer.file_versions}"
+                                                       Classes="section-title"
+                                                       VerticalAlignment="Center"/>
+                                            <Button Grid.Column="1"
+                                                    Content="{Binding FileVersionsToggleLabel}"
+                                                    Command="{Binding ToggleFileVersionsViewCommand}"
+                                                    Classes="subtle compact"
+                                                    IsVisible="{Binding CanToggleFileVersionsView}"
+                                                    VerticalAlignment="Center"/>
+                                        </Grid>
 
-                                            <TextBlock Text="{Binding VersionActionMessage}"
-                                                       TextWrapping="Wrap"
-                                                       Opacity="0.9"
-                                                       IsVisible="{Binding HasVersionActionMessage}"/>
+                                        <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
+                                            <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72"/>
+                                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
                                         </StackPanel>
-                                    </ScrollViewer>
-                                </Grid>
-                            </Border>
-                        </Grid>
+
+                                        <TextBlock Text="{Binding VersionPanelError}"
+                                                   Foreground="{DynamicResource VeyraDangerBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasVersionPanelError}"/>
+                                        <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}"
+                                                   Opacity="0.72"
+                                                   IsVisible="{Binding HasNoFileVersions}"/>
+
+                                        <ListBox Classes="clean-list"
+                                                 ItemsSource="{Binding VisibleFileVersions}"
+                                                 SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                                 MaxHeight="260">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                    <Border Classes="card" Padding="8">
+                                                        <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
+                                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <Border Classes="card" Padding="10" IsVisible="{Binding HasSelectedVersion}">
+                                            <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="84,*" RowSpacing="4" ColumnSpacing="8">
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Classes="label"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Classes="label"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
+                                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Classes="label"/>
+                                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}" TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </Border>
+
+                                        <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
+                                                   Foreground="{DynamicResource VeyraWarningBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
+                                        <WrapPanel x:Name="ExplorerRestoreActionsPanel" Orientation="Horizontal">
+                                            <Button Command="{Binding RestoreVersionAsCopyCommand}"
+                                                    IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                    Classes="subtle responsive-icon"
+                                                    Margin="0,0,8,8">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8C8;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_as_copy}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding RestoreVersionOverwriteCommand}"
+                                                    IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                    Classes="responsive-icon"
+                                                    Margin="0,0,0,8">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_overwrite}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding VersionActionProgressDetail}"
+                                                           Classes="muted"
+                                                           TextWrapping="Wrap"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="{Binding VersionActionMessage}"
+                                                   TextWrapping="Wrap"
+                                                   Opacity="0.9"
+                                                   IsVisible="{Binding HasVersionActionMessage}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasNoSelectedItem}">
+                                    <TextBlock Text="{loc:Tr explorer.select_file_from_index}"
+                                               Opacity="0.72"
+                                               TextWrapping="Wrap"/>
+                                </Border>
+
+                                <Border Classes="card" Padding="12" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Spacing="4">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
+                                                <Border Background="{DynamicResource VeyraWarningBrush}"
+                                                        CornerRadius="999"
+                                                        Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip.Tip="{loc:Tr explorer.repository_tools_tooltip}">
+                                                    <TextBlock Text="!"
+                                                               FontWeight="Bold"
+                                                               Foreground="{DynamicResource VeyraPanelStrongBrush}"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Classes="muted"
+                                                       Text="{loc:Tr explorer.repository_tools_hint}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <Button Content="{loc:Tr explorer.fix_missing_data}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
+                                                Command="{Binding RepairRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}"
+                                                HorizontalAlignment="Stretch"/>
+                                        <Button Content="{loc:Tr explorer.rebuild_index}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
+                                                Command="{Binding ReindexRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}"
+                                                HorizontalAlignment="Stretch"/>
+                                        <Button Content="{loc:Tr explorer.repair_links}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
+                                                Command="{Binding RelinkRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}"
+                                                HorizontalAlignment="Stretch"/>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsMaintenanceRunning}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{Binding MaintenanceProgressTitle}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding MaintenanceProgressDetail}"
+                                                           Classes="muted"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Border>
-            </Border>
+
+                <GridSplitter x:Name="ExplorerBottomSplitter"
+                              Grid.Column="0"
+                              Grid.ColumnSpan="5"
+                              Height="6"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              IsVisible="False"/>
+
+            </Grid>
             <Border IsVisible="{Binding IsDiffPreviewMenuOpen}"
                     Classes="overlay-backdrop"
                     Padding="24">
@@ -1232,3 +850,5 @@
         </Grid>
     </Grid>
 </UserControl>
+
+

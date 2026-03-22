@@ -10,7 +10,7 @@ public static class Blake3FileHasher
             path,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 1024 * 1024,
             useAsync: true);
 

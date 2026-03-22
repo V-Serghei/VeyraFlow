@@ -116,11 +116,16 @@
                                            TextWrapping="Wrap"/>
                             </Grid>
 
-                            <ProgressBar Minimum="0"
-                                         Maximum="100"
-                                         Value="{Binding ProgressPercent}"
-                                         Height="14"
-                                         IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                            <StackPanel Spacing="6">
+                                <ProgressBar Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding ProgressPercent}"
+                                             Height="14"/>
+                                <ProgressBar Classes="loading-progress"
+                                             Height="4"
+                                             IsIndeterminate="True"
+                                             IsVisible="{Binding ShowAnimatedActivity}"/>
+                            </StackPanel>
 
                             <Border Classes="metric-card">
                                 <TextBlock Text="{loc:Tr create_repo.scan_hint}" Classes="muted" TextWrapping="Wrap"/>
@@ -147,8 +152,8 @@
                                 </Border>
                                 <Border Classes="metric-card" Margin="0,0,12,12">
                                     <StackPanel Spacing="4">
-                                        <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
-                                        <TextBlock Text="{loc:Tr create_repo.progress_card}" Classes="muted"/>
+                                        <TextBlock Text="{Binding TrackedFilesCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.tracked_files_card}" Classes="muted"/>
                                     </StackPanel>
                                 </Border>
                             </WrapPanel>
@@ -174,10 +179,31 @@
                                 </Grid>
                             </Border>
 
-                            <Border Classes="card" BorderBrush="{DynamicResource VeyraSuccessBrush}" Background="{DynamicResource VeyraDiffAddBgBrush}" IsVisible="{Binding IsCompleted}">
+                            <Border Classes="card" BorderBrush="{DynamicResource VeyraSuccessBrush}" Background="{DynamicResource VeyraDiffAddBgBrush}" IsVisible="{Binding ShowCreateSuccessBanner}">
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="{loc:Tr create_repo.success_banner_title}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
                                     <TextBlock Text="{loc:Tr create_repo.success_banner_body}" TextWrapping="Wrap" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card"
+                                    BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                    IsVisible="{Binding HasRetryableBusyFiles}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="{loc:Tr create_repo.warning_busy_files_title}"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesSummary}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesPreview}"
+                                               TextWrapping="Wrap"
+                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                               FontSize="12"
+                                               IsVisible="{Binding HasRetryableBusyFilesPreview}"/>
+                                    <Button Content="{loc:Tr create_repo.retry_unavailable_files}"
+                                            Command="{Binding RetryUnavailableFilesCommand}"
+                                            HorizontalAlignment="Left"
+                                            Classes="primary"/>
                                 </StackPanel>
                             </Border>
 
@@ -212,14 +238,20 @@
                                Classes="muted"
                                TextWrapping="Wrap"
                                TextAlignment="Center"/>
-                    <ProgressBar Classes="loading-progress"
-                                 Minimum="0"
-                                 Maximum="100"
-                                 Value="{Binding ProgressPercent}"
-                                 IsIndeterminate="{Binding IsProgressIndeterminate}"/>
-                    <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}"
+                    <StackPanel Spacing="6">
+                        <ProgressBar Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding ProgressPercent}"
+                                     Height="10"/>
+                        <ProgressBar Classes="loading-progress"
+                                     Height="4"
+                                     IsIndeterminate="True"
+                                     IsVisible="{Binding ShowAnimatedActivity}"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ProgressDisplayText}"
                                FontWeight="SemiBold"
-                               HorizontalAlignment="Center"/>
+                               HorizontalAlignment="Center"
+                               IsVisible="{Binding ShowDeterminateProgressValue}"/>
                 </StackPanel>
             </Border>
         </Border>

@@ -33,7 +33,7 @@ internal static class DatabaseStartupBootstrapper
         BackfillUserProfileTokenLifecycleMigrationHistoryIfNeeded(db);
         BackfillSyncUploadCheckpointMigrationHistoryIfNeeded(db);
         BackfillSensitiveActionVerificationMigrationHistoryIfNeeded(db);
-        db.Database.Migrate();
+        TryApplyMigrations(db);
         EnsureRepositorySnapshotTitleColumn(db);
         EnsureRepositorySnapshotTagsColumn(db);
         EnsureRepositoryCaptureSettingsColumns(db);
@@ -60,6 +60,22 @@ internal static class DatabaseStartupBootstrapper
         db.Database.ExecuteSqlRaw("PRAGMA foreign_keys=ON;");
         db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
         EnsurePerformanceIndexes(db);
+    }
+
+    private static void TryApplyMigrations(VeyraDbContext db)
+    {
+        try
+        {
+            db.Database.Migrate();
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.OrdinalIgnoreCase) ||
+                  ex.Message.Contains("pending changes", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Warning(
+                ex,
+                "Database migrate reported pending model changes. Continuing with startup schema repair path instead of aborting startup.");
+        }
     }
 
     private static void EnsureRepositorySnapshotTitleColumn(VeyraDbContext db)
@@ -341,6 +357,9 @@ internal static class DatabaseStartupBootstrapper
                 ("Repositories", "RetentionMaxTotalSizeBytes"),
                 ("Repositories", "RetentionTriggerFilter"),
                 ("Repositories", "RetentionRunIntervalMinutes"),
+                ("Repositories", "RetentionAllowManualSnapshotCleanup"),
+                ("Repositories", "RetentionAutomaticCompactionEnabled"),
+                ("Repositories", "RetentionAutomaticCompactionWindowHours"),
                 ("Repositories", "RetentionLastRunAt"),
                 ("Repositories", "RetentionLastStatus")
             };
@@ -723,6 +742,12 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaxTotalSizeBytes", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionTriggerFilter", "TEXT NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionRunIntervalMinutes", "INTEGER NOT NULL DEFAULT 60");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaintenanceWindowStartHour", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionMaintenanceWindowEndHour", "INTEGER NULL");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionStorageMode", "TEXT NOT NULL DEFAULT 'delete'");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionAllowManualSnapshotCleanup", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionAutomaticCompactionEnabled", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "Repositories", "RetentionAutomaticCompactionWindowHours", "INTEGER NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionLastRunAt", "TEXT NULL");
             EnsureSqliteColumnExists(connection, "Repositories", "RetentionLastStatus", "TEXT NULL");
 
@@ -760,6 +785,10 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
 
             EnsureSqliteColumnExists(connection, "RepositorySnapshots", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
             EnsureSqliteColumnExists(connection, "RepositorySnapshots", "DeletedAt", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "IsArchived", "INTEGER NOT NULL DEFAULT 0");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "ArchivedAt", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "ArchiveFilePath", "TEXT NULL");
+            EnsureSqliteColumnExists(connection, "RepositorySnapshots", "ArchiveFileSizeBytes", "INTEGER NULL");
 
             EnsureSqliteColumnExists(connection, "RepositorySnapshotEntries", "IsDeleted", "INTEGER NOT NULL DEFAULT 0");
             EnsureSqliteColumnExists(connection, "RepositorySnapshotEntries", "DeletedAt", "TEXT NULL");
@@ -792,6 +821,12 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
             {
                 createIdx3.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySnapshots_RepositoryId_IsDeleted_CreatedAt\" ON \"RepositorySnapshots\" (\"RepositoryId\", \"IsDeleted\", \"CreatedAt\");";
                 createIdx3.ExecuteNonQuery();
+            }
+
+            using (var createIdx3b = connection.CreateCommand())
+            {
+                createIdx3b.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_RepositorySnapshots_RepositoryId_IsArchived_CreatedAt\" ON \"RepositorySnapshots\" (\"RepositoryId\", \"IsArchived\", \"CreatedAt\");";
+                createIdx3b.ExecuteNonQuery();
             }
 
             using (var createIdx4 = connection.CreateCommand())

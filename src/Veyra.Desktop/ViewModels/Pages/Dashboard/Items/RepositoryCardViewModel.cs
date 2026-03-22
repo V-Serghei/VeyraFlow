@@ -24,6 +24,11 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
     [ObservableProperty] private string _sizeDisplay = "0 B";
     [ObservableProperty] private string _cloudSyncStatus = string.Empty;
     [ObservableProperty] private string _cloudQueueSummary = string.Empty;
+    [ObservableProperty] private bool _showCloudSection = true;
+    [ObservableProperty] private string _cloudModeText = string.Empty;
+    [ObservableProperty] private string _cloudModeColor = "#9E9E9E";
+    [ObservableProperty] private string _cloudModeBorderColor = "#2A3442";
+    [ObservableProperty] private string _cloudModeBackgroundColor = "#0F1319";
 
     [ObservableProperty] private string _cloudSyncStateKey = "idle";
     [ObservableProperty] private bool _isDirectoryAvailable = true;

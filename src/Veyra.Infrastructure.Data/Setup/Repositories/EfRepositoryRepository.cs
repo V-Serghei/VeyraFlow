@@ -46,6 +46,12 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             ProtectCloudMetadata = true,
             RetentionEnabled = false,
             RetentionRunIntervalMinutes = 60,
+            RetentionMaintenanceWindowStartHour = null,
+            RetentionMaintenanceWindowEndHour = null,
+            RetentionStorageMode = RepositoryRetentionStorageModes.Delete,
+            RetentionAllowManualSnapshotCleanup = false,
+            RetentionAutomaticCompactionEnabled = false,
+            RetentionAutomaticCompactionWindowHours = null,
             RetentionLastRunAt = null,
             RetentionLastStatus = null,
             SyncConflictStrategy = Repository.DefaultSyncConflictStrategy,
@@ -116,6 +122,12 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         entity.RetentionMaxTotalSizeBytes = NormalizePositive(retentionPolicy.MaxTotalSizeBytes);
         entity.RetentionTriggerFilter = SerializeTriggerFilters(retentionPolicy.TriggerFilters);
         entity.RetentionRunIntervalMinutes = Math.Clamp(retentionPolicy.RunIntervalMinutes, 5, 7 * 24 * 60);
+        entity.RetentionMaintenanceWindowStartHour = NormalizeHour(retentionPolicy.MaintenanceWindowStartHour);
+        entity.RetentionMaintenanceWindowEndHour = NormalizeHour(retentionPolicy.MaintenanceWindowEndHour);
+        entity.RetentionStorageMode = RepositoryRetentionStorageModes.Normalize(retentionPolicy.StorageMode);
+        entity.RetentionAllowManualSnapshotCleanup = retentionPolicy.AllowManualSnapshotCleanup;
+        entity.RetentionAutomaticCompactionEnabled = retentionPolicy.AutomaticCompactionEnabled;
+        entity.RetentionAutomaticCompactionWindowHours = NormalizePositive(retentionPolicy.AutomaticCompactionWindowHours);
         entity.SyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(syncConflictStrategy);
         entity.SyncRetryMaxAttempts = Math.Clamp(syncRetryMaxAttempts, 1, 20);
         entity.SyncRetryBaseDelaySeconds = Math.Clamp(syncRetryBaseDelaySeconds, 5, 600);
@@ -598,6 +610,12 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     ProtectCloudMetadata = true,
                     RetentionEnabled = false,
                     RetentionRunIntervalMinutes = 60,
+            RetentionMaintenanceWindowStartHour = null,
+            RetentionMaintenanceWindowEndHour = null,
+            RetentionStorageMode = RepositoryRetentionStorageModes.Delete,
+            RetentionAllowManualSnapshotCleanup = false,
+                    RetentionAutomaticCompactionEnabled = false,
+                    RetentionAutomaticCompactionWindowHours = null,
                     RetentionLastRunAt = null,
                     RetentionLastStatus = null,
                     SyncConflictStrategy = Repository.DefaultSyncConflictStrategy,
@@ -638,8 +656,14 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repository.RetentionMaxTotalSizeBytes,
             ParseTriggerFilters(repository.RetentionTriggerFilter),
             repository.RetentionRunIntervalMinutes,
+            repository.RetentionMaintenanceWindowStartHour,
+            repository.RetentionMaintenanceWindowEndHour,
             repository.RetentionLastRunAt,
-            repository.RetentionLastStatus);
+            repository.RetentionLastStatus,
+            repository.RetentionStorageMode,
+            repository.RetentionAllowManualSnapshotCleanup,
+            repository.RetentionAutomaticCompactionEnabled,
+            repository.RetentionAutomaticCompactionWindowHours);
     }
 
     private static RepositoryCloudSyncStatusDto MapCloudSyncStatus(
@@ -710,6 +734,9 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
 
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
+
+    private static int? NormalizeHour(int? value)
+        => value is >= 0 and <= 23 ? value : null;
 
     private static IReadOnlyList<string> ParseExclusionPatterns(string? value)
     {

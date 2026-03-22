@@ -31,7 +31,7 @@ public sealed class LocalBlockStorageMetricsService(
             .Where(b => !b.FileVersion.FileIdentity.IsDeleted)
             .Select(b => new
             {
-                b.BlockHashBlake3,
+                b.BlockStorageKey,
                 LengthBytes = (long)b.LengthBytes
             })
             .ToListAsync(ct);
@@ -39,7 +39,7 @@ public sealed class LocalBlockStorageMetricsService(
         var referencedBlockCount = blockRows.Count;
         var logicalReferencedBytes = blockRows.Sum(static row => Math.Max(0L, row.LengthBytes));
         var uniqueHashes = blockRows
-            .Select(static row => row.BlockHashBlake3?.Trim())
+            .Select(static row => row.BlockStorageKey?.Trim())
             .Where(static hash => !string.IsNullOrWhiteSpace(hash))
             .Select(static hash => hash!)
             .Distinct(StringComparer.OrdinalIgnoreCase)

@@ -66,12 +66,10 @@ public static class WordSemanticProjection
             var paragraphStyle = BuildParagraphStyleToken(paragraph, w, styleMap);
             lines.Add($"{paragraphLabel} [p:{paragraphStyle}]");
 
-            var runIndex = 0;
-            var hasContent = false;
+            var mergedRuns = new List<MergedRunSegment>();
 
             foreach (var run in paragraph.Descendants(w + "r"))
             {
-                runIndex++;
                 var runStyle = BuildRunStyleToken(run, w, styleMap);
                 var effectiveStyle = MergeRunAndParagraphStyle(runStyle, paragraphStyle);
                 var runText = ExtractRunText(run, w);
@@ -79,16 +77,66 @@ public static class WordSemanticProjection
                 if (string.IsNullOrEmpty(runText))
                     continue;
 
-                hasContent = true;
-                var normalizedText = NormalizeText(runText);
-                lines.Add($"{paragraphLabel}.R{runIndex:D4} [r:{effectiveStyle}] {normalizedText}");
+                AppendMergedRun(mergedRuns, effectiveStyle, runText);
             }
 
-            if (!hasContent)
+            if (mergedRuns.Count == 0)
+            {
                 lines.Add($"{paragraphLabel}.R0000 [r:default] <empty-paragraph>");
+                continue;
+            }
+
+            for (var mergedIndex = 0; mergedIndex < mergedRuns.Count; mergedIndex++)
+            {
+                var mergedRun = mergedRuns[mergedIndex];
+                var normalizedText = NormalizeText(mergedRun.Text);
+                lines.Add($"{paragraphLabel}.R{mergedIndex + 1:D4} [r:{mergedRun.Style}] {normalizedText}");
+            }
         }
 
         return lines;
+    }
+
+    private static void AppendMergedRun(ICollection<MergedRunSegment> mergedRuns, string style, string text)
+    {
+        if (mergedRuns is not List<MergedRunSegment> segments)
+            throw new InvalidOperationException("Merged runs collection must preserve insertion order.");
+
+        if (segments.Count == 0)
+        {
+            segments.Add(new MergedRunSegment(style, text));
+            return;
+        }
+
+        var lastIndex = segments.Count - 1;
+        var lastSegment = segments[lastIndex];
+
+        // Word can re-split identical visible text into many runs without any user-facing edit.
+        if (string.IsNullOrWhiteSpace(text) || AreEquivalentStylesForMerge(lastSegment.Style, style))
+        {
+            segments[lastIndex] = lastSegment with { Text = lastSegment.Text + text };
+            return;
+        }
+
+        segments.Add(new MergedRunSegment(style, text));
+    }
+
+    private static bool AreEquivalentStylesForMerge(string left, string right)
+    {
+        if (string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var leftTokens = SplitStyleTokens(left)
+            .Select(token => token.Trim())
+            .Where(token => token.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var rightTokens = SplitStyleTokens(right)
+            .Select(token => token.Trim())
+            .Where(token => token.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return leftTokens.SetEquals(rightTokens);
     }
 
     private static string MergeRunAndParagraphStyle(string runStyle, string paragraphStyle)
@@ -398,4 +446,6 @@ public static class WordSemanticProjection
 
         return normalized.ToLowerInvariant();
     }
+
+    private readonly record struct MergedRunSegment(string Style, string Text);
 }

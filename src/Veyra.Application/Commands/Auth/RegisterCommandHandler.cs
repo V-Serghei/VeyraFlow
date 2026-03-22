@@ -1,3 +1,4 @@
+using System;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
@@ -8,6 +9,7 @@ namespace Veyra.Application.Commands.Auth;
 public sealed class RegisterCommandHandler(
     IAuthService authService,
     IUserProfileRepository userProfileRepo,
+    ILocalCredentialStore localCredentialStore,
     ILogger<RegisterCommandHandler> logger)
     : IRequestHandler<RegisterCommand, OperationResult>
 {
@@ -34,6 +36,7 @@ public sealed class RegisterCommandHandler(
                 session.AccessTokenExpiresAtUtc,
                 session.RefreshTokenExpiresAtUtc,
                 cancellationToken);
+            await localCredentialStore.SavePasswordAsync(session.Username, request.Password, cancellationToken);
 
             logger.LogInformation("User {Username} registered and saved locally", session.Username);
             return OperationResult.Ok();
@@ -42,6 +45,18 @@ public sealed class RegisterCommandHandler(
         {
             logger.LogWarning(ex, "Registration rejected for user {Username}", request.Username);
             return OperationResult.Fail(ex.Message);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TimeoutException)
+        {
+            logger.LogWarning(ex, "Registration could not reach cloud for user {Username}", request.Username);
+
+            if (ex.Message.Contains("actively refused", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("connection refused", StringComparison.OrdinalIgnoreCase))
+            {
+                return OperationResult.Fail("Cloud service is temporarily unavailable. Try again later.");
+            }
+
+            return OperationResult.Fail("Internet connection is required. Connect to a network and try again.");
         }
         catch (Exception ex)
         {

@@ -19,6 +19,7 @@ public sealed class AppDiagnosticsService(
     private const long RecommendedMemoryLimitBytes = 500L * 1024 * 1024;
     private const long RecommendedHistoryTargetMs = 1000;
     private const double RecommendedScanTargetMbPerSecond = 50d;
+    private static readonly TimeSpan RecentScanTelemetryTtl = TimeSpan.FromHours(2);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -29,12 +30,22 @@ public sealed class AppDiagnosticsService(
     {
         ct.ThrowIfCancellationRequested();
 
-        var targetRepository = (await repositories.GetAllRepositoriesAsync(ct))
+        var availableRepositories = (await repositories.GetAllRepositoriesAsync(ct))
             .Where(static repo => !repo.IsDeleted)
             .Where(static repo => !string.IsNullOrWhiteSpace(repo.DirectoryPath) && Directory.Exists(repo.DirectoryPath))
-            .OrderByDescending(static repo => repo.TotalSizeBytes)
-            .ThenByDescending(static repo => repo.FileCount)
-            .FirstOrDefault();
+            .ToList();
+
+        var recentTelemetry = RepositoryScanTelemetryTracker.GetMostRecent(
+            RecentScanTelemetryTtl,
+            repositoryId => availableRepositories.Any(repo => repo.Id == repositoryId));
+
+        var targetRepository = recentTelemetry is not null
+            ? availableRepositories.FirstOrDefault(repo => repo.Id == recentTelemetry.RepositoryId)
+            : availableRepositories
+                .OrderByDescending(static repo => repo.LastScannedAt ?? DateTime.MinValue)
+                .ThenByDescending(static repo => repo.TotalSizeBytes)
+                .ThenByDescending(static repo => repo.FileCount)
+                .FirstOrDefault();
 
         var process = CaptureProcessMetrics();
         var nativeRuntime = CaptureNativeRuntime();
@@ -114,6 +125,14 @@ public sealed class AppDiagnosticsService(
         AppDiagnosticsNativeRuntimeDto nativeRuntime,
         CancellationToken ct)
     {
+        if (RepositoryScanTelemetryTracker.TryGetFresh(repository.Id, RecentScanTelemetryTtl, out var recentTelemetry)
+            && recentTelemetry.FileCount > 0
+            && recentTelemetry.TotalFileBytes > 0
+            && recentTelemetry.ThroughputMbPerSecond > 0)
+        {
+            return BuildScanBenchmarkFromTelemetry(recentTelemetry);
+        }
+
         if (!nativeRuntime.IsLoaded || !nativeRuntime.IsHealthy || !nativeRuntime.SupportsScan)
         {
             return new AppDiagnosticsScanBenchmarkDto(
@@ -152,6 +171,18 @@ public sealed class AppDiagnosticsService(
             var throughput = totalFileBytes <= 0
                 ? 0d
                 : totalFileBytes / 1024d / 1024d / (durationMs / 1000d);
+
+            RepositoryScanTelemetryTracker.Record(
+                repository.Id,
+                repository.DirectoryPath,
+                "rust_diagnostics",
+                filtered.Count,
+                fileCount,
+                totalFileBytes,
+                durationMs,
+                durationMs,
+                "diagnostics_benchmark",
+                DateTime.UtcNow);
 
             return new AppDiagnosticsScanBenchmarkDto(
                 Available: true,
@@ -199,12 +230,54 @@ public sealed class AppDiagnosticsService(
     private static AppDiagnosticsNativeRuntimeDto CaptureNativeRuntime()
     {
         var report = VeyraCoreNative.ProbeRuntimeHealth();
+        var featureUsage = NativeFeatureUsageTracker.Snapshot()
+            .Select(entry => new AppDiagnosticsNativeFeatureUsageDto(
+                entry.FeatureKey,
+                IsFeatureSupported(report, entry.FeatureKey),
+                entry.NativeHits,
+                entry.ManagedFallbacks))
+            .ToArray();
+
         return new AppDiagnosticsNativeRuntimeDto(
             report.IsLoaded,
             report.IsHealthy,
             report.SupportsScan,
+            report.SupportsStoreFileBlocks,
+            report.SupportsRestoreFileBlocks,
+            report.SupportsTextDiff,
+            report.SupportsSnapshotComparison,
+            report.SupportsRepositoryPathComparison,
+            report.SupportsVersionPlanning,
+            report.SupportsImageDiff,
+            featureUsage,
             report.LoadedPath,
             report.ErrorMessage);
     }
+
+    private static bool IsFeatureSupported(NativeRuntimeHealthReport report, string featureKey)
+        => featureKey switch
+        {
+            NativeFeatureUsageTracker.Scan => report.SupportsScan,
+            NativeFeatureUsageTracker.StoreBlocks => report.SupportsStoreFileBlocks,
+            NativeFeatureUsageTracker.RestoreBlocks => report.SupportsRestoreFileBlocks,
+            NativeFeatureUsageTracker.TextDiff => report.SupportsTextDiff,
+            NativeFeatureUsageTracker.SnapshotComparison => report.SupportsSnapshotComparison,
+            NativeFeatureUsageTracker.RepositoryPathComparison => report.SupportsRepositoryPathComparison,
+            NativeFeatureUsageTracker.VersionPlanning => report.SupportsVersionPlanning,
+            NativeFeatureUsageTracker.ImageDiff => report.SupportsImageDiff,
+            _ => false
+        };
+
+    private static AppDiagnosticsScanBenchmarkDto BuildScanBenchmarkFromTelemetry(RepositoryScanTelemetrySnapshot telemetry)
+        => new(
+            Available: true,
+            Engine: $"{telemetry.Engine}_recent",
+            EntryCount: telemetry.EntryCount,
+            FileCount: telemetry.FileCount,
+            TotalFileBytes: telemetry.TotalFileBytes,
+            DurationMs: telemetry.ScanDurationMs,
+            ThroughputMbPerSecond: telemetry.ThroughputMbPerSecond,
+            MeetsRecommendedTarget: telemetry.ThroughputMbPerSecond >= RecommendedScanTargetMbPerSecond,
+            TargetMbPerSecond: RecommendedScanTargetMbPerSecond);
 
 }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Infrastructure.Data.Persistence;
 
@@ -90,7 +91,10 @@ public class VeyraDbContext : DbContext
         modelBuilder.Entity<FileVersionBlock>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.BlockHashBlake3).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.BlockStorageKey)
+                .HasColumnName("BlockHashBlake3")
+                .IsRequired()
+                .HasMaxLength(64);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.Property(e => e.DeletedAt).IsRequired(false);
@@ -102,7 +106,7 @@ public class VeyraDbContext : DbContext
 
             entity.HasIndex(e => new { e.FileVersionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.FileVersionId, e.IsDeleted, e.Sequence });
-            entity.HasIndex(e => e.BlockHashBlake3);
+            entity.HasIndex(e => e.BlockStorageKey);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -281,8 +285,14 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.RetentionMaxTotalSizeBytes).IsRequired(false);
             entity.Property(e => e.RetentionTriggerFilter).HasMaxLength(512);
             entity.Property(e => e.RetentionRunIntervalMinutes).HasDefaultValue(60);
+            entity.Property(e => e.RetentionMaintenanceWindowStartHour).IsRequired(false);
+            entity.Property(e => e.RetentionMaintenanceWindowEndHour).IsRequired(false);
             entity.Property(e => e.RetentionLastRunAt).IsRequired(false);
             entity.Property(e => e.RetentionLastStatus).HasMaxLength(256);
+            entity.Property(e => e.RetentionStorageMode).HasMaxLength(16).HasDefaultValue(RepositoryRetentionStorageModes.Delete);
+            entity.Property(e => e.RetentionAllowManualSnapshotCleanup).HasDefaultValue(false);
+            entity.Property(e => e.RetentionAutomaticCompactionEnabled).HasDefaultValue(false);
+            entity.Property(e => e.RetentionAutomaticCompactionWindowHours).IsRequired(false);
             entity.HasIndex(e => new { e.RetentionEnabled, e.RetentionLastRunAt });
             entity.Property(e => e.SyncConflictStrategy).HasMaxLength(32).HasDefaultValue(Repository.DefaultSyncConflictStrategy);
             entity.Property(e => e.SyncRetryMaxAttempts).HasDefaultValue(5);
@@ -337,6 +347,10 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.Trigger).IsRequired().HasMaxLength(64);
             entity.Property(e => e.Title).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.IsArchived).HasDefaultValue(false);
+            entity.Property(e => e.ArchivedAt).IsRequired(false);
+            entity.Property(e => e.ArchiveFilePath).HasMaxLength(2048).IsRequired(false);
+            entity.Property(e => e.ArchiveFileSizeBytes).IsRequired(false);
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.Property(e => e.DeletedAt).IsRequired(false);
             entity.HasOne(e => e.Repository)
@@ -344,6 +358,7 @@ public class VeyraDbContext : DbContext
                 .HasForeignKey(e => e.RepositoryId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(e => new { e.RepositoryId, e.CreatedAt });
+            entity.HasIndex(e => new { e.RepositoryId, e.IsArchived, e.CreatedAt });
             entity.HasIndex(e => new { e.RepositoryId, e.IsDeleted, e.CreatedAt });
             entity.HasQueryFilter(e => !e.IsDeleted);
         });

@@ -48,6 +48,7 @@ public static partial class DependencyInjection
             IntervalMinutes = schedulerOverrides?.IntervalMinutes ?? (cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? 15),
             QuietHoursStartHour = schedulerOverrides?.QuietHoursStartHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0),
             QuietHoursEndHour = schedulerOverrides?.QuietHoursEndHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0),
+            MaxConcurrentScans = Math.Clamp(cfg.GetValue<int?>("SnapshotScheduler:MaxConcurrentScans") ?? 2, 1, 8),
             MaxReadBytesPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? 0,
             MaxIoOperationsPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? 0,
             RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,

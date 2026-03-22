@@ -1518,12 +1518,7 @@ public sealed partial class SnapshotNameDialogWindowViewModel : ObservableObject
     }
 
     private static Task<Bitmap?> LoadBitmapAsync(string? imagePath, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
-            return Task.FromResult<Bitmap?>(null);
-
-        return Task.Run(() => (Bitmap?)new Bitmap(imagePath), ct);
-    }
+        => PreviewBitmapLoader.LoadBitmapAsync(imagePath, ct);
 
     private void ClearLoadingState()
     {

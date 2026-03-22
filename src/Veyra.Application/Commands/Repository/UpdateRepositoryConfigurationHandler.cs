@@ -38,6 +38,13 @@ public sealed class UpdateRepositoryConfigurationHandler(
                 : request.Name.Trim();
 
             var safeRetentionPolicy = NormalizeRetentionPolicy(request.RetentionPolicy);
+            if (safeRetentionPolicy.Enabled
+                && TargetsManualSnapshots(safeRetentionPolicy.TriggerFilters)
+                && !safeRetentionPolicy.AllowManualSnapshotCleanup)
+            {
+                return OperationResult.Fail("Manual snapshot cleanup requires an explicit unlock.");
+            }
+
             var safeSyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(request.SyncConflictStrategy);
             var safeSyncRetryMaxAttempts = Math.Clamp(request.SyncRetryMaxAttempts, 1, 20);
             var safeSyncRetryBaseDelaySeconds = Math.Clamp(request.SyncRetryBaseDelaySeconds, 5, 600);
@@ -153,8 +160,19 @@ public sealed class UpdateRepositoryConfigurationHandler(
             MaxSnapshots = NormalizePositive(policy.MaxSnapshots),
             MaxTotalSizeBytes = NormalizePositive(policy.MaxTotalSizeBytes),
             TriggerFilters = filters,
-            RunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60)
+            RunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60),
+            StorageMode = RepositoryRetentionStorageModes.Normalize(policy.StorageMode),
+            AutomaticCompactionWindowHours = policy.AutomaticCompactionEnabled
+                ? NormalizePositive(policy.AutomaticCompactionWindowHours)
+                : null
         };
+    }
+
+    private static bool TargetsManualSnapshots(IReadOnlyCollection<string> triggerFilters)
+    {
+        return triggerFilters.Any(static value =>
+            string.Equals(value, "manual", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "all", StringComparison.OrdinalIgnoreCase));
     }
 
     private static int? NormalizePositive(int? value)

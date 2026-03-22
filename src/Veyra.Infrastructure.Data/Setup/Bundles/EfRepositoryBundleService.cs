@@ -21,6 +21,7 @@ public sealed class EfRepositoryBundleService(
     private const int CurrentBundleFormatVersion = 1;
     private const string ManifestEntryName = "manifest.json";
     private const int MaxNameLength = 256;
+    private const int ImportBatchSize = 1000;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -175,110 +176,25 @@ public sealed class EfRepositoryBundleService(
             })
             .ToListAsync(ct);
 
-        var fileVersionBlocks = await db.Set<FileVersionBlock>()
-            .AsNoTracking()
-            .Where(b => !b.IsDeleted && b.FileVersion.FileIdentity.RepositoryId == repositoryId)
-            .OrderBy(b => b.FileVersionId)
-            .ThenBy(b => b.Sequence)
-            .Select(b => new BundleFileVersionBlockInfo
-            {
-                Id = b.Id,
-                FileVersionId = b.FileVersionId,
-                Sequence = b.Sequence,
-                BlockHashBlake3 = b.BlockHashBlake3,
-                LengthBytes = b.LengthBytes,
-                StoredSizeBytes = b.StoredSizeBytes,
-                CreatedAtUtc = b.CreatedAt
-            })
-            .ToListAsync(ct);
+        var fileVersionIds = fileVersions
+            .Select(v => v.Id)
+            .ToList();
 
-        var snapshotFileLinks = await db.Set<SnapshotFileLink>()
-            .AsNoTracking()
-            .Where(l => !l.IsDeleted && l.Snapshot.RepositoryId == repositoryId)
-            .OrderBy(l => l.SnapshotId)
-            .ThenBy(l => l.FileIdentityId)
-            .Select(l => new BundleSnapshotLinkInfo
-            {
-                Id = l.Id,
-                SnapshotId = l.SnapshotId,
-                FileIdentityId = l.FileIdentityId,
-                FileVersionId = l.FileVersionId,
-                CreatedAtUtc = l.CreatedAt
-            })
-            .ToListAsync(ct);
+        var fileVersionBlocks = await LoadFileVersionBlocksAsync(fileVersionIds, ct);
 
-        var textDiffs = await db.Set<FileVersionTextDiff>()
-            .AsNoTracking()
-            .Where(d => !d.IsDeleted &&
-                        (db.Set<FileVersion>().Any(v => v.Id == d.LeftFileVersionId
-                                                        && !v.IsDeleted
-                                                        && !v.FileIdentity.IsDeleted
-                                                        && v.FileIdentity.RepositoryId == repositoryId)
-                         || db.Set<FileVersion>().Any(v => v.Id == d.RightFileVersionId
-                                                           && !v.IsDeleted
-                                                           && !v.FileIdentity.IsDeleted
-                                                           && v.FileIdentity.RepositoryId == repositoryId)))
-            .OrderBy(d => d.Id)
-            .Select(d => new BundleTextDiffInfo
-            {
-                Id = d.Id,
-                LeftFileVersionId = d.LeftFileVersionId,
-                RightFileVersionId = d.RightFileVersionId,
-                MaxLines = d.MaxLines,
-                DiffKeySha256 = d.DiffKeySha256,
-                RelativePath = d.RelativePath,
-                AddedLines = d.AddedLines,
-                RemovedLines = d.RemovedLines,
-                IsTruncated = d.IsTruncated,
-                StorageFormatVersion = d.StorageFormatVersion,
-                LinesJson = d.LinesJson,
-                CreatedAtUtc = d.CreatedAt,
-                UpdatedAtUtc = d.UpdatedAt
-            })
-            .ToListAsync(ct);
+        var snapshotIds = snapshots
+            .Select(s => s.Id)
+            .ToList();
+
+        var snapshotFileLinks = await LoadSnapshotFileLinksAsync(snapshotIds, ct);
+
+        var textDiffs = await LoadTextDiffsAsync(fileVersionIds, ct);
 
         var diffIds = textDiffs.Select(d => d.Id).ToHashSet();
 
-        var textDiffHunks = await db.Set<FileVersionTextDiffHunk>()
-            .AsNoTracking()
-            .Where(h => !h.IsDeleted && diffIds.Contains(h.DiffId))
-            .OrderBy(h => h.DiffId)
-            .ThenBy(h => h.Sequence)
-            .Select(h => new BundleTextDiffHunkInfo
-            {
-                Id = h.Id,
-                DiffId = h.DiffId,
-                Sequence = h.Sequence,
-                StartLineSequence = h.StartLineSequence,
-                EndLineSequence = h.EndLineSequence,
-                OldStartLine = h.OldStartLine,
-                OldLineCount = h.OldLineCount,
-                NewStartLine = h.NewStartLine,
-                NewLineCount = h.NewLineCount,
-                ChangeKind = h.ChangeKind,
-                CreatedAtUtc = h.CreatedAt
-            })
-            .ToListAsync(ct);
+        var textDiffHunks = await LoadTextDiffHunksAsync(diffIds, ct);
 
-        var textDiffLines = await db.Set<FileVersionTextDiffLine>()
-            .AsNoTracking()
-            .Where(l => !l.IsDeleted && diffIds.Contains(l.DiffId))
-            .OrderBy(l => l.DiffId)
-            .ThenBy(l => l.Sequence)
-            .Select(l => new BundleTextDiffLineInfo
-            {
-                Id = l.Id,
-                DiffId = l.DiffId,
-                Sequence = l.Sequence,
-                Kind = l.Kind,
-                LeftLineNumber = l.LeftLineNumber,
-                RightLineNumber = l.RightLineNumber,
-                HunkId = l.HunkId,
-                InHunkSequence = l.InHunkSequence,
-                TextLineAtomId = l.TextLineAtomId,
-                CreatedAtUtc = l.CreatedAt
-            })
-            .ToListAsync(ct);
+        var textDiffLines = await LoadTextDiffLinesAsync(diffIds, ct);
 
         var textLineAtomIds = textDiffLines
             .Select(l => l.TextLineAtomId)
@@ -340,7 +256,7 @@ public sealed class EfRepositoryBundleService(
 
         var storeRoot = RepositoryBundleBlockPathResolver.ResolveStoreRoot(configuration);
         var uniqueBlockHashes = fileVersionBlocks
-            .Select(b => b.BlockHashBlake3)
+            .Select(b => b.BlockStorageKey)
             .Where(h => !string.IsNullOrWhiteSpace(h))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(h => h, StringComparer.OrdinalIgnoreCase)
@@ -568,11 +484,11 @@ public sealed class EfRepositoryBundleService(
 
         if (snapshotRows.Count > 0)
         {
-            db.AddRange(snapshotRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in snapshotRows)
-                snapshotIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                snapshotRows,
+                row => row.Entity,
+                (row, entity) => snapshotIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var entryRows = manifest.SnapshotEntries
@@ -596,10 +512,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (entryRows.Count > 0)
-        {
-            db.AddRange(entryRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(entryRows, ct);
 
         var identityRows = manifest.FileIdentities
             .OrderBy(i => i.RelativePath, StringComparer.OrdinalIgnoreCase)
@@ -623,11 +536,11 @@ public sealed class EfRepositoryBundleService(
 
         if (identityRows.Count > 0)
         {
-            db.AddRange(identityRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in identityRows)
-                identityIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                identityRows,
+                row => row.Entity,
+                (row, entity) => identityIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var versionRows = manifest.FileVersions
@@ -653,11 +566,11 @@ public sealed class EfRepositoryBundleService(
 
         if (versionRows.Count > 0)
         {
-            db.AddRange(versionRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in versionRows)
-                versionIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                versionRows,
+                row => row.Entity,
+                (row, entity) => versionIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var blockRows = manifest.FileVersionBlocks
@@ -668,7 +581,7 @@ public sealed class EfRepositoryBundleService(
             {
                 FileVersionId = versionIdMap[b.FileVersionId],
                 Sequence = b.Sequence,
-                BlockHashBlake3 = b.BlockHashBlake3,
+                BlockStorageKey = b.BlockStorageKey,
                 LengthBytes = b.LengthBytes,
                 StoredSizeBytes = b.StoredSizeBytes,
                 CreatedAt = b.CreatedAtUtc,
@@ -678,10 +591,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (blockRows.Count > 0)
-        {
-            db.AddRange(blockRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(blockRows, ct);
 
         var linkRows = manifest.SnapshotFileLinks
             .Where(l => snapshotIdMap.ContainsKey(l.SnapshotId)
@@ -701,10 +611,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (linkRows.Count > 0)
-        {
-            db.AddRange(linkRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(linkRows, ct);
 
         var diffRows = manifest.TextDiffs
             .Where(d => versionIdMap.ContainsKey(d.LeftFileVersionId)
@@ -735,11 +642,11 @@ public sealed class EfRepositoryBundleService(
 
         if (diffRows.Count > 0)
         {
-            db.AddRange(diffRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in diffRows)
-                diffIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                diffRows,
+                row => row.Entity,
+                (row, entity) => diffIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var atomRows = await UpsertTextLineAtomsAsync(manifest.TextLineAtoms, atomIdMap, ct);
@@ -771,11 +678,11 @@ public sealed class EfRepositoryBundleService(
 
         if (hunkRows.Count > 0)
         {
-            db.AddRange(hunkRows.Select(x => x.Entity));
-            await db.SaveChangesAsync(ct);
-
-            foreach (var row in hunkRows)
-                hunkIdMap[row.Source.Id] = row.Entity.Id;
+            await SaveMappedRowsInBatchesAsync(
+                hunkRows,
+                row => row.Entity,
+                (row, entity) => hunkIdMap[row.Source.Id] = entity.Id,
+                ct);
         }
 
         var lineRows = manifest.TextDiffLines
@@ -801,10 +708,7 @@ public sealed class EfRepositoryBundleService(
             .ToList();
 
         if (lineRows.Count > 0)
-        {
-            db.AddRange(lineRows);
-            await db.SaveChangesAsync(ct);
-        }
+            await SaveEntitiesInBatchesAsync(lineRows, ct);
 
         var latestSnapshot = snapshotRows
             .Select(r => r.Entity)
@@ -858,6 +762,68 @@ public sealed class EfRepositoryBundleService(
             ImportedAtUtc: DateTime.UtcNow,
             Warnings: warnings,
             Summary: summary);
+    }
+
+    private async Task SaveEntitiesInBatchesAsync<TEntity>(
+        IReadOnlyList<TEntity> entities,
+        CancellationToken ct)
+        where TEntity : class
+    {
+        foreach (var chunk in Chunk(entities, ImportBatchSize))
+        {
+            var previousAutoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
+            try
+            {
+                db.AddRange(chunk);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+                DetachEntities(chunk);
+            }
+        }
+    }
+
+    private async Task SaveMappedRowsInBatchesAsync<TSource, TEntity>(
+        IReadOnlyList<TSource> rows,
+        Func<TSource, TEntity> entitySelector,
+        Action<TSource, TEntity> afterSave,
+        CancellationToken ct)
+        where TEntity : class
+    {
+        foreach (var chunk in Chunk(rows, ImportBatchSize))
+        {
+            var entities = chunk.Select(entitySelector).ToList();
+            var previousAutoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
+            try
+            {
+                db.AddRange(entities);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+            }
+
+            foreach (var row in chunk)
+                afterSave(row, entitySelector(row));
+
+            DetachEntities(entities);
+        }
+    }
+
+    private void DetachEntities<TEntity>(IReadOnlyList<TEntity> entities)
+        where TEntity : class
+    {
+        foreach (var entity in entities)
+        {
+            var entry = db.Entry(entity);
+            if (entry.State != EntityState.Detached)
+                entry.State = EntityState.Detached;
+        }
     }
 
     private static bool ValidateManifestShape(
@@ -923,6 +889,213 @@ public sealed class EfRepositoryBundleService(
         return output;
     }
 
+    private async Task<List<BundleFileVersionBlockInfo>> LoadFileVersionBlocksAsync(
+        IReadOnlyList<long> fileVersionIds,
+        CancellationToken ct)
+    {
+        if (fileVersionIds.Count == 0)
+            return [];
+
+        var output = new List<BundleFileVersionBlockInfo>();
+
+        foreach (var chunk in Chunk(fileVersionIds, 500))
+        {
+            var items = await db.Set<FileVersionBlock>()
+                .AsNoTracking()
+                .Where(b => !b.IsDeleted && chunk.Contains(b.FileVersionId))
+                .OrderBy(b => b.FileVersionId)
+                .ThenBy(b => b.Sequence)
+                .Select(b => new BundleFileVersionBlockInfo
+                {
+                    Id = b.Id,
+                    FileVersionId = b.FileVersionId,
+                    Sequence = b.Sequence,
+                    BlockStorageKey = b.BlockStorageKey,
+                    LengthBytes = b.LengthBytes,
+                    StoredSizeBytes = b.StoredSizeBytes,
+                    CreatedAtUtc = b.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            output.AddRange(items);
+        }
+
+        output.Sort((left, right) =>
+        {
+            var versionCompare = left.FileVersionId.CompareTo(right.FileVersionId);
+            return versionCompare != 0 ? versionCompare : left.Sequence.CompareTo(right.Sequence);
+        });
+        return output;
+    }
+
+    private async Task<List<BundleSnapshotLinkInfo>> LoadSnapshotFileLinksAsync(
+        IReadOnlyList<long> snapshotIds,
+        CancellationToken ct)
+    {
+        if (snapshotIds.Count == 0)
+            return [];
+
+        var output = new List<BundleSnapshotLinkInfo>();
+
+        foreach (var chunk in Chunk(snapshotIds, 500))
+        {
+            var items = await db.Set<SnapshotFileLink>()
+                .AsNoTracking()
+                .Where(l => !l.IsDeleted && chunk.Contains(l.SnapshotId))
+                .OrderBy(l => l.SnapshotId)
+                .ThenBy(l => l.FileIdentityId)
+                .Select(l => new BundleSnapshotLinkInfo
+                {
+                    Id = l.Id,
+                    SnapshotId = l.SnapshotId,
+                    FileIdentityId = l.FileIdentityId,
+                    FileVersionId = l.FileVersionId,
+                    CreatedAtUtc = l.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            output.AddRange(items);
+        }
+
+        output.Sort((left, right) =>
+        {
+            var snapshotCompare = left.SnapshotId.CompareTo(right.SnapshotId);
+            return snapshotCompare != 0 ? snapshotCompare : left.FileIdentityId.CompareTo(right.FileIdentityId);
+        });
+        return output;
+    }
+
+    private async Task<List<BundleTextDiffInfo>> LoadTextDiffsAsync(
+        IReadOnlyList<long> fileVersionIds,
+        CancellationToken ct)
+    {
+        if (fileVersionIds.Count == 0)
+            return [];
+
+        var byId = new Dictionary<long, BundleTextDiffInfo>();
+
+        foreach (var chunk in Chunk(fileVersionIds, 500))
+        {
+            var items = await db.Set<FileVersionTextDiff>()
+                .AsNoTracking()
+                .Where(d => !d.IsDeleted
+                            && (chunk.Contains(d.LeftFileVersionId) || chunk.Contains(d.RightFileVersionId)))
+                .OrderBy(d => d.Id)
+                .Select(d => new BundleTextDiffInfo
+                {
+                    Id = d.Id,
+                    LeftFileVersionId = d.LeftFileVersionId,
+                    RightFileVersionId = d.RightFileVersionId,
+                    MaxLines = d.MaxLines,
+                    DiffKeySha256 = d.DiffKeySha256,
+                    RelativePath = d.RelativePath,
+                    AddedLines = d.AddedLines,
+                    RemovedLines = d.RemovedLines,
+                    IsTruncated = d.IsTruncated,
+                    StorageFormatVersion = d.StorageFormatVersion,
+                    LinesJson = d.LinesJson,
+                    CreatedAtUtc = d.CreatedAt,
+                    UpdatedAtUtc = d.UpdatedAt
+                })
+                .ToListAsync(ct);
+
+            foreach (var item in items)
+            {
+                if (!byId.ContainsKey(item.Id))
+                    byId[item.Id] = item;
+            }
+        }
+
+        return byId.Values
+            .OrderBy(item => item.Id)
+            .ToList();
+    }
+
+    private async Task<List<BundleTextDiffHunkInfo>> LoadTextDiffHunksAsync(
+        IReadOnlyCollection<long> diffIds,
+        CancellationToken ct)
+    {
+        if (diffIds.Count == 0)
+            return [];
+
+        var output = new List<BundleTextDiffHunkInfo>();
+
+        foreach (var chunk in Chunk(diffIds.ToList(), 500))
+        {
+            var items = await db.Set<FileVersionTextDiffHunk>()
+                .AsNoTracking()
+                .Where(h => !h.IsDeleted && chunk.Contains(h.DiffId))
+                .OrderBy(h => h.DiffId)
+                .ThenBy(h => h.Sequence)
+                .Select(h => new BundleTextDiffHunkInfo
+                {
+                    Id = h.Id,
+                    DiffId = h.DiffId,
+                    Sequence = h.Sequence,
+                    StartLineSequence = h.StartLineSequence,
+                    EndLineSequence = h.EndLineSequence,
+                    OldStartLine = h.OldStartLine,
+                    OldLineCount = h.OldLineCount,
+                    NewStartLine = h.NewStartLine,
+                    NewLineCount = h.NewLineCount,
+                    ChangeKind = h.ChangeKind,
+                    CreatedAtUtc = h.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            output.AddRange(items);
+        }
+
+        output.Sort((left, right) =>
+        {
+            var diffCompare = left.DiffId.CompareTo(right.DiffId);
+            return diffCompare != 0 ? diffCompare : left.Sequence.CompareTo(right.Sequence);
+        });
+        return output;
+    }
+
+    private async Task<List<BundleTextDiffLineInfo>> LoadTextDiffLinesAsync(
+        IReadOnlyCollection<long> diffIds,
+        CancellationToken ct)
+    {
+        if (diffIds.Count == 0)
+            return [];
+
+        var output = new List<BundleTextDiffLineInfo>();
+
+        foreach (var chunk in Chunk(diffIds.ToList(), 500))
+        {
+            var items = await db.Set<FileVersionTextDiffLine>()
+                .AsNoTracking()
+                .Where(l => !l.IsDeleted && chunk.Contains(l.DiffId))
+                .OrderBy(l => l.DiffId)
+                .ThenBy(l => l.Sequence)
+                .Select(l => new BundleTextDiffLineInfo
+                {
+                    Id = l.Id,
+                    DiffId = l.DiffId,
+                    Sequence = l.Sequence,
+                    Kind = l.Kind,
+                    LeftLineNumber = l.LeftLineNumber,
+                    RightLineNumber = l.RightLineNumber,
+                    HunkId = l.HunkId,
+                    InHunkSequence = l.InHunkSequence,
+                    TextLineAtomId = l.TextLineAtomId,
+                    CreatedAtUtc = l.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            output.AddRange(items);
+        }
+
+        output.Sort((left, right) =>
+        {
+            var diffCompare = left.DiffId.CompareTo(right.DiffId);
+            return diffCompare != 0 ? diffCompare : left.Sequence.CompareTo(right.Sequence);
+        });
+        return output;
+    }
+
     private async Task<int> UpsertTextLineAtomsAsync(
         IReadOnlyList<BundleTextLineAtomInfo> atoms,
         IDictionary<long, long> atomIdMap,
@@ -952,7 +1125,7 @@ public sealed class EfRepositoryBundleService(
             }
         }
 
-        var created = new List<(long SourceId, TextLineAtom Entity)>();
+        var pendingByKey = new Dictionary<(string Hash, string Text), PendingTextLineAtomImportRow>();
 
         foreach (var atom in atoms.OrderBy(a => a.Id))
         {
@@ -966,25 +1139,56 @@ public sealed class EfRepositoryBundleService(
                 continue;
             }
 
-            var entity = new TextLineAtom
+            if (pendingByKey.TryGetValue(key, out var pending))
             {
-                HashSha256 = atom.HashSha256,
-                Text = atom.Text ?? string.Empty,
-                CreatedAt = atom.CreatedAtUtc
-            };
+                pending.SourceIds.Add(atom.Id);
+                continue;
+            }
 
-            db.Add(entity);
-            created.Add((atom.Id, entity));
-            existing[key] = entity;
+            pendingByKey[key] = new PendingTextLineAtomImportRow(
+                new TextLineAtom
+                {
+                    HashSha256 = atom.HashSha256,
+                    Text = atom.Text ?? string.Empty,
+                    CreatedAt = atom.CreatedAtUtc
+                },
+                new List<long> { atom.Id });
         }
 
-        if (created.Count > 0)
-            await db.SaveChangesAsync(ct);
+        if (pendingByKey.Count == 0)
+            return atomIdMap.Count;
 
-        foreach (var row in created)
-            atomIdMap[row.SourceId] = row.Entity.Id;
+        foreach (var chunk in Chunk(pendingByKey.Values.ToList(), ImportBatchSize))
+        {
+            var entities = chunk.Select(row => row.Entity).ToList();
+            var previousAutoDetectChanges = db.ChangeTracker.AutoDetectChangesEnabled;
+            db.ChangeTracker.AutoDetectChangesEnabled = false;
+            try
+            {
+                db.AddRange(entities);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.AutoDetectChangesEnabled = previousAutoDetectChanges;
+            }
+
+            foreach (var row in chunk)
+            {
+                foreach (var sourceId in row.SourceIds)
+                    atomIdMap[sourceId] = row.Entity.Id;
+            }
+
+            DetachEntities(entities);
+        }
 
         return atomIdMap.Count;
+    }
+
+    private sealed class PendingTextLineAtomImportRow(TextLineAtom entity, List<long> sourceIds)
+    {
+        public TextLineAtom Entity { get; } = entity;
+        public List<long> SourceIds { get; } = sourceIds;
     }
 
     private async Task<int> ImportBlockArtifactsAsync(
@@ -1197,4 +1401,3 @@ public sealed class EfRepositoryBundleService(
         }
     }
 }
-

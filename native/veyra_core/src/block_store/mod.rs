@@ -4,6 +4,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+const BLOCK_PAYLOAD_MAGIC: &[u8; 4] = b"VYB1";
+const BLOCK_PAYLOAD_VERSION: u8 = 1;
+const BLOCK_COMPRESSION_NONE: u8 = 0;
+const BLOCK_COMPRESSION_ZSTD: u8 = 1;
+const BLOCK_COMPRESSION_LEVEL: i32 = 6;
+
 #[derive(Serialize)]
 struct StoredBlockRef {
     sequence: u32,
@@ -62,8 +68,7 @@ fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bo
         return Ok((sz, false));
     }
 
-    let compressed =
-        zstd::encode_all(bytes, 3).map_err(|e| format!("compress block {hash}: {e}"))?;
+    let encoded = encode_block_payload(hash, bytes)?;
 
     let temp_path = block_path.with_extension(format!("{}.tmp", std::process::id()));
     if temp_path.exists() {
@@ -73,7 +78,7 @@ fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bo
     {
         let mut f = File::create(&temp_path)
             .map_err(|e| format!("create temp {}: {e}", temp_path.display()))?;
-        f.write_all(&compressed)
+        f.write_all(&encoded)
             .map_err(|e| format!("write temp {}: {e}", temp_path.display()))?;
         f.flush()
             .map_err(|e| format!("flush temp {}: {e}", temp_path.display()))?;
@@ -102,6 +107,51 @@ fn persist_block(store_root: &Path, hash: &str, bytes: &[u8]) -> Result<(u64, bo
         .len();
 
     Ok((stored_size, true))
+}
+
+fn encode_block_payload(hash: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let compressed = zstd::encode_all(bytes, BLOCK_COMPRESSION_LEVEL)
+        .map_err(|e| format!("compress block {hash}: {e}"))?;
+
+    let (compression_kind, payload) = if compressed.len() < bytes.len() {
+        (BLOCK_COMPRESSION_ZSTD, compressed)
+    } else {
+        (BLOCK_COMPRESSION_NONE, bytes.to_vec())
+    };
+
+    let mut encoded = Vec::with_capacity(BLOCK_PAYLOAD_MAGIC.len() + 2 + payload.len());
+    encoded.extend_from_slice(BLOCK_PAYLOAD_MAGIC);
+    encoded.push(BLOCK_PAYLOAD_VERSION);
+    encoded.push(compression_kind);
+    encoded.extend_from_slice(&payload);
+    Ok(encoded)
+}
+
+fn decode_block_payload(hash: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let header_len = BLOCK_PAYLOAD_MAGIC.len() + 2;
+    if bytes.len() >= header_len && &bytes[..BLOCK_PAYLOAD_MAGIC.len()] == BLOCK_PAYLOAD_MAGIC {
+        let version = bytes[BLOCK_PAYLOAD_MAGIC.len()];
+        if version != BLOCK_PAYLOAD_VERSION {
+            return Err(format!(
+                "unsupported block payload version {version} for block {hash}"
+            ));
+        }
+
+        let compression_kind = bytes[BLOCK_PAYLOAD_MAGIC.len() + 1];
+        let payload = &bytes[header_len..];
+
+        return match compression_kind {
+            BLOCK_COMPRESSION_NONE => Ok(payload.to_vec()),
+            BLOCK_COMPRESSION_ZSTD => zstd::decode_all(payload)
+                .map_err(|e| format!("decompress block {hash}: {e}")),
+            _ => Err(format!(
+                "unsupported block compression kind {compression_kind} for block {hash}"
+            )),
+        };
+    }
+
+    // Legacy native blocks were stored as bare zstd streams without an envelope.
+    zstd::decode_all(bytes).map_err(|e| format!("decompress block {hash}: {e}"))
 }
 
 pub fn store_file_blocks(
@@ -188,7 +238,7 @@ fn read_block(store_root: &Path, hash: &str) -> Result<Vec<u8>, String> {
 
     let bytes = fs::read(&block_path).map_err(|e| format!("read {}: {e}", block_path.display()))?;
 
-    zstd::decode_all(bytes.as_slice()).map_err(|e| format!("decompress block {hash}: {e}"))
+    decode_block_payload(hash, bytes.as_slice())
 }
 
 pub fn restore_file_from_blocks(
@@ -261,4 +311,40 @@ pub fn restore_file_from_blocks(
     })?;
 
     Ok(total_written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_block_payload_round_trips_compressible_data() {
+        let raw = vec![b'A'; 16 * 1024];
+        let encoded = encode_block_payload("compressible", raw.as_slice()).unwrap();
+
+        assert_eq!(&encoded[..BLOCK_PAYLOAD_MAGIC.len()], BLOCK_PAYLOAD_MAGIC);
+        assert_eq!(encoded[BLOCK_PAYLOAD_MAGIC.len() + 1], BLOCK_COMPRESSION_ZSTD);
+
+        let decoded = decode_block_payload("compressible", encoded.as_slice()).unwrap();
+        assert_eq!(decoded, raw);
+    }
+
+    #[test]
+    fn encode_decode_block_payload_round_trips_incompressible_data_without_forcing_zstd() {
+        let mut raw = Vec::with_capacity(64 * 1024);
+        let mut counter = 0_u64;
+        while raw.len() < 64 * 1024 {
+            let digest = blake3::hash(counter.to_le_bytes().as_slice());
+            raw.extend_from_slice(digest.as_bytes());
+            counter += 1;
+        }
+        raw.truncate(64 * 1024);
+        let encoded = encode_block_payload("incompressible", raw.as_slice()).unwrap();
+
+        assert_eq!(&encoded[..BLOCK_PAYLOAD_MAGIC.len()], BLOCK_PAYLOAD_MAGIC);
+        assert_eq!(encoded[BLOCK_PAYLOAD_MAGIC.len() + 1], BLOCK_COMPRESSION_NONE);
+
+        let decoded = decode_block_payload("incompressible", encoded.as_slice()).unwrap();
+        assert_eq!(decoded, raw);
+    }
 }

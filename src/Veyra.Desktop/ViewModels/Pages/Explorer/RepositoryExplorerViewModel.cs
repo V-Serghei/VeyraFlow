@@ -20,6 +20,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Services.Storage;
@@ -37,6 +38,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private const int ExplorerFilterDebounceMs = 100;
 
     private readonly IMediator _mediator;
+    private readonly IServiceScopeExecutor _scopeExecutor;
     private readonly IWindowService _windows;
     private readonly ILogger<RepositoryExplorerViewModel> _log;
     private readonly IRepositoryFsEventQueueService _fsEventQueue;
@@ -83,6 +85,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private int _pendingDeletedCount;
     private bool _suppressFileVersionsCollectionChanged;
     private bool _suppressComparableVersionsCollectionChanged;
+    private SnapshotHistoryWindow? _snapshotHistoryWindow;
+
+    private enum ScanExecutionOutcome
+    {
+        Completed,
+        Deferred,
+        Failed
+    }
 
     public event Action? BackRequested;
     public event Func<int, Task>? OpenSettingsRequested;
@@ -225,6 +235,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasNoSnapshotHistory))]
     private bool _hasSnapshotHistory;
     [ObservableProperty] private string _snapshotHistorySearchQuery = string.Empty;
+    [ObservableProperty] private string _selectedSnapshotKindFilter = "all";
     [ObservableProperty] private string _selectedSnapshotTriggerFilter = "all";
     [ObservableProperty] private string _selectedSnapshotTagFilter = "all";
     [ObservableProperty] private string _snapshotHistoryMinChangedFiles = string.Empty;
@@ -435,6 +446,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     public ObservableCollection<string> ExtensionFilters { get; } = ["all"];
     public ObservableCollection<string> ModifiedWindowFilters { get; } = ["all", "24h", "7d", "30d"];
     public ObservableCollection<RepositoryExplorerSavedFilterViewModel> SavedExplorerFilters { get; } = [];
+    public ObservableCollection<string> SnapshotKindFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotTriggerFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotTagFilters { get; } = ["all"];
     public ObservableCollection<string> SnapshotFileChangeKindFilters { get; } = ["all", "added", "modified", "removed"];
@@ -449,12 +461,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     public RepositoryExplorerViewModel(
         IMediator mediator,
+        IServiceScopeExecutor scopeExecutor,
         IWindowService windows,
         ILogger<RepositoryExplorerViewModel> log,
         IRepositoryFsEventQueueService fsEventQueue,
         IRepositoryExplorerFilterStore filterStore)
     {
         _mediator = mediator;
+        _scopeExecutor = scopeExecutor;
         _windows = windows;
         _log = log;
         _fsEventQueue = fsEventQueue;
@@ -511,6 +525,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             HasSnapshotFiles = false;
             IsSnapshotHistoryLoading = false;
             IsSnapshotFilesLoading = false;
+            CloseSnapshotHistoryWindow();
             IsSnapshotHistoryMenuOpen = false;
             IsDiffPreviewMenuOpen = false;
             IsDiffPreviewLoading = false;
@@ -609,6 +624,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     partial void OnMinSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
     partial void OnMaxSizeMbChanged(string value) => ApplyExplorerFiltersIfNeeded();
     partial void OnSnapshotHistorySearchQueryChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
+    partial void OnSelectedSnapshotKindFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSelectedSnapshotTriggerFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSelectedSnapshotTagFilterChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
     partial void OnSnapshotHistoryMinChangedFilesChanged(string value) => ApplySnapshotHistoryFiltersIfNeeded();
@@ -769,6 +785,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private void Back()
     {
+        CloseSnapshotHistoryWindow();
         StopLiveSync();
         BackRequested?.Invoke();
     }
@@ -913,6 +930,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         try
         {
             SnapshotHistorySearchQuery = string.Empty;
+            SelectedSnapshotKindFilter = "all";
             SelectedSnapshotTriggerFilter = "all";
             SelectedSnapshotTagFilter = "all";
             SnapshotHistoryMinChangedFiles = string.Empty;
@@ -1029,22 +1047,61 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     [RelayCommand]
     private async Task ShowSnapshotHistoryAsync()
     {
-        IsSnapshotHistoryMenuOpen = true;
-        await Task.Yield();
-
         if (RepositoryId == 0)
             return;
+
+        IsSnapshotHistoryMenuOpen = true;
 
         if (!IsSnapshotHistoryLoading)
             await LoadSnapshotHistoryAsync(SelectedSnapshot?.SnapshotId ?? 0);
 
         if (SelectedSnapshot is null && SnapshotHistory.Count > 0)
             SelectedSnapshot = SnapshotHistory[0];
+
+        ShowSnapshotHistoryWindow();
     }
 
     [RelayCommand]
     private void CloseSnapshotHistoryMenu()
-        => IsSnapshotHistoryMenuOpen = false;
+        => CloseSnapshotHistoryWindow();
+
+    private void ShowSnapshotHistoryWindow()
+    {
+        if (_snapshotHistoryWindow is { } existing)
+        {
+            existing.Activate();
+            existing.Focus();
+            return;
+        }
+
+        var window = _windows.Create<SnapshotHistoryWindow>();
+        window.DataContext = this;
+
+        window.Closed += OnSnapshotHistoryWindowClosed;
+        _snapshotHistoryWindow = window;
+        _windows.Show(window);
+    }
+
+    private void CloseSnapshotHistoryWindow()
+    {
+        IsSnapshotHistoryMenuOpen = false;
+
+        if (_snapshotHistoryWindow is not { } window)
+            return;
+
+        _snapshotHistoryWindow = null;
+        window.Closed -= OnSnapshotHistoryWindowClosed;
+        window.Close();
+    }
+
+    private void OnSnapshotHistoryWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is SnapshotHistoryWindow window)
+            window.Closed -= OnSnapshotHistoryWindowClosed;
+
+        _snapshotHistoryWindow = null;
+        IsSnapshotHistoryMenuOpen = false;
+    }
 
     [RelayCommand]
     private async Task ExportRepositoryBundleAsync()
@@ -1462,6 +1519,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         IsSnapshotHistoryMenuOpen = true;
         await LoadSnapshotHistoryAsync(snapshotId);
+        ShowSnapshotHistoryWindow();
 
         var target = SnapshotHistory.FirstOrDefault(item => item.SnapshotId == snapshotId);
         if (target is not null)
@@ -1661,7 +1719,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         VersionActionMessage = Loc.F("explorer.diff_ready_message", beforeVersion.VersionName, afterVersion.VersionName, value.AddedLines, value.RemovedLines);
     }
 
-    private async Task<bool> ExecuteScanAsync(
+    private async Task<ScanExecutionOutcome> ExecuteScanAsync(
         bool saveFileVersions,
         string triggerOverride,
         string fallbackMessage,
@@ -1671,13 +1729,13 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         IReadOnlyList<string>? snapshotTags = null)
     {
         if (RepositoryId == 0)
-            return false;
+            return ScanExecutionOutcome.Failed;
 
         if (!await _scanGate.WaitAsync(0))
         {
             if (showErrors)
                 ErrorMessage = Loc.T("explorer.error_scan_already_running");
-            return false;
+            return ScanExecutionOutcome.Deferred;
         }
 
         var success = false;
@@ -1703,20 +1761,30 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     ScanMessage = p.Message;
             });
 
-            var result = await _mediator.Send(new ScanRepositoryCommand(
+            var command = new ScanRepositoryCommand(
                 RepositoryId,
                 progress,
                 new RepositoryScanOptionsDto(
                     SaveFileVersions: saveFileVersions,
                     TriggerOverride: triggerOverride,
                     SnapshotTitle: snapshotTitle,
-                    SnapshotTags: snapshotTags)));
+                    SnapshotTags: snapshotTags));
+
+            var result = await _scopeExecutor.ExecuteAsync<IMediator, OperationResult<RepositoryScanResultDto>>(
+                (mediator, token) => mediator.Send(command, token));
 
             if (!result.Success)
             {
                 if (showErrors)
                     ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "explorer.error_scan_finished_with_error");
-                return false;
+                return ScanExecutionOutcome.Failed;
+            }
+
+            if (result.Value?.SkippedBecauseScanInProgress == true)
+            {
+                if (showErrors)
+                    ErrorMessage = Loc.T("explorer.error_scan_already_running");
+                return ScanExecutionOutcome.Deferred;
             }
 
             if (result.Value?.SnapshotCreated == true)
@@ -1726,7 +1794,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 VersionActionMessage = successMessage;
 
             success = true;
-            return true;
+            return ScanExecutionOutcome.Completed;
         }
         catch (Exception ex)
         {
@@ -1738,7 +1806,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
             if (showErrors)
                 ErrorMessage = Loc.T("explorer.error_scan_failed");
-            return false;
+            return ScanExecutionOutcome.Failed;
         }
         finally
         {
@@ -1870,9 +1938,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 visible.Add(selected);
         }
 
-        VisibleFileVersions.Clear();
-        foreach (var version in visible)
-            VisibleFileVersions.Add(version);
+        ReplaceCollectionItems(VisibleFileVersions, visible, AreReferenceItemsEquivalent);
 
         OnPropertyChanged(nameof(CanToggleFileVersionsView));
         OnPropertyChanged(nameof(FileVersionsToggleLabel));
@@ -2100,6 +2166,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         RebuildStaticFilterOptions(ModifiedWindowFilters, SelectedModifiedWindowFilter, ["all", "24h", "7d", "30d"], value => SelectedModifiedWindowFilter = value);
         RebuildStaticFilterOptions(SnapshotFileChangeKindFilters, SelectedSnapshotFileChangeKindFilter, ["all", "added", "modified", "removed"], value => SelectedSnapshotFileChangeKindFilter = value);
 
+        var selectedKind = SelectedSnapshotKindFilter;
+        var currentKinds = SnapshotKindFilters.ToList();
+        RebuildStaticFilterOptions(SnapshotKindFilters, selectedKind, currentKinds, value => SelectedSnapshotKindFilter = value);
+
         var selectedTrigger = SelectedSnapshotTriggerFilter;
         var currentTriggers = SnapshotTriggerFilters.ToList();
         RebuildStaticFilterOptions(SnapshotTriggerFilters, selectedTrigger, currentTriggers, value => SelectedSnapshotTriggerFilter = value);
@@ -2210,6 +2280,8 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                     SnapshotId = item.SnapshotId,
                     Title = item.Title,
                     CreatedAtUtc = item.CreatedAtUtc,
+                    Kind = item.Kind,
+                    IsArchived = item.IsArchived,
                     Trigger = item.Trigger,
                     ChangedFilesCount = item.ChangedFilesCount,
                     Tags = item.Tags ?? Array.Empty<string>()
@@ -2219,6 +2291,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             var targetSnapshotId = preferredSnapshotId > 0
                 ? preferredSnapshotId
                 : _preferredSnapshotId ?? SelectedSnapshot?.SnapshotId ?? 0;
+            RebuildSnapshotKindFilters();
             RebuildSnapshotTriggerFilters();
             RebuildSnapshotTagFilters();
             ApplySnapshotHistoryFilters(targetSnapshotId, forceSnapshotFilesReload);
@@ -2791,22 +2864,24 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
         _lastLiveSyncUtc = DateTime.UtcNow;
 
-        var success = await ExecuteScanAsync(
+        var scanOutcome = await ExecuteScanAsync(
             saveFileVersions: _autoCaptureFileVersions,
             triggerOverride: _autoCaptureFileVersions ? "auto_snapshot_live_watcher" : "sync_live_watcher",
             fallbackMessage: Loc.T("explorer.scan.syncing_file_changes"),
             showErrors: false,
             successMessage: null);
 
-        if (success)
+        if (scanOutcome == ScanExecutionOutcome.Completed)
             await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = string.Empty);
-        else if (manualTrigger)
+        else if (scanOutcome == ScanExecutionOutcome.Failed && manualTrigger)
             await Dispatcher.UIThread.InvokeAsync(() => LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_scan_failed"));
 
         try
         {
-            if (success)
+            if (scanOutcome == ScanExecutionOutcome.Completed)
                 await _fsEventQueue.CompleteAsync(RepositoryId, lease.ItemIds);
+            else if (scanOutcome == ScanExecutionOutcome.Deferred)
+                await _fsEventQueue.RequeueAsync(RepositoryId, lease.ItemIds, "live_sync_scan_deferred");
             else
                 await _fsEventQueue.RequeueAsync(RepositoryId, lease.ItemIds, "live_sync_scan_failed");
         }
@@ -2820,7 +2895,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         await RefreshLiveSyncIndicatorsAsync();
 
         if (IsLiveSyncActive && await _fsEventQueue.HasPendingAsync(RepositoryId))
-            ArmLiveSyncTimer(success ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
+            ArmLiveSyncTimer(scanOutcome == ScanExecutionOutcome.Completed ? LiveSyncMinIntervalMs : LiveSyncDebounceMs);
     }
 
     private async Task RefreshLiveSyncIndicatorsAsync(CancellationToken ct = default)
@@ -2849,7 +2924,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             {
                 LiveSyncLastIssue = Loc.T("explorer.monitoring_issue_root_missing");
             }
-            else if (string.IsNullOrWhiteSpace(LiveSyncLastIssue) && !string.IsNullOrWhiteSpace(status.LastError))
+            else if (string.IsNullOrWhiteSpace(LiveSyncLastIssue)
+                     && !string.IsNullOrWhiteSpace(status.LastError)
+                     && !IsBenignLiveSyncQueueError(status.LastError))
             {
                 LiveSyncLastIssue = Loc.F("explorer.monitoring_issue_queue_error", status.LastError);
             }
@@ -2872,6 +2949,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             }
         }
     }
+
+    private static bool IsBenignLiveSyncQueueError(string? error)
+        => string.Equals(error, "live_sync_scan_deferred", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(error, "live_sync_scan_in_progress", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> NormalizeTrackedExtensions(IEnumerable<string> values)
     {
@@ -3020,6 +3101,34 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
     }
 
+    private void RebuildSnapshotKindFilters()
+    {
+        var selected = NormalizeSnapshotKindFilter(SelectedSnapshotKindFilter);
+        var kinds = _snapshotHistorySource
+            .Select(x => NormalizeSnapshotKindFilter(x.Kind))
+            .Where(x => x != "all")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        SnapshotKindFilters.Clear();
+        SnapshotKindFilters.Add("all");
+        foreach (var kind in kinds)
+            SnapshotKindFilters.Add(kind);
+
+        _suppressSnapshotFilterApply = true;
+        try
+        {
+            SelectedSnapshotKindFilter = SnapshotKindFilters.Contains(selected, StringComparer.OrdinalIgnoreCase)
+                ? selected
+                : "all";
+        }
+        finally
+        {
+            _suppressSnapshotFilterApply = false;
+        }
+    }
+
     private void RebuildSnapshotTagFilters()
     {
         var selected = NormalizeSnapshotTagFilter(SelectedSnapshotTagFilter);
@@ -3088,6 +3197,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         var directives = ParseSnapshotHistoryDirectives(SnapshotHistorySearchQuery.Trim());
         var textQuery = directives.TextQuery;
 
+        var kindFilter = NormalizeSnapshotKindFilter(SelectedSnapshotKindFilter);
+        if (kindFilter == "all" && !string.IsNullOrWhiteSpace(directives.KindFilter))
+            kindFilter = directives.KindFilter;
+
         var triggerFilter = NormalizeSnapshotTriggerFilter(SelectedSnapshotTriggerFilter);
         if (triggerFilter == "all" && !string.IsNullOrWhiteSpace(directives.TriggerFilter))
             triggerFilter = directives.TriggerFilter;
@@ -3106,10 +3219,15 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             filtered = filtered.Where(x =>
                 x.DisplayTitle.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.Kind.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
+                x.KindLabel.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
                 x.Trigger.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
                 x.Tags.Any(tag => tag.Contains(textQuery, StringComparison.OrdinalIgnoreCase)) ||
                 x.DisplayTime.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
         }
+
+        if (kindFilter != "all")
+            filtered = filtered.Where(x => string.Equals(NormalizeSnapshotKindFilter(x.Kind), kindFilter, StringComparison.OrdinalIgnoreCase));
 
         if (triggerFilter != "all")
             filtered = filtered.Where(x => string.Equals(NormalizeSnapshotTriggerFilter(x.Trigger), triggerFilter, StringComparison.OrdinalIgnoreCase));
@@ -3125,9 +3243,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .ThenByDescending(x => x.SnapshotId)
             .ToList();
 
-        SnapshotHistory.Clear();
-        foreach (var row in rows)
-            SnapshotHistory.Add(row);
+        ReplaceCollectionItems(SnapshotHistory, rows, AreReferenceItemsEquivalent);
 
         HasSnapshotHistory = SnapshotHistory.Count > 0;
 
@@ -3216,9 +3332,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        SnapshotFiles.Clear();
-        foreach (var row in rows)
-            SnapshotFiles.Add(row);
+        ReplaceCollectionItems(SnapshotFiles, rows, AreReferenceItemsEquivalent);
 
         HasSnapshotFiles = SnapshotFiles.Count > 0;
 
@@ -3501,38 +3615,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void ReplaceExplorerItems(IReadOnlyList<ExplorerItemViewModel> rows)
     {
-        if (AreExplorerItemsEquivalent(Items, rows))
-            return;
-
-        Items.Clear();
-        foreach (var row in rows)
-            Items.Add(row);
+        ReplaceCollectionItems(Items, rows, AreExplorerItemsEquivalent);
     }
 
     private static bool AreExplorerItemsEquivalent(
-        IReadOnlyList<ExplorerItemViewModel> current,
-        IReadOnlyList<ExplorerItemViewModel> next)
+        ExplorerItemViewModel left,
+        ExplorerItemViewModel right)
     {
-        if (current.Count != next.Count)
-            return false;
-
-        for (var i = 0; i < current.Count; i++)
-        {
-            var left = current[i];
-            var right = next[i];
-            if (left.IsDirectory != right.IsDirectory
-                || !left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(left.Name, right.Name, StringComparison.Ordinal)
-                || !string.Equals(left.Type, right.Type, StringComparison.Ordinal)
-                || !string.Equals(left.SizeDisplay, right.SizeDisplay, StringComparison.Ordinal)
-                || !string.Equals(left.ModifiedDisplay, right.ModifiedDisplay, StringComparison.Ordinal)
-                || !string.Equals(left.HashSha256, right.HashSha256, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return left.IsDirectory == right.IsDirectory
+            && left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+            && string.Equals(left.Type, right.Type, StringComparison.Ordinal)
+            && string.Equals(left.SizeDisplay, right.SizeDisplay, StringComparison.Ordinal)
+            && string.Equals(left.ModifiedDisplay, right.ModifiedDisplay, StringComparison.Ordinal)
+            && string.Equals(left.HashSha256, right.HashSha256, StringComparison.Ordinal);
     }
 
     private async Task RunTransientPreparationAsync(
@@ -3647,9 +3743,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _suppressFileVersionsCollectionChanged = true;
         try
         {
-            FileVersions.Clear();
-            foreach (var version in versions)
-                FileVersions.Add(version);
+            ReplaceCollectionItems(FileVersions, versions, AreExplorerFileVersionsEquivalent);
         }
         finally
         {
@@ -3667,9 +3761,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _suppressComparableVersionsCollectionChanged = true;
         try
         {
-            ComparableFileVersions.Clear();
-            foreach (var version in versions)
-                ComparableFileVersions.Add(version);
+            ReplaceCollectionItems(ComparableFileVersions, versions, AreReferenceItemsEquivalent);
         }
         finally
         {
@@ -3677,6 +3769,43 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasComparableVersions));
+    }
+
+    private static void ReplaceCollectionItems<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> rows,
+        Func<T, T, bool> areEquivalent)
+    {
+        var sharedCount = Math.Min(collection.Count, rows.Count);
+
+        for (var i = 0; i < sharedCount; i++)
+        {
+            if (!areEquivalent(collection[i], rows[i]))
+                collection[i] = rows[i];
+        }
+
+        while (collection.Count > rows.Count)
+            collection.RemoveAt(collection.Count - 1);
+
+        for (var i = sharedCount; i < rows.Count; i++)
+            collection.Add(rows[i]);
+    }
+
+    private static bool AreReferenceItemsEquivalent<T>(T left, T right)
+        where T : class
+        => ReferenceEquals(left, right);
+
+    private static bool AreExplorerFileVersionsEquivalent(
+        ExplorerFileVersionViewModel left,
+        ExplorerFileVersionViewModel right)
+    {
+        return left.FileVersionId == right.FileVersionId
+            && left.CreatedAtUtc == right.CreatedAtUtc
+            && left.SizeBytes == right.SizeBytes
+            && left.IsDeletionMarker == right.IsDeletionMarker
+            && left.HasContentBlocks == right.HasContentBlocks
+            && string.Equals(left.ContentHashSha256, right.ContentHashSha256, StringComparison.Ordinal)
+            && string.Equals(left.RelativePath, right.RelativePath, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnDiffPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -4256,6 +4385,14 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 continue;
             }
 
+            if (lower.StartsWith("kind:", StringComparison.Ordinal))
+            {
+                var kind = NormalizeSnapshotKindFilter(normalized[5..]);
+                if (kind != "all")
+                    directives = directives with { KindFilter = kind };
+                continue;
+            }
+
             if (lower.StartsWith("tag:", StringComparison.Ordinal))
             {
                 var tag = NormalizeSnapshotTagFilter(normalized[4..]);
@@ -4360,6 +4497,18 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(normalized) || normalized == "all"
             ? "all"
             : normalized;
+    }
+
+    private static string NormalizeSnapshotKindFilter(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '_');
+        return normalized switch
+        {
+            "manual" => RepositorySnapshotKind.Manual,
+            "automatic" => RepositorySnapshotKind.Automatic,
+            "working" => RepositorySnapshotKind.Working,
+            _ => "all"
+        };
     }
 
     private static string NormalizeSnapshotTagFilter(string? value)

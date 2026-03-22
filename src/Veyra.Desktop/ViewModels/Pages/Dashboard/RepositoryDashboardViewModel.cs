@@ -6,17 +6,21 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
+using Veyra.Desktop.Services.Connectivity;
+using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.Views.Windows;
@@ -31,15 +35,24 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private readonly ILogger<RepositoryDashboardViewModel> _log;
     private readonly IWindowService _windows;
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
+    private readonly IUserProfileRepository _userProfiles;
+    private readonly IConnectivityStatusService _connectivity;
     private readonly IRepositoryDashboardFilterStore _filterStore;
     private readonly LocalizationManager _localization;
     private readonly UserExperienceManager _experience;
     private readonly List<RepositoryCardViewModel> _allRepositories = [];
+    private readonly Dictionary<int, RepositoryCardViewModel> _repositoryCardCache = [];
 
     private bool _presetsLoaded;
     private bool _suppressFilterApply;
     private CancellationTokenSource? _filterCts;
     private long _filterRequestId;
+    private const string LocalModeAccent = "#6EA8FF";
+    private const string WarningAccent = "#F59E0B";
+    private const string SuccessAccent = "#4CAF50";
+    private const string LocalModeSurface = "#1A6EA8FF";
+    private const string WarningSurface = "#1AF59E0B";
+    private const string SuccessSurface = "#144CAF50";
 
     public event Func<int, Task>? OpenRepositoryRequested;
     public event Func<int, Task>? OpenRepositorySettingsRequested;
@@ -68,8 +81,45 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private string _savedFilterName = string.Empty;
     [ObservableProperty] private RepositoryDashboardSavedFilterViewModel? _selectedSavedFilter;
     [ObservableProperty] private bool _hasSavedFilters;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowConnectivityPanel))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelText))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelBadgeText))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelTitle))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelDetail))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelAccentColor))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelBackgroundColor))]
+    private bool _hasCloudAccess;
 
     public bool HasActiveFilters => GetActiveFilterCount() > 0;
+    public bool ShowConnectivityPanel => HasCloudAccess
+        && (_connectivity.Snapshot.State is ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable);
+    public string ConnectivityPanelText => _connectivity.Snapshot.State switch
+    {
+        ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_compact"),
+        ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_compact"),
+        _ => string.Empty
+    };
+    public string ConnectivityPanelBadgeText => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.cloud_mode.internet_unavailable"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.cloud_mode.cloud_unavailable"),
+            _ => Loc.T("dashboard.cloud_mode.ready")
+        };
+    public string ConnectivityPanelTitle => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_title"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_title"),
+            _ => string.Empty
+        };
+    public string ConnectivityPanelDetail => _connectivity.Snapshot.State switch
+        {
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_detail"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_detail"),
+            _ => string.Empty
+        };
+    public string ConnectivityPanelAccentColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).AccentColor;
+    public string ConnectivityPanelBackgroundColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).BackgroundColor;
     public bool ShowLoadingOverlay => IsLoading || IsTransientActionBusy;
     public string LoadingOverlayTitle => IsTransientActionBusy
         ? TransientActionTitle
@@ -92,17 +142,22 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         ILogger<RepositoryDashboardViewModel> log,
         IWindowService windows,
         ISensitiveActionGuard sensitiveActionGuard,
+        IUserProfileRepository userProfiles,
+        IConnectivityStatusService connectivity,
         IRepositoryDashboardFilterStore filterStore)
     {
         _mediator = mediator;
         _log = log;
         _windows = windows;
         _sensitiveActionGuard = sensitiveActionGuard;
+        _userProfiles = userProfiles;
+        _connectivity = connectivity;
         _filterStore = filterStore;
         _localization = LocalizationManager.Instance;
         _experience = UserExperienceManager.Instance;
         _localization.LanguageChanged += OnLanguageChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
+        _connectivity.StatusChanged += OnConnectivityStatusChanged;
     }
 
     [RelayCommand]
@@ -126,13 +181,29 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             if (!_presetsLoaded)
                 _presetsLoaded = true;
 
+            HasCloudAccess = (await _userProfiles.GetActiveProfileAsync()) is not null;
             var repos = await _mediator.Send(new GetAllRepositoriesQuery());
             _allRepositories.Clear();
 
-            var cards = await Task.Run(() => repos
-                .Select(MapRepositoryCard)
-                .OrderBy(card => card.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList());
+            var cards = await Task.Run(() =>
+            {
+                var mapped = repos
+                    .Select(repo => MapRepositoryCardCached(repo, HasCloudAccess, _connectivity.Snapshot.State))
+                    .OrderBy(card => card.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var activeRepositoryIds = mapped
+                    .Select(card => card.Id)
+                    .ToHashSet();
+                var staleRepositoryIds = _repositoryCardCache.Keys
+                    .Where(id => !activeRepositoryIds.Contains(id))
+                    .ToList();
+
+                foreach (var staleRepositoryId in staleRepositoryIds)
+                    _repositoryCardCache.Remove(staleRepositoryId);
+
+                return mapped;
+            });
 
             _allRepositories.AddRange(cards);
 
@@ -223,38 +294,35 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [RelayCommand]
     private async Task AddRepositoryAsync()
     {
-        await RunTransientActionAsync(
-            "dashboard.create_repository_opening_title",
-            "dashboard.create_repository_opening_detail",
-            async () =>
+        try
+        {
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_add_repository",
+                "security.action_add_repository_body");
+
+            if (!guardResult.IsAllowed)
             {
-                var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
-                    "security.action_add_repository",
-                    "security.action_add_repository_body");
+                if (!guardResult.IsCancelled)
+                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
 
-                if (!guardResult.IsAllowed)
-                {
-                    if (!guardResult.IsCancelled)
-                        ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
-                    return;
-                }
+            var wizard = _windows.Create<CreateRepositoryWindow>();
+            var owner = _windows.GetActiveWindow();
+            _log.LogInformation("Opening create repository window from dashboard");
 
-                var wizard = _windows.Create<CreateRepositoryWindow>();
-                var owner = _windows.GetActiveWindow();
-                _log.LogInformation("Opening create repository window from dashboard");
+            if (owner is not null)
+                await _windows.ShowDialogAsync(wizard, owner);
+            else
+                _windows.Show(wizard);
 
-                if (owner is not null)
-                    await _windows.ShowDialogAsync(wizard, owner);
-                else
-                    _windows.Show(wizard);
-
-                await LoadAsync();
-            },
-            ex =>
-            {
-                _log.LogError(ex, "Failed to open repository creation wizard");
-                ErrorMessage = Loc.T("dashboard.error_open_create_repository");
-            });
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to open repository creation wizard");
+            ErrorMessage = Loc.T("dashboard.error_open_create_repository");
+        }
     }
 
     [RelayCommand]
@@ -393,55 +461,49 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                 if (minSizeMb is > 0 && maxSizeMb is > 0 && minSizeMb > maxSizeMb)
                     (minSizeMb, maxSizeMb) = (maxSizeMb, minSizeMb);
 
-                IEnumerable<RepositoryCardViewModel> filteredSource = source;
-
-                if (!string.IsNullOrWhiteSpace(textQuery))
+                if (IsPassThroughDashboardFilter(
+                        textQuery,
+                        availabilityFilter,
+                        syncStateFilter,
+                        formatTagFilter,
+                        minSizeMb,
+                        maxSizeMb,
+                        onlyQueueIssues))
                 {
-                    filteredSource = filteredSource.Where(r =>
-                        r.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
-                        r.DirectoryPath.Contains(textQuery, StringComparison.OrdinalIgnoreCase) ||
-                        r.LinkedFormats.Any(f => f.Contains(textQuery, StringComparison.OrdinalIgnoreCase)));
+                    return new List<RepositoryCardViewModel>(source);
                 }
 
-                if (availabilityFilter != "all")
+                var filteredSource = new List<RepositoryCardViewModel>(source.Length);
+
+                foreach (var repository in source)
                 {
-                    filteredSource = availabilityFilter switch
+                    if (!MatchesRepositoryCardText(repository, textQuery))
+                        continue;
+
+                    if (!MatchesAvailability(repository, availabilityFilter))
+                        continue;
+
+                    if (!MatchesSyncState(repository, syncStateFilter))
+                        continue;
+
+                    if (!MatchesFormatTag(repository, formatTagFilter))
+                        continue;
+
+                    if (!MatchesRepositorySize(repository, minSizeMb, maxSizeMb))
+                        continue;
+
+                    if (onlyQueueIssues
+                        && repository.QueueConflictCount <= 0
+                        && repository.QueueDeadLetterCount <= 0
+                        && repository.QueueFailedCount <= 0)
                     {
-                        "available" => filteredSource.Where(r => r.IsDirectoryAvailable),
-                        "unavailable" => filteredSource.Where(r => !r.IsDirectoryAvailable),
-                        _ => filteredSource
-                    };
+                        continue;
+                    }
+
+                    filteredSource.Add(repository);
                 }
 
-                if (syncStateFilter != "all")
-                {
-                    filteredSource = filteredSource.Where(r =>
-                        string.Equals(r.CloudSyncStateKey, syncStateFilter, StringComparison.OrdinalIgnoreCase));
-                }
-
-                if (formatTagFilter != "all")
-                {
-                    filteredSource = filteredSource.Where(r => r.LinkedFormats.Any(f =>
-                        string.Equals(f.Trim().ToLowerInvariant(), formatTagFilter, StringComparison.OrdinalIgnoreCase)));
-                }
-
-                if (minSizeMb is > 0)
-                    filteredSource = filteredSource.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) >= minSizeMb.Value);
-
-                if (maxSizeMb is > 0)
-                    filteredSource = filteredSource.Where(r => (r.TotalSizeBytes / (1024d * 1024d)) <= maxSizeMb.Value);
-
-                if (onlyQueueIssues)
-                {
-                    filteredSource = filteredSource.Where(r =>
-                        r.QueueConflictCount > 0 ||
-                        r.QueueDeadLetterCount > 0 ||
-                        r.QueueFailedCount > 0);
-                }
-
-                return filteredSource
-                    .OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                return filteredSource;
             }, ct);
 
             if (!IsLatestFilterRequest(requestId) || ct.IsCancellationRequested)
@@ -463,12 +525,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private async Task LoadSavedFiltersAsync(CancellationToken ct = default)
     {
         var presets = await _filterStore.LoadAsync(ct);
+        var items = presets
+            .Select(preset => new RepositoryDashboardSavedFilterViewModel(preset))
+            .OrderByDescending(f => f.SavedAtUtc)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        SavedFilters.Clear();
-        foreach (var preset in presets)
-            SavedFilters.Add(new RepositoryDashboardSavedFilterViewModel(preset));
-
-        SortSavedFilters();
+        SyncSavedFilters(items);
         HasSavedFilters = SavedFilters.Count > 0;
     }
 
@@ -501,36 +564,10 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         cts?.Dispose();
     }
 
-    private void ReplaceVisibleRepositories(IReadOnlyCollection<RepositoryCardViewModel> repositories)
+    private void ReplaceVisibleRepositories(IReadOnlyList<RepositoryCardViewModel> repositories)
     {
-        if (AreVisibleRepositoriesEquivalent(repositories))
-        {
-            NotifyDashboardChromeStateChanged();
-            return;
-        }
-
-        Repositories.Clear();
-        foreach (var repository in repositories)
-            Repositories.Add(repository);
-
+        SyncCollection(Repositories, repositories);
         NotifyDashboardChromeStateChanged();
-    }
-
-    private bool AreVisibleRepositoriesEquivalent(IReadOnlyCollection<RepositoryCardViewModel> repositories)
-    {
-        if (Repositories.Count != repositories.Count)
-            return false;
-
-        using var currentEnumerator = Repositories.GetEnumerator();
-        using var nextEnumerator = repositories.GetEnumerator();
-
-        while (currentEnumerator.MoveNext() && nextEnumerator.MoveNext())
-        {
-            if (!ReferenceEquals(currentEnumerator.Current, nextEnumerator.Current))
-                return false;
-        }
-
-        return true;
     }
 
     private void ApplyPreset(RepositoryDashboardFilterPreset preset)
@@ -578,9 +615,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        SavedFilters.Clear();
-        foreach (var item in sorted)
-            SavedFilters.Add(item);
+        SyncSavedFilters(sorted);
     }
 
     private void RebuildFormatTagFilters()
@@ -617,34 +652,99 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return value;
     }
 
+    private void SyncSavedFilters(IReadOnlyList<RepositoryDashboardSavedFilterViewModel> items)
+    {
+        SyncCollection(
+            SavedFilters,
+            items,
+            static (left, right) =>
+                string.Equals(left.Name, right.Name, StringComparison.OrdinalIgnoreCase)
+                && left.SavedAtUtc == right.SavedAtUtc);
+    }
+
     private static void ReplaceCollectionIfChanged<T>(
         ObservableCollection<T> collection,
         IReadOnlyList<T> items)
     {
-        if (CollectionEquals(collection, items))
+        if (CollectionEquals(collection, items, EqualityComparer<T>.Default.Equals))
             return;
 
-        collection.Clear();
-        foreach (var item in items)
-            collection.Add(item);
+        SyncCollection(collection, items);
     }
 
-    private static bool CollectionEquals<T>(IReadOnlyList<T> current, IReadOnlyList<T> next)
+    private static void SyncCollection<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items)
+        => SyncCollection(collection, items, EqualityComparer<T>.Default.Equals);
+
+    private static void SyncCollection<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> items,
+        Func<T, T, bool> comparer)
+    {
+        var prefixLength = 0;
+        var currentCount = collection.Count;
+        var nextCount = items.Count;
+
+        while (prefixLength < currentCount &&
+               prefixLength < nextCount &&
+               comparer(collection[prefixLength], items[prefixLength]))
+        {
+            prefixLength++;
+        }
+
+        var suffixLength = 0;
+        while (suffixLength < currentCount - prefixLength &&
+               suffixLength < nextCount - prefixLength &&
+               comparer(collection[currentCount - 1 - suffixLength], items[nextCount - 1 - suffixLength]))
+        {
+            suffixLength++;
+        }
+
+        for (var index = currentCount - suffixLength - 1; index >= prefixLength; index--)
+            collection.RemoveAt(index);
+
+        for (var index = prefixLength; index < nextCount - suffixLength; index++)
+            collection.Insert(index, items[index]);
+    }
+
+    private static bool CollectionEquals<T>(
+        IReadOnlyList<T> current,
+        IReadOnlyList<T> next,
+        Func<T, T, bool> comparer)
     {
         if (current.Count != next.Count)
             return false;
 
-        var comparer = EqualityComparer<T>.Default;
         for (var i = 0; i < current.Count; i++)
         {
-            if (!comparer.Equals(current[i], next[i]))
+            if (!comparer(current[i], next[i]))
                 return false;
         }
 
         return true;
     }
 
-    private static RepositoryCardViewModel MapRepositoryCard(RepositoryDto repository)
+    private RepositoryCardViewModel MapRepositoryCardCached(
+        RepositoryDto repository,
+        bool hasCloudAccess,
+        ConnectivityState connectivityState)
+    {
+        if (_repositoryCardCache.TryGetValue(repository.Id, out var cached))
+        {
+            UpdateRepositoryCard(cached, repository, hasCloudAccess, connectivityState);
+            return cached;
+        }
+
+        var created = CreateRepositoryCard(repository, hasCloudAccess, connectivityState);
+        _repositoryCardCache[repository.Id] = created;
+        return created;
+    }
+
+    private static RepositoryCardViewModel CreateRepositoryCard(
+        RepositoryDto repository,
+        bool hasCloudAccess,
+        ConnectivityState connectivityState)
     {
         var isAvailable = Directory.Exists(repository.DirectoryPath);
         var syncStateKey = NormalizeCloudSyncStateKey(repository.CloudSync?.LastStatus);
@@ -679,8 +779,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             VersionCount = repository.VersionCount,
             TotalSizeBytes = repository.TotalSizeBytes,
             SizeDisplay = FormatSize(repository.TotalSizeBytes),
+            ShowCloudSection = hasCloudAccess,
             CloudSyncStateKey = syncStateKey,
-            CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus),
+            CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus, hasCloudAccess, connectivityState),
+            CloudModeText = FormatCloudMode(hasCloudAccess, connectivityState, syncStateKey),
+            CloudModeColor = FormatCloudModeColor(hasCloudAccess, connectivityState),
+            CloudModeBorderColor = FormatCloudModeBorderColor(hasCloudAccess, connectivityState),
+            CloudModeBackgroundColor = FormatCloudModeBackgroundColor(hasCloudAccess, connectivityState),
             CloudQueueSummary = BuildQueueSummary(queuePending, queueRunning, queueRetry, queueConflict, queueDeadLetter),
             IsDirectoryAvailable = isAvailable,
             QueuePendingCount = queuePending,
@@ -697,6 +802,63 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
         card.RefreshFormatsDisplay();
         return card;
+    }
+
+    private static void UpdateRepositoryCard(
+        RepositoryCardViewModel card,
+        RepositoryDto repository,
+        bool hasCloudAccess,
+        ConnectivityState connectivityState)
+    {
+        var isAvailable = Directory.Exists(repository.DirectoryPath);
+        var syncStateKey = NormalizeCloudSyncStateKey(repository.CloudSync?.LastStatus);
+        var queuePending = repository.CloudSync?.PendingQueueCount ?? 0;
+        var queueRunning = repository.CloudSync?.RunningQueueCount ?? 0;
+        var queueRetry = repository.CloudSync?.RetryQueueCount ?? 0;
+        var queueConflict = repository.CloudSync?.ConflictQueueCount ?? 0;
+        var queueDeadLetter = repository.CloudSync?.DeadLetterQueueCount ?? 0;
+        var queueFailed = repository.CloudSync?.FailedQueueCount ?? 0;
+        var queueCompleted = repository.CloudSync?.CompletedQueueCount ?? 0;
+        var statusBadge = BuildRepositoryStatusBadge(
+            isAvailable,
+            repository.CloudSync?.LastStatus,
+            queuePending,
+            queueRunning,
+            queueRetry,
+            queueConflict,
+            queueDeadLetter,
+            queueFailed);
+
+        card.Name = repository.Name;
+        card.Description = repository.Description;
+        card.DirectoryPath = repository.DirectoryPath;
+        card.LastActivityUtc = repository.LastScannedAt;
+        card.StatusText = statusBadge.Text;
+        card.StatusColor = statusBadge.Color;
+        card.LastActivity = FormatLastActivity(repository.LastScannedAt);
+        card.FileCount = repository.FileCount;
+        card.VersionCount = repository.VersionCount;
+        card.TotalSizeBytes = repository.TotalSizeBytes;
+        card.SizeDisplay = FormatSize(repository.TotalSizeBytes);
+        card.ShowCloudSection = hasCloudAccess;
+        card.CloudSyncStateKey = syncStateKey;
+        card.CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus, hasCloudAccess, connectivityState);
+        card.CloudModeText = FormatCloudMode(hasCloudAccess, connectivityState, syncStateKey);
+        card.CloudModeColor = FormatCloudModeColor(hasCloudAccess, connectivityState);
+        card.CloudModeBorderColor = FormatCloudModeBorderColor(hasCloudAccess, connectivityState);
+        card.CloudModeBackgroundColor = FormatCloudModeBackgroundColor(hasCloudAccess, connectivityState);
+        card.CloudQueueSummary = BuildQueueSummary(queuePending, queueRunning, queueRetry, queueConflict, queueDeadLetter);
+        card.IsDirectoryAvailable = isAvailable;
+        card.QueuePendingCount = queuePending;
+        card.QueueRunningCount = queueRunning;
+        card.QueueRetryCount = queueRetry;
+        card.QueueConflictCount = queueConflict;
+        card.QueueDeadLetterCount = queueDeadLetter;
+        card.QueueFailedCount = queueFailed;
+        card.QueueCompletedCount = queueCompleted;
+
+        SyncCollection(card.LinkedFormats, repository.LinkedFormats.ToList());
+        card.RefreshFormatsDisplay();
     }
 
     private static SearchDirectives ParseSearchDirectives(string rawQuery)
@@ -846,6 +1008,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (normalized.StartsWith("synced", StringComparison.Ordinal))
             return "synced";
 
+        if (normalized.StartsWith("syncing_", StringComparison.Ordinal))
+            return "syncing";
+
         if (normalized.StartsWith("syncing_upload", StringComparison.Ordinal))
             return "syncing";
 
@@ -861,6 +1026,68 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             "failed" => "failed",
             _ => normalized.Replace(' ', '_')
         };
+    }
+
+    private static bool MatchesRepositoryCardText(RepositoryCardViewModel repository, string textQuery)
+    {
+        if (string.IsNullOrWhiteSpace(textQuery))
+            return true;
+
+        return repository.Name.Contains(textQuery, StringComparison.OrdinalIgnoreCase)
+               || repository.DirectoryPath.Contains(textQuery, StringComparison.OrdinalIgnoreCase)
+               || repository.LinkedFormats.Any(f => f.Contains(textQuery, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesAvailability(RepositoryCardViewModel repository, string availabilityFilter)
+    {
+        return availabilityFilter switch
+        {
+            "available" => repository.IsDirectoryAvailable,
+            "unavailable" => !repository.IsDirectoryAvailable,
+            _ => true
+        };
+    }
+
+    private static bool MatchesSyncState(RepositoryCardViewModel repository, string syncStateFilter)
+        => syncStateFilter == "all"
+           || string.Equals(repository.CloudSyncStateKey, syncStateFilter, StringComparison.OrdinalIgnoreCase);
+
+    private static bool MatchesFormatTag(RepositoryCardViewModel repository, string formatTagFilter)
+    {
+        if (formatTagFilter == "all")
+            return true;
+
+        return repository.LinkedFormats.Any(f =>
+            string.Equals(f.Trim().ToLowerInvariant(), formatTagFilter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool MatchesRepositorySize(RepositoryCardViewModel repository, double? minSizeMb, double? maxSizeMb)
+    {
+        var sizeMb = repository.TotalSizeBytes / (1024d * 1024d);
+        if (minSizeMb is > 0 && sizeMb < minSizeMb.Value)
+            return false;
+        if (maxSizeMb is > 0 && sizeMb > maxSizeMb.Value)
+            return false;
+
+        return true;
+    }
+
+    private static bool IsPassThroughDashboardFilter(
+        string textQuery,
+        string availabilityFilter,
+        string syncStateFilter,
+        string formatTagFilter,
+        double? minSizeMb,
+        double? maxSizeMb,
+        bool onlyQueueIssues)
+    {
+        return string.IsNullOrWhiteSpace(textQuery)
+               && availabilityFilter == "all"
+               && syncStateFilter == "all"
+               && formatTagFilter == "all"
+               && minSizeMb is not > 0
+               && maxSizeMb is not > 0
+               && !onlyQueueIssues;
     }
 
     private static string FormatLastActivity(DateTime? utc)
@@ -887,7 +1114,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             return normalized switch
             {
-                "queued" or "syncing" or "offline_retry" or "retrying" => Loc.T("dashboard.sync.simple.in_progress"),
+                _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => Loc.T("dashboard.sync.simple.in_progress"),
+                "queued" or "syncing" or "syncing_prepare" or "syncing_snapshot" or "syncing_finalize" or "offline_retry" or "retrying"
+                    => Loc.T("dashboard.sync.simple.in_progress"),
                 "auth_required" or "conflict" or "dead_letter" or "failed" => Loc.T("dashboard.sync.simple.attention"),
                 _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.simple.ready"),
                 _ => Loc.T("dashboard.sync.simple.local_only")
@@ -897,7 +1126,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return normalized switch
         {
             "queued" => Loc.T("dashboard.sync.queued"),
-            "syncing" => Loc.T("dashboard.sync.syncing"),
+            "syncing" or "syncing_prepare" => Loc.T("dashboard.sync.syncing_prepare"),
+            "syncing_snapshot" => Loc.T("dashboard.sync.syncing_snapshot"),
+            "syncing_finalize" => Loc.T("dashboard.sync.syncing_finalize"),
             _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => FormatSyncingUploadStatus(status),
             "offline_retry" => Loc.T("dashboard.sync.offline_retry"),
             "retrying" => Loc.T("dashboard.sync.retrying"),
@@ -933,16 +1164,76 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
     private static string BuildQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
     {
-        if (UserExperienceManager.Instance.IsBasicMode)
+        var total = pending + running + retry + conflict + deadLetter;
+        if (total <= 0)
+            return Loc.T("dashboard.queue_summary_simple_idle");
+
+        if (conflict > 0 || deadLetter > 0)
+            return Loc.T("dashboard.sync.simple.attention");
+
+        return Loc.T("dashboard.queue_summary_simple_active");
+    }
+
+    private static string FormatCloudMode(bool hasCloudAccess, ConnectivityState connectivityState, string syncStateKey)
+    {
+        if (!hasCloudAccess)
+            return Loc.T("dashboard.cloud_mode.local");
+
+        return connectivityState switch
         {
-            var total = pending + running + retry + conflict + deadLetter;
-            return total <= 0
-                ? Loc.T("dashboard.queue_summary_simple_idle")
-                : Loc.F("dashboard.queue_summary_simple_active", total);
+            ConnectivityState.InternetUnavailable => Loc.T("dashboard.cloud_mode.internet_unavailable"),
+            ConnectivityState.CloudUnavailable => Loc.T("dashboard.cloud_mode.cloud_unavailable"),
+            _ when syncStateKey == "idle" => Loc.T("dashboard.cloud_mode.ready"),
+            _ => Loc.T("dashboard.cloud_mode.ready")
+        };
+    }
+
+    private static string FormatCloudSyncStatus(string? cloudStatus, bool hasCloudAccess, ConnectivityState connectivityState)
+    {
+        if (hasCloudAccess)
+        {
+            if (connectivityState == ConnectivityState.InternetUnavailable)
+                return Loc.T("dashboard.sync.internet_unavailable_status");
+
+            if (connectivityState == ConnectivityState.CloudUnavailable)
+                return Loc.T("dashboard.sync.cloud_unavailable_status");
         }
 
-        return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+        return FormatCloudSyncStatus(cloudStatus);
     }
+
+    private static string FormatCloudModeColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => !hasCloudAccess
+            ? LocalModeAccent
+            : connectivityState switch
+            {
+                ConnectivityState.InternetUnavailable => WarningAccent,
+                ConnectivityState.CloudUnavailable => WarningAccent,
+                _ => SuccessAccent
+            };
+
+    private static string FormatCloudModeBorderColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => FormatCloudModeColor(hasCloudAccess, connectivityState);
+
+    private static string FormatCloudModeBackgroundColor(bool hasCloudAccess, ConnectivityState connectivityState)
+        => !hasCloudAccess
+            ? LocalModeSurface
+            : connectivityState switch
+            {
+                ConnectivityState.InternetUnavailable => WarningSurface,
+                ConnectivityState.CloudUnavailable => WarningSurface,
+                _ => SuccessSurface
+            };
+
+    private static (string AccentColor, string BackgroundColor) DescribeConnectivityVisuals(bool hasCloudAccess, ConnectivityState state)
+        => !hasCloudAccess
+            ? (LocalModeAccent, LocalModeSurface)
+            : state switch
+            {
+                ConnectivityState.InternetUnavailable => (WarningAccent, WarningSurface),
+                ConnectivityState.CloudUnavailable => (WarningAccent, WarningSurface),
+                _ => (SuccessAccent, SuccessSurface)
+            };
 
     private static (string Text, string Color) BuildRepositoryStatusBadge(
         bool isDirectoryAvailable,
@@ -980,6 +1271,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         RefreshLocalizationState();
     }
 
+    private void OnConnectivityStatusChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(RefreshLocalizationState);
+    }
+
     private void RefreshLocalizationState()
     {
         RefreshFilterOptionBindings();
@@ -998,7 +1294,12 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             card.StatusText = statusBadge.Text;
             card.StatusColor = statusBadge.Color;
             card.LastActivity = FormatLastActivity(card.LastActivityUtc);
-            card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey);
+            card.ShowCloudSection = HasCloudAccess;
+            card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey, HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeText = FormatCloudMode(HasCloudAccess, _connectivity.Snapshot.State, card.CloudSyncStateKey);
+            card.CloudModeColor = FormatCloudModeColor(HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeBorderColor = FormatCloudModeBorderColor(HasCloudAccess, _connectivity.Snapshot.State);
+            card.CloudModeBackgroundColor = FormatCloudModeBackgroundColor(HasCloudAccess, _connectivity.Snapshot.State);
             card.CloudQueueSummary = BuildQueueSummary(
                 card.QueuePendingCount,
                 card.QueueRunningCount,
@@ -1010,6 +1311,13 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
         RefreshRepositoryBindings();
         NotifyDashboardChromeStateChanged();
+        OnPropertyChanged(nameof(ShowConnectivityPanel));
+        OnPropertyChanged(nameof(ConnectivityPanelText));
+        OnPropertyChanged(nameof(ConnectivityPanelBadgeText));
+        OnPropertyChanged(nameof(ConnectivityPanelTitle));
+        OnPropertyChanged(nameof(ConnectivityPanelDetail));
+        OnPropertyChanged(nameof(ConnectivityPanelAccentColor));
+        OnPropertyChanged(nameof(ConnectivityPanelBackgroundColor));
     }
 
     private void RefreshFilterOptionBindings()
@@ -1028,9 +1336,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (values.Count == 0)
             return;
 
-        collection.Clear();
-        foreach (var item in values)
-            collection.Add(item);
+        ReplaceCollectionIfChanged(collection, values);
 
         restoreSelection(values.Contains(selected, StringComparer.OrdinalIgnoreCase)
             ? selected
@@ -1040,10 +1346,6 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private void RefreshRepositoryBindings()
     {
         var selectedSavedFilterName = SelectedSavedFilter?.Name;
-        var items = Repositories.ToList();
-        Repositories.Clear();
-        foreach (var item in items)
-            Repositories.Add(item);
 
         SelectedSavedFilter = string.IsNullOrWhiteSpace(selectedSavedFilterName)
             ? SelectedSavedFilter

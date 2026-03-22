@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
 using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
@@ -31,6 +32,7 @@ internal sealed class RustFileContentStore : IFileContentStore
     private readonly string _storeRoot;
     private readonly object _nativeCapabilityLock = new();
     private readonly INativeExecutionScheduler _scheduler;
+    private readonly IRepositorySnapshotArchiveService _snapshotArchive;
 
     private bool _nativeStoreAvailable;
     private bool _nativeRestoreAvailable;
@@ -40,10 +42,12 @@ internal sealed class RustFileContentStore : IFileContentStore
         IConfiguration configuration,
         ILogger<RustFileContentStore> log,
         INativeExecutionScheduler scheduler,
+        IRepositorySnapshotArchiveService snapshotArchive,
         ArtifactBlockCryptor artifactCryptor)
     {
         _log = log;
         _scheduler = scheduler;
+        _snapshotArchive = snapshotArchive;
         _storeRoot = ResolveStoreRoot(configuration);
         _artifactCryptor = artifactCryptor;
 
@@ -104,7 +108,7 @@ internal sealed class RustFileContentStore : IFileContentStore
                     .OrderBy(b => b.Sequence)
                     .Select(b => new StoredFileBlockDto(
                         b.Sequence,
-                        b.BlockHashBlake3,
+                        b.BlockStorageKey,
                         b.LengthBytes,
                         b.StoredSizeBytes))
                     .ToList();
@@ -124,11 +128,13 @@ internal sealed class RustFileContentStore : IFileContentStore
                 result.BlockCount,
                 result.DedupedBlocks,
                 result.NewBlocks);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.StoreBlocks);
 
             return result;
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.StoreBlocks);
             DisableNativeStore(ex, fullPath);
             return await StoreFileManagedAsync(fullPath, ct);
         }
@@ -149,6 +155,8 @@ internal sealed class RustFileContentStore : IFileContentStore
         if (blocks.Count == 0)
             return await CreateEmptyFileAsync(fullTarget, overwriteExisting, ct);
 
+        await EnsureArchivedBlocksAvailableAsync(blocks, ct);
+
         if (!_nativeRestoreAvailable)
             return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
 
@@ -160,7 +168,7 @@ internal sealed class RustFileContentStore : IFileContentStore
                     .OrderBy(b => b.Sequence)
                     .Select(b => new RestoreBlockPayload
                     {
-                        BlockHashBlake3 = b.BlockHashBlake3,
+                        BlockStorageKey = b.BlockStorageKey,
                         LengthBytes = b.LengthBytes
                     })
                     .ToList();
@@ -174,13 +182,38 @@ internal sealed class RustFileContentStore : IFileContentStore
                 fullTarget,
                 written,
                 blocks.Count);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.RestoreBlocks);
 
             return written;
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RestoreBlocks);
             DisableNativeRestore(ex, fullTarget);
             return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+        }
+    }
+
+    private async Task EnsureArchivedBlocksAvailableAsync(
+        IReadOnlyList<StoredFileBlockDto> blocks,
+        CancellationToken ct)
+    {
+        var blockStorageKeys = blocks
+            .Select(static block => block.BlockStorageKey)
+            .Where(static key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (blockStorageKeys.Count == 0)
+            return;
+
+        try
+        {
+            await _snapshotArchive.EnsureArchivedBlocksAvailableAsync(blockStorageKeys, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Archived snapshot hydration check failed before restore.");
         }
     }
 
@@ -224,7 +257,7 @@ internal sealed class RustFileContentStore : IFileContentStore
             fullPath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite | FileShare.Delete,
             bufferSize: DefaultChunkSize,
             useAsync: true);
 
@@ -328,9 +361,9 @@ internal sealed class RustFileContentStore : IFileContentStore
         {
             byte[] plaintextBytes;
 
-            if (block.BlockHashBlake3.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+            if (block.BlockStorageKey.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                var hash = block.BlockHashBlake3[ManagedHashPrefix.Length..];
+                var hash = block.BlockStorageKey[ManagedHashPrefix.Length..];
                 var blockPath = GetManagedBlockPath(hash);
 
                 if (!File.Exists(blockPath))
@@ -341,11 +374,11 @@ internal sealed class RustFileContentStore : IFileContentStore
 
                 if (plaintextBytes.Length < block.LengthBytes)
                     throw new InvalidOperationException(
-                        $"Block {block.BlockHashBlake3} is shorter than expected after decryption.");
+                        $"Block {block.BlockStorageKey} is shorter than expected after decryption.");
             }
-            else if (IsNativeBlockHash(block.BlockHashBlake3))
+            else if (IsNativeBlockHash(block.BlockStorageKey))
             {
-                var nativeCompressedPath = GetNativeBlockPath(block.BlockHashBlake3);
+                var nativeCompressedPath = GetNativeBlockPath(block.BlockStorageKey);
                 if (!File.Exists(nativeCompressedPath))
                     throw new FileNotFoundException("Native block file not found for restore.", nativeCompressedPath);
 
@@ -358,17 +391,17 @@ internal sealed class RustFileContentStore : IFileContentStore
                 catch (EntryPointNotFoundException)
                 {
                     throw new InvalidOperationException(
-                        $"Managed fallback cannot restore native block hash {block.BlockHashBlake3}. Rebuild native veyra_core with block entrypoints.");
+                        $"Managed fallback cannot restore native block hash {block.BlockStorageKey}. Rebuild native veyra_core with block entrypoints.");
                 }
 
                 if (plaintextBytes.Length < block.LengthBytes)
                     throw new InvalidOperationException(
-                        $"Native block {block.BlockHashBlake3} is shorter than expected after decompression.");
+                        $"Native block {block.BlockStorageKey} is shorter than expected after decompression.");
             }
             else
             {
                 throw new InvalidOperationException(
-                    $"Unsupported block hash format {block.BlockHashBlake3}.");
+                    $"Unsupported block hash format {block.BlockStorageKey}.");
             }
 
             await outStream.WriteAsync(plaintextBytes.AsMemory(0, block.LengthBytes), ct);

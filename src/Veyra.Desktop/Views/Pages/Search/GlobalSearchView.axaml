@@ -159,10 +159,10 @@
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding HasRepositoryResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
 
-                            <ScrollViewer IsVisible="{Binding HasRepositoryResults}"
-                                          VerticalScrollBarVisibility="Auto">
-                                <ItemsControl ItemsSource="{Binding RepositoryResults}">
-                                    <ItemsControl.ItemTemplate>
+                            <ListBox IsVisible="{Binding HasRepositoryResults}"
+                                     Classes="clean-list passive-list"
+                                     ItemsSource="{Binding RepositoryResults}">
+                                <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="vm:GlobalSearchRepositoryResultItemViewModel">
                                             <Border Classes="card" Padding="12" Margin="0,0,0,10">
                                                 <StackPanel Spacing="8">
@@ -198,9 +198,8 @@
                                                 </StackPanel>
                                             </Border>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </ScrollViewer>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </Grid>
                     </Grid>
                 </Border>
@@ -220,10 +219,10 @@
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding HasSnapshotResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
 
-                            <ScrollViewer IsVisible="{Binding HasSnapshotResults}"
-                                          VerticalScrollBarVisibility="Auto">
-                                <ItemsControl ItemsSource="{Binding SnapshotResults}">
-                                    <ItemsControl.ItemTemplate>
+                            <ListBox IsVisible="{Binding HasSnapshotResults}"
+                                     Classes="clean-list passive-list"
+                                     ItemsSource="{Binding SnapshotResults}">
+                                <ListBox.ItemTemplate>
                                         <DataTemplate x:DataType="vm:GlobalSearchSnapshotResultItemViewModel">
                                             <Border Classes="card" Padding="12" Margin="0,0,0,10">
                                                 <StackPanel Spacing="8">
@@ -258,9 +257,8 @@
                                                 </StackPanel>
                                             </Border>
                                         </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </ScrollViewer>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </Grid>
                     </Grid>
                 </Border>
@@ -281,10 +279,10 @@
                                    TextWrapping="Wrap"
                                    IsVisible="{Binding HasFileResults, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
 
-                        <ScrollViewer IsVisible="{Binding HasFileResults}"
-                                      VerticalScrollBarVisibility="Auto">
-                            <ItemsControl ItemsSource="{Binding FileResults}">
-                                <ItemsControl.ItemTemplate>
+                        <ListBox IsVisible="{Binding HasFileResults}"
+                                 Classes="clean-list passive-list"
+                                 ItemsSource="{Binding FileResults}">
+                            <ListBox.ItemTemplate>
                                     <DataTemplate x:DataType="vm:GlobalSearchFileResultItemViewModel">
                                         <Border Classes="card" Padding="12" Margin="0,0,0,10">
                                             <StackPanel Spacing="8">
@@ -322,9 +320,8 @@
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </ScrollViewer>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </Grid>
                 </Grid>
             </Border>

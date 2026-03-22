@@ -143,7 +143,7 @@ public sealed class EfRepositoryIntegrityService(
             .Where(b => !b.FileVersion.FileIdentity.IsDeleted)
             .Where(b => b.FileVersion.FileIdentity.RepositoryId == repositoryId)
             .Select(b => new BlockReference(
-                b.BlockHashBlake3,
+                b.BlockStorageKey,
                 b.FileVersionId,
                 b.FileVersion.FileIdentity.RelativePath,
                 b.Sequence,

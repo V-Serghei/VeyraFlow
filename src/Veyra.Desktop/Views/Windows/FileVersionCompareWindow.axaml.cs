@@ -19,11 +19,13 @@ namespace Veyra.Desktop.Views.Windows;
 
 public partial class FileVersionCompareWindow : Window
 {
-    private const double CompactWidth = 1160;
-    private const double NarrowWidth = 980;
+    private const double CompactWidth = 1100;
+    private const double NarrowWidth = 900;
     private bool _isSyncingDiffScroll;
     private ScrollViewer? _leftDiffScrollViewer;
     private ScrollViewer? _rightDiffScrollViewer;
+    private ScrollViewer? _leftFullDiffScrollViewer;
+    private ScrollViewer? _rightFullDiffScrollViewer;
     private ScrollViewer? _leftWordDiffScrollViewer;
     private ScrollViewer? _rightWordDiffScrollViewer;
     private InteractiveImageViewportController? _overlayViewportController;
@@ -49,7 +51,7 @@ public partial class FileVersionCompareWindow : Window
                 ownerWindow,
                 maximizeToWorkingArea: false,
                 frameMarginDip: 8d,
-                minWidthDip: 820d,
+                minWidthDip: 780d,
                 minHeightDip: 560d);
 
             Dispatcher.UIThread.Post(() =>
@@ -58,7 +60,7 @@ public partial class FileVersionCompareWindow : Window
                     ownerWindow,
                     maximizeToWorkingArea: false,
                     frameMarginDip: 8d,
-                    minWidthDip: 820d,
+                    minWidthDip: 780d,
                     minHeightDip: 560d),
                 DispatcherPriority.Background);
 
@@ -66,6 +68,8 @@ public partial class FileVersionCompareWindow : Window
 
             _leftDiffScrollViewer = this.FindControl<ScrollViewer>("LeftDiffScrollViewer");
             _rightDiffScrollViewer = this.FindControl<ScrollViewer>("RightDiffScrollViewer");
+            _leftFullDiffScrollViewer = this.FindControl<ScrollViewer>("LeftFullDiffScrollViewer");
+            _rightFullDiffScrollViewer = this.FindControl<ScrollViewer>("RightFullDiffScrollViewer");
             _leftWordDiffScrollViewer = this.FindControl<ScrollViewer>("LeftWordDiffScrollViewer");
             _rightWordDiffScrollViewer = this.FindControl<ScrollViewer>("RightWordDiffScrollViewer");
             var overlayImageScrollViewer = this.FindControl<ScrollViewer>("OverlayImageScrollViewer");
@@ -142,6 +146,8 @@ public partial class FileVersionCompareWindow : Window
 
             _leftDiffScrollViewer = null;
             _rightDiffScrollViewer = null;
+            _leftFullDiffScrollViewer = null;
+            _rightFullDiffScrollViewer = null;
             _leftWordDiffScrollViewer = null;
             _rightWordDiffScrollViewer = null;
             _overlayViewportController = null;
@@ -208,23 +214,24 @@ public partial class FileVersionCompareWindow : Window
         if (DataContext is not FileVersionCompareWindowViewModel vm)
             return;
 
-        var pngBytes = vm.GetCurrentImageDiffPreviewPngBytes();
-        if (pngBytes.Length == 0)
+        var request = vm.BuildDetachedImagePreviewRequest();
+        if (request is null)
             return;
 
-        var previewTitle = string.IsNullOrWhiteSpace(vm.OverlayImageCaption)
-            ? Loc.T("compare.window_title")
-            : vm.OverlayImageCaption;
-
         var detachedWindow = new DetachedImagePreviewWindow(
-            pngBytes,
-            previewTitle,
+            request,
             Owner as Window ?? this)
         {
             Topmost = true
         };
 
         detachedWindow.Show();
+    }
+
+    private void OnImageDiffSettingsBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        GetViewModel()?.HideImageDiffSettingsPane();
+        e.Handled = true;
     }
 
     private void OnVersionItemPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -277,6 +284,24 @@ public partial class FileVersionCompareWindow : Window
 
         var offset = source.GetValue(ScrollViewer.OffsetProperty);
         SyncDiffScroll(_leftWordDiffScrollViewer, offset);
+    }
+
+    private void OnLeftFullDiffScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer source)
+            return;
+
+        var offset = source.GetValue(ScrollViewer.OffsetProperty);
+        SyncDiffScroll(_rightFullDiffScrollViewer, offset);
+    }
+
+    private void OnRightFullDiffScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer source)
+            return;
+
+        var offset = source.GetValue(ScrollViewer.OffsetProperty);
+        SyncDiffScroll(_leftFullDiffScrollViewer, offset);
     }
 
     private void SyncDiffScroll(ScrollViewer? target, Vector offset)

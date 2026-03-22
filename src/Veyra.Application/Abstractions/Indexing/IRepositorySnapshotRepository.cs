@@ -12,10 +12,15 @@ public interface IRepositorySnapshotRepository
         bool saveFileVersions = true,
         string? snapshotTitle = null,
         IReadOnlyCollection<string>? snapshotTags = null,
+        IProgress<RepositoryScanProgressDto>? progress = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
         int repositoryId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyDictionary<int, IReadOnlyList<RepositoryScanEntryDto>>> GetLatestEntriesBatchAsync(
+        IReadOnlyCollection<int> repositoryIds,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<FileVersionInfoDto>> GetFileVersionsAsync(
@@ -31,6 +36,11 @@ public interface IRepositorySnapshotRepository
 
     Task<IReadOnlyList<RepositorySnapshotHistoryItemDto>> GetSnapshotHistoryAsync(
         int repositoryId,
+        int take = 100,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyDictionary<int, IReadOnlyList<RepositorySnapshotHistoryItemDto>>> GetSnapshotHistoryBatchAsync(
+        IReadOnlyCollection<int> repositoryIds,
         int take = 100,
         CancellationToken ct = default);
 
@@ -66,4 +76,3 @@ public interface IRepositorySnapshotRepository
         long fileVersionId,
         CancellationToken ct = default);
 }
-
