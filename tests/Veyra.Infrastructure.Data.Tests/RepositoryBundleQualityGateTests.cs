@@ -234,7 +234,7 @@ public sealed class RepositoryBundleQualityGateTests
         {
             FileVersionId = version.Id,
             Sequence = 0,
-            BlockHashBlake3 = blockHash,
+            BlockStorageKey = blockHash,
             LengthBytes = 42,
             StoredSizeBytes = 42,
             CreatedAt = now,

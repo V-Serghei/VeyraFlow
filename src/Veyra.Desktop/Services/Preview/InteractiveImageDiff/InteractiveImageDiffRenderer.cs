@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
@@ -13,6 +15,7 @@ using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Veyra.Infrastructure.Data.Preview;
+using Veyra.Infrastructure.Native;
 
 namespace Veyra.Desktop.Services.Preview;
 
@@ -20,6 +23,12 @@ internal static class InteractiveImageDiffRenderer
 {
     private const int MaxPixels = 24_000_000;
     private const int MinRegionPixels = 1;
+    private const int MaxCachedFrames = 12;
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly object NativeGate = new();
+    private static readonly object CacheGate = new();
+    private static readonly Dictionary<string, CachedRenderFrame> FrameCache = [];
+    private static bool _nativeImageDiffAvailable = NativeRuntimeHealth.Probe().SupportsImageDiff;
 
     public static async Task<InteractiveImageDiffRenderResult?> TryRenderAsync(
         string baselinePath,
@@ -72,6 +81,30 @@ internal static class InteractiveImageDiffRenderer
             || !File.Exists(currentPath))
         {
             return null;
+        }
+
+        var cacheKey = BuildCacheKey(
+            baselinePath,
+            currentPath,
+            sensitivityPercent,
+            mode,
+            splitPercent,
+            showRegionBoxes);
+        if (TryGetCachedFrame(cacheKey, out var cachedFrame))
+            return cachedFrame;
+
+        var nativeFrame = await TryRenderNativeFrameAsync(
+            baselinePath,
+            currentPath,
+            sensitivityPercent,
+            mode,
+            splitPercent,
+            showRegionBoxes,
+            ct);
+        if (nativeFrame is not null)
+        {
+            StoreCachedFrame(cacheKey, nativeFrame);
+            return nativeFrame;
         }
 
         using var baselineImage = await DiffImageLoader.LoadForDiffAsync(baselinePath, ct);
@@ -179,13 +212,15 @@ internal static class InteractiveImageDiffRenderer
         await using var stream = new MemoryStream();
         await output.SaveAsPngAsync(stream, new PngEncoder(), ct);
         var pngBytes = stream.ToArray();
-        return new InteractiveImageDiffRenderFrame(
+        var frame = new InteractiveImageDiffRenderFrame(
             pngBytes,
             output.Width,
             output.Height,
             changedPixels,
             Math.Clamp((double)changedPixels / (compareWidth * (double)compareHeight), 0d, 1d),
             regions.Count);
+        StoreCachedFrame(cacheKey, frame);
+        return frame;
     }
 
     private static double ComputeDifference(Rgba32 left, Rgba32 right)
@@ -468,6 +503,194 @@ internal static class InteractiveImageDiffRenderer
         var right = Math.Clamp(region.Right, left, width - 1);
         var bottom = Math.Clamp(region.Bottom, top, height - 1);
         return new PixelRegion(left, top, right, bottom);
+    }
+
+    private static async Task<InteractiveImageDiffRenderFrame?> TryRenderNativeFrameAsync(
+        string baselinePath,
+        string currentPath,
+        double sensitivityPercent,
+        ImageDiffVisualizationMode mode,
+        double splitPercent,
+        bool showRegionBoxes,
+        CancellationToken ct)
+    {
+        if (!IsNativeImageDiffAvailable())
+            return null;
+
+        try
+        {
+            var payloadJson = NativeImageDiffInterop.RenderImageDiffJson(
+                baselinePath,
+                currentPath,
+                (int)Math.Round(sensitivityPercent),
+                (int)mode,
+                (int)Math.Round(splitPercent),
+                showRegionBoxes);
+
+            var payload = JsonSerializer.Deserialize<NativeImageDiffRenderPayload>(payloadJson, JsonOptions);
+            if (payload is null || string.IsNullOrWhiteSpace(payload.PngBase64))
+                return null;
+
+            var pngBytes = Convert.FromBase64String(payload.PngBase64);
+            var result = new InteractiveImageDiffRenderFrame(
+                pngBytes,
+                payload.PixelWidth,
+                payload.PixelHeight,
+                payload.ChangedPixelCount,
+                payload.ChangedPixelRatio,
+                payload.ChangedRegionCount);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.ImageDiff);
+            return result;
+        }
+        catch (Exception ex) when (IsNativeUnavailable(ex))
+        {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.ImageDiff);
+            DisableNativeImageDiff();
+            return null;
+        }
+        catch
+        {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.ImageDiff);
+            return null;
+        }
+    }
+
+    private static bool IsNativeImageDiffAvailable()
+    {
+        lock (NativeGate)
+            return _nativeImageDiffAvailable;
+    }
+
+    private static void DisableNativeImageDiff()
+    {
+        lock (NativeGate)
+            _nativeImageDiffAvailable = false;
+    }
+
+    private static bool IsNativeUnavailable(Exception ex)
+    {
+        if (ex is EntryPointNotFoundException or DllNotFoundException or BadImageFormatException)
+            return true;
+
+        if (ex is InvalidOperationException ioe)
+        {
+            return ioe.Message.Contains("entry point", StringComparison.OrdinalIgnoreCase)
+                   || ioe.Message.Contains("Unable to load DLL", StringComparison.OrdinalIgnoreCase)
+                   || ioe.Message.Contains("Native image diff", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string BuildCacheKey(
+        string baselinePath,
+        string currentPath,
+        double sensitivityPercent,
+        ImageDiffVisualizationMode mode,
+        double splitPercent,
+        bool showRegionBoxes)
+    {
+        static string Stamp(string path)
+        {
+            var info = new FileInfo(path);
+            return string.Concat(
+                info.FullName.ToUpperInvariant(),
+                "|",
+                info.Exists ? info.Length : 0,
+                "|",
+                info.Exists ? info.LastWriteTimeUtc.Ticks : 0);
+        }
+
+        return string.Concat(
+            Stamp(baselinePath),
+            "||",
+            Stamp(currentPath),
+            "||",
+            (int)Math.Round(sensitivityPercent),
+            "|",
+            (int)mode,
+            "|",
+            (int)Math.Round(splitPercent),
+            "|",
+            showRegionBoxes ? "1" : "0");
+    }
+
+    private static bool TryGetCachedFrame(string cacheKey, out InteractiveImageDiffRenderFrame? frame)
+    {
+        lock (CacheGate)
+        {
+            if (!FrameCache.TryGetValue(cacheKey, out var cached))
+            {
+                frame = null;
+                return false;
+            }
+
+            cached.LastAccessUtc = DateTime.UtcNow;
+            frame = new InteractiveImageDiffRenderFrame(
+                cached.PngBytes,
+                cached.PixelWidth,
+                cached.PixelHeight,
+                cached.ChangedPixelCount,
+                cached.ChangedPixelRatio,
+                cached.ChangedRegionCount);
+            return true;
+        }
+    }
+
+    private static void StoreCachedFrame(string cacheKey, InteractiveImageDiffRenderFrame frame)
+    {
+        lock (CacheGate)
+        {
+            FrameCache[cacheKey] = new CachedRenderFrame
+            {
+                PngBytes = frame.PngBytes,
+                PixelWidth = frame.PixelWidth,
+                PixelHeight = frame.PixelHeight,
+                ChangedPixelCount = frame.ChangedPixelCount,
+                ChangedPixelRatio = frame.ChangedPixelRatio,
+                ChangedRegionCount = frame.ChangedRegionCount,
+                LastAccessUtc = DateTime.UtcNow
+            };
+
+            if (FrameCache.Count <= MaxCachedFrames)
+                return;
+
+            foreach (var key in FrameCache
+                         .OrderBy(static item => item.Value.LastAccessUtc)
+                         .Take(FrameCache.Count - MaxCachedFrames)
+                         .Select(static item => item.Key)
+                         .ToArray())
+            {
+                FrameCache.Remove(key);
+            }
+        }
+    }
+
+    private sealed class NativeImageDiffRenderPayload
+    {
+        [JsonPropertyName("png_base64")]
+        public string? PngBase64 { get; init; }
+        [JsonPropertyName("pixel_width")]
+        public int PixelWidth { get; init; }
+        [JsonPropertyName("pixel_height")]
+        public int PixelHeight { get; init; }
+        [JsonPropertyName("changed_pixel_count")]
+        public int ChangedPixelCount { get; init; }
+        [JsonPropertyName("changed_pixel_ratio")]
+        public double ChangedPixelRatio { get; init; }
+        [JsonPropertyName("changed_region_count")]
+        public int ChangedRegionCount { get; init; }
+    }
+
+    private sealed class CachedRenderFrame
+    {
+        public required byte[] PngBytes { get; init; }
+        public required int PixelWidth { get; init; }
+        public required int PixelHeight { get; init; }
+        public required int ChangedPixelCount { get; init; }
+        public required double ChangedPixelRatio { get; init; }
+        public required int ChangedRegionCount { get; init; }
+        public DateTime LastAccessUtc { get; set; }
     }
 
     private static Rgba32 Blend(Rgba32 basePixel, Rgba32 overlayPixel, float overlayOpacity)

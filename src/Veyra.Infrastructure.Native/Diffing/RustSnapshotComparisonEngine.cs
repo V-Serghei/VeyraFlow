@@ -79,15 +79,19 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
                         ? payload.ChangedFilesCount
                         : changes.Count;
 
-                    return new SnapshotLinkComparisonResultDto(changedCount, changes);
+                    var result = new SnapshotLinkComparisonResultDto(changedCount, changes);
+                    NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.SnapshotComparison);
+                    return result;
                 }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.SnapshotComparison);
                 DisableNativeSnapshotComparison(ex);
             }
             catch (Exception ex)
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.SnapshotComparison);
                 _log.LogWarning(ex, "Native snapshot comparison failed. Falling back to managed engine.");
             }
         }
@@ -138,20 +142,24 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
                         ? payload.ChangedFilesCount
                         : payload.AddedCount + payload.ModifiedCount + payload.DeletedCount;
 
-                    return new RepositoryPathComparisonResultDto(
+                    var result = new RepositoryPathComparisonResultDto(
                         payload.AddedCount,
                         payload.ModifiedCount,
                         payload.DeletedCount,
                         changedCount,
                         entries);
+                    NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.RepositoryPathComparison);
+                    return result;
                 }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RepositoryPathComparison);
                 DisableNativeRepositoryPathComparison(ex);
             }
             catch (Exception ex)
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RepositoryPathComparison);
                 _log.LogWarning(ex, "Native repository path comparison failed. Falling back to managed engine.");
             }
         }
@@ -207,18 +215,22 @@ public sealed class RustSnapshotComparisonEngine : ISnapshotComparisonEngine
                         ? planned.NewVersionsCount
                         : entries.Count(e => e.ShouldCreateNewVersion);
 
-                    return new RepositoryVersionPlanningResultDto(
+                    var result = new RepositoryVersionPlanningResultDto(
                         changedFilesCount,
                         newVersionsCount,
                         entries);
+                    NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.VersionPlanning);
+                    return result;
                 }, ct);
             }
             catch (Exception ex) when (IsNativeUnavailable(ex))
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.VersionPlanning);
                 DisableNativeVersionPlanner(ex);
             }
             catch (Exception ex)
             {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.VersionPlanning);
                 _log.LogWarning(ex, "Native repository version planner failed. Falling back to managed engine.");
             }
         }

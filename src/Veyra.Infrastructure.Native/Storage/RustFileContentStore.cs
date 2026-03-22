@@ -128,11 +128,13 @@ internal sealed class RustFileContentStore : IFileContentStore
                 result.BlockCount,
                 result.DedupedBlocks,
                 result.NewBlocks);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.StoreBlocks);
 
             return result;
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.StoreBlocks);
             DisableNativeStore(ex, fullPath);
             return await StoreFileManagedAsync(fullPath, ct);
         }
@@ -180,11 +182,13 @@ internal sealed class RustFileContentStore : IFileContentStore
                 fullTarget,
                 written,
                 blocks.Count);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.RestoreBlocks);
 
             return written;
         }
         catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RestoreBlocks);
             DisableNativeRestore(ex, fullTarget);
             return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
         }

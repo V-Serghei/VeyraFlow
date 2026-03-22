@@ -73,20 +73,24 @@ public sealed class RustTextDiffEngine : ITextDiffEngine
                         h.ChangeKind ?? "modified"))
                     .ToList();
 
-                return new TextDiffComputationDto(
+                var result = new TextDiffComputationDto(
                     payload.AddedLines,
                     payload.RemovedLines,
                     payload.IsTruncated,
                     lines,
                     hunks);
+                NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.TextDiff);
+                return result;
             }, ct);
         }
         catch (Exception ex) when (IsNativeUnavailable(ex))
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.TextDiff);
             DisableNativeDiff(ex);
         }
         catch (Exception ex)
         {
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.TextDiff);
             _log.LogWarning(ex, "Native diff failed. Falling back to managed diff engine.");
         }
 

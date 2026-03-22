@@ -59,6 +59,16 @@ int32_t veyra_build_text_diff_utf8(const char *left_file_path_ptr,
                                    uint64_t out_len,
                                    uint64_t *written);
 
+int32_t veyra_render_image_diff_utf8(const char *baseline_path_ptr,
+                                     const char *current_path_ptr,
+                                     uint32_t sensitivity_percent,
+                                     uint32_t mode,
+                                     uint32_t split_percent,
+                                     int show_region_boxes,
+                                     uint8_t *out,
+                                     uint64_t out_len,
+                                     uint64_t *written);
+
 int32_t veyra_compare_snapshot_links_utf8(const char *current_states_json_ptr,
                                           const char *previous_states_json_ptr,
                                           uint8_t *out,

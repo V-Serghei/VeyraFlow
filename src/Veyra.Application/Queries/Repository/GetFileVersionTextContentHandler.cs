@@ -17,7 +17,7 @@ public sealed class GetFileVersionTextContentHandler(
     {
         ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
         ".cs", ".js", ".ts", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
-        ".html", ".css", ".sql", ".xaml", ".axaml"
+        ".html", ".css", ".sql", ".xaml", ".axaml", ".svg"
     };
 
     public async Task<OperationResult<FileVersionTextContentDto>> Handle(GetFileVersionTextContentQuery request, CancellationToken ct)

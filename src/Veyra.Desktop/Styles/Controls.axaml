@@ -415,17 +415,24 @@
         <Setter Property="Spacing" Value="6"/>
         <Setter Property="HorizontalAlignment" Value="Center"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
     </Style>
 
     <Style Selector="TextBlock.button-icon">
         <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
     </Style>
 
     <Style Selector="TextBlock.button-label">
         <Setter Property="VerticalAlignment" Value="Center"/>
         <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+    </Style>
+
+    <Style Selector="TextBlock.button-label.persistent">
+        <Setter Property="TextTrimming" Value="None"/>
     </Style>
 
     <Style Selector="Button.responsive-icon">
@@ -453,6 +460,10 @@
 
     <Style Selector="UserControl.narrow-layout TextBlock.button-label, Window.narrow-layout TextBlock.button-label">
         <Setter Property="IsVisible" Value="False"/>
+    </Style>
+
+    <Style Selector="UserControl.narrow-layout TextBlock.button-label.persistent, Window.narrow-layout TextBlock.button-label.persistent">
+        <Setter Property="IsVisible" Value="True"/>
     </Style>
 
     <Style Selector="UserControl.narrow-layout Button.responsive-icon, Window.narrow-layout Button.responsive-icon">
@@ -612,6 +623,15 @@
 
     <Style Selector="ListBox.clean-list > ListBoxItem:selected /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource VeyraAccentSubtleBrush}"/>
+        <Setter Property="Opacity" Value="1"/>
+    </Style>
+
+    <Style Selector="ListBox.clean-list.passive-list > ListBoxItem:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+
+    <Style Selector="ListBox.clean-list.passive-list > ListBoxItem:selected /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Opacity" Value="1"/>
     </Style>
 </Styles>

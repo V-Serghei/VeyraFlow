@@ -18,7 +18,7 @@ public sealed class RepositorySnapshotHistoryEntryViewModel : ObservableObject
     public int ChangedFilesCount { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
-    public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? $"{Loc.T("snapshot.default_name_prefix")}_{CreatedAtUtc:yyyyMMdd_HHmmss}" : Title;
+    public string DisplayTitle => ResolveDisplayTitle();
     public string DisplayTime => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     public string KindLabel => Kind switch
     {
@@ -39,5 +39,16 @@ public sealed class RepositorySnapshotHistoryEntryViewModel : ObservableObject
         OnPropertyChanged(nameof(ChangedFilesLabel));
         OnPropertyChanged(nameof(TagsLabel));
         OnPropertyChanged(nameof(HasTags));
+    }
+
+    private string ResolveDisplayTitle()
+    {
+        if (!string.IsNullOrWhiteSpace(Title))
+            return Title;
+
+        if (Trigger.StartsWith("initial_snapshot", StringComparison.OrdinalIgnoreCase))
+            return Loc.T("snapshot.initial_name");
+
+        return $"{Loc.T("snapshot.default_name_prefix")}_{CreatedAtUtc:yyyyMMdd_HHmmss}";
     }
 }

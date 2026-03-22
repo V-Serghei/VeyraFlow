@@ -20,7 +20,8 @@
                     <TextBlock x:Name="PreviewTitleTextBlock"
                                FontSize="15"
                                FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis"/>
+                               TextWrapping="Wrap"
+                               MaxLines="2"/>
                     <TextBlock Text="{loc:Tr compare.zoom_hint}"
                                Classes="muted"
                                FontSize="11"/>
@@ -28,7 +29,7 @@
 
                 <WrapPanel Grid.Row="1"
                            Orientation="Horizontal"
-                           HorizontalAlignment="Right"
+                           HorizontalAlignment="Left"
                            ItemHeight="40">
                     <Button Classes="subtle compact responsive-icon"
                             Click="OnZoomOutClicked"

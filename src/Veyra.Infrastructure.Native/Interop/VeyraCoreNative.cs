@@ -16,6 +16,7 @@ internal static class VeyraCoreNative
     internal const string EntryStoreFileBlocks = "veyra_store_file_blocks_utf8";
     internal const string EntryRestoreFileBlocks = "veyra_restore_file_blocks_utf8";
     internal const string EntryBuildTextDiff = "veyra_build_text_diff_utf8";
+    internal const string EntryRenderImageDiff = "veyra_render_image_diff_utf8";
     internal const string EntryCompareSnapshotLinks = "veyra_compare_snapshot_links_utf8";
     internal const string EntryCompareRepositoryPaths = "veyra_compare_repository_paths_utf8";
     internal const string EntryPlanRepositoryVersions = "veyra_plan_repository_versions_utf8";
@@ -36,7 +37,8 @@ internal static class VeyraCoreNative
     private static readonly string[] OptionalEntrypoints =
     [
         EntryScanDirectoryLimited,
-        EntryScanDirectoryLimitedV2
+        EntryScanDirectoryLimitedV2,
+        EntryRenderImageDiff
     ];
 
     private static readonly Lazy<NativeLibraryProbe> LibraryProbe = new(
@@ -103,6 +105,18 @@ internal static class VeyraCoreNative
         out ulong written);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_render_image_diff_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string baselineFilePath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string currentFilePath,
+        uint sensitivityPercent,
+        uint mode,
+        uint splitPercent,
+        int showRegionBoxes,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_zstd_compress(
         byte[] data,
         int dataLen,
@@ -164,6 +178,7 @@ internal static class VeyraCoreNative
                 SupportsSnapshotComparison: false,
                 SupportsRepositoryPathComparison: false,
                 SupportsVersionPlanning: false,
+                SupportsImageDiff: false,
                 LoadedPath: null,
                 ErrorMessage: probe.LoadError ?? "Unable to load native veyra_core library.",
                 MissingEntrypoints: RequiredEntrypoints,
@@ -181,6 +196,7 @@ internal static class VeyraCoreNative
         var supportsSnapshotComparison = HasEntrypoint(probe, EntryCompareSnapshotLinks);
         var supportsRepositoryPathComparison = HasEntrypoint(probe, EntryCompareRepositoryPaths);
         var supportsVersionPlanning = HasEntrypoint(probe, EntryPlanRepositoryVersions);
+        var supportsImageDiff = HasEntrypoint(probe, EntryRenderImageDiff);
 
         var isHealthy = missingEntrypoints.Length == 0;
         string? runtimeCheckError = null;
@@ -210,6 +226,7 @@ internal static class VeyraCoreNative
             SupportsSnapshotComparison: supportsSnapshotComparison,
             SupportsRepositoryPathComparison: supportsRepositoryPathComparison,
             SupportsVersionPlanning: supportsVersionPlanning,
+            SupportsImageDiff: supportsImageDiff,
             LoadedPath: probe.LoadedPath,
             ErrorMessage: probe.LoadError ?? runtimeCheckError,
             MissingEntrypoints: missingEntrypoints,
@@ -273,6 +290,33 @@ internal static class VeyraCoreNative
             (buffer, len, out written) =>
                 veyra_build_text_diff_utf8(leftFilePath, rightFilePath, normalizedMaxLines, buffer, len, out written),
             "Native text diff failed");
+    }
+
+    public static string RenderImageDiffJson(
+        string baselineFilePath,
+        string currentFilePath,
+        int sensitivityPercent,
+        int mode,
+        int splitPercent,
+        bool showRegionBoxes)
+    {
+        var safeSensitivity = (uint)Math.Clamp(sensitivityPercent, 0, 100);
+        var safeMode = (uint)Math.Clamp(mode, 0, 3);
+        var safeSplit = (uint)Math.Clamp(splitPercent, 0, 100);
+
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_render_image_diff_utf8(
+                    baselineFilePath,
+                    currentFilePath,
+                    safeSensitivity,
+                    safeMode,
+                    safeSplit,
+                    showRegionBoxes ? 1 : 0,
+                    buffer,
+                    len,
+                    out written),
+            "Native image diff render failed");
     }
 
     public static byte[] ZstdDecompress(byte[] compressedBytes, int expectedOutputLength)

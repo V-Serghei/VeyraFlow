@@ -9,6 +9,8 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Services.Sync;
+using Veyra.Desktop.Services.Sync.Runtime;
+using Veyra.Desktop.Services.Sync.Runtime.Models;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;
@@ -178,6 +180,7 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
             new FakeFileContentStore(),
             new FakeMediator(),
             cfg,
+            new FakeCloudSyncRuntimeControlService(),
             NullLogger<RepositoryCloudSyncOrchestrator>.Instance);
     }
 
@@ -296,7 +299,7 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
             {
                 FileVersionId = version.Id,
                 Sequence = i,
-                BlockHashBlake3 = blockHashes[i],
+                BlockStorageKey = blockHashes[i],
                 LengthBytes = 64,
                 StoredSizeBytes = 64,
                 CreatedAt = now,
@@ -534,6 +537,24 @@ public sealed class RepositoryCloudSyncOrchestratorQualityGateTests
 
         public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class FakeCloudSyncRuntimeControlService : ICloudSyncRuntimeControlService
+    {
+        public bool IsPaused => false;
+
+        public CloudSyncRuntimeSnapshot Snapshot => new(false);
+
+        public CancellationToken PauseToken => CancellationToken.None;
+
+        public event Action<CloudSyncRuntimeSnapshot>? StateChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public Task SetPausedAsync(bool paused, CancellationToken ct = default)
+            => Task.CompletedTask;
     }
 
     private sealed class CheckpointCloudSyncService(string blockHashA, string blockHashB) : ICloudSyncService

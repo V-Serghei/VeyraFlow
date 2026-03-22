@@ -26,9 +26,10 @@
                         Command="{Binding AddRepositoryCommand}"
                         Classes="primary"/>
 
-                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding Repositories}">
-                        <ItemsControl.ItemTemplate>
+                <ListBox Grid.Row="2"
+                         Classes="clean-list passive-list"
+                         ItemsSource="{Binding Repositories}">
+                        <ListBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:RepositoryCardViewModel">
                                 <Border Classes="card" Padding="10,10,10,12" Margin="0,0,0,8">
                                     <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
@@ -67,9 +68,8 @@
                                     </Grid>
                                 </Border>
                             </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                        </ListBox.ItemTemplate>
+                </ListBox>
             </Grid>
             </Border>
 

@@ -116,11 +116,16 @@
                                            TextWrapping="Wrap"/>
                             </Grid>
 
-                            <ProgressBar Minimum="0"
-                                         Maximum="100"
-                                         Value="{Binding ProgressPercent}"
-                                         Height="14"
-                                         IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                            <StackPanel Spacing="6">
+                                <ProgressBar Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding ProgressPercent}"
+                                             Height="14"/>
+                                <ProgressBar Classes="loading-progress"
+                                             Height="4"
+                                             IsIndeterminate="True"
+                                             IsVisible="{Binding IsProgressIndeterminate}"/>
+                            </StackPanel>
 
                             <Border Classes="metric-card">
                                 <TextBlock Text="{loc:Tr create_repo.scan_hint}" Classes="muted" TextWrapping="Wrap"/>
@@ -147,8 +152,8 @@
                                 </Border>
                                 <Border Classes="metric-card" Margin="0,0,12,12">
                                     <StackPanel Spacing="4">
-                                        <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
-                                        <TextBlock Text="{loc:Tr create_repo.progress_card}" Classes="muted"/>
+                                        <TextBlock Text="{Binding TrackedFilesCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.tracked_files_card}" Classes="muted"/>
                                     </StackPanel>
                                 </Border>
                             </WrapPanel>
@@ -212,14 +217,20 @@
                                Classes="muted"
                                TextWrapping="Wrap"
                                TextAlignment="Center"/>
-                    <ProgressBar Classes="loading-progress"
-                                 Minimum="0"
-                                 Maximum="100"
-                                 Value="{Binding ProgressPercent}"
-                                 IsIndeterminate="{Binding IsProgressIndeterminate}"/>
-                    <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}"
+                    <StackPanel Spacing="6">
+                        <ProgressBar Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding ProgressPercent}"
+                                     Height="10"/>
+                        <ProgressBar Classes="loading-progress"
+                                     Height="4"
+                                     IsIndeterminate="True"
+                                     IsVisible="{Binding IsProgressIndeterminate}"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ProgressDisplayText}"
                                FontWeight="SemiBold"
-                               HorizontalAlignment="Center"/>
+                               HorizontalAlignment="Center"
+                               IsVisible="{Binding ShowDeterminateProgressValue}"/>
                 </StackPanel>
             </Border>
         </Border>

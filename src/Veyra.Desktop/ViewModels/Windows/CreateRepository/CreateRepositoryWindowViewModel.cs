@@ -44,27 +44,48 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     [ObservableProperty] private string _directoryPath = string.Empty;
     [ObservableProperty] private string _customFormat = string.Empty;
 
-    [ObservableProperty] private int _progressPercent;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDeterminateProgressValue))]
+    [NotifyPropertyChangedFor(nameof(ProgressDisplayText))]
+    private int _progressPercent;
     [ObservableProperty] private string _progressMessage = Loc.T("create_repo.waiting_start");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
     [NotifyPropertyChangedFor(nameof(FilesFoundCount))]
+    [NotifyPropertyChangedFor(nameof(TrackedFilesCount))]
     private int _filesProcessed;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FilesProgressLabel))]
     [NotifyPropertyChangedFor(nameof(FilesFoundCount))]
+    [NotifyPropertyChangedFor(nameof(TrackedFilesCount))]
     private int _filesTotal;
 
-    [ObservableProperty] private bool _isProgressIndeterminate;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDeterminateProgressValue))]
+    [NotifyPropertyChangedFor(nameof(ProgressDisplayText))]
+    private bool _isProgressIndeterminate;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FilesFoundCount))]
+    private int _directoryFilesFound;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TrackedFilesCount))]
+    private int _trackedFilesPreviewCount;
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
-    public int FilesFoundCount => Math.Max(FilesProcessed, FilesTotal);
+    public int FilesFoundCount => DirectoryFilesFound > 0 ? DirectoryFilesFound : Math.Max(FilesProcessed, FilesTotal);
     public string FilesProgressLabel => FilesFoundCount.ToString();
+    public int TrackedFilesCount => Math.Max(TrackedFilesPreviewCount, Math.Max(FilesProcessed, FilesTotal));
     public int SelectedFormatCount => Formats.Count(f => f.IsSelected);
     public int TrackedFolderCount => string.IsNullOrWhiteSpace(DirectoryPath) ? 0 : 1;
     public bool HasProgressLog => ProgressLogItems.Count > 0;
+    public bool ShowDeterminateProgressValue => ProgressPercent > 0;
+    public string ProgressDisplayText => ShowDeterminateProgressValue
+        ? $"{ProgressPercent}%"
+        : Loc.T("create_repo.in_progress");
 
     public ObservableCollection<RepositoryFormatOptionViewModel> Formats { get; } = [];
     public ObservableCollection<FormatCategoryItemViewModel> FormatCategories { get; } = [];
@@ -304,6 +325,8 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             ProgressMessage = Loc.T("create_repo.progress_start");
             FilesProcessed = 0;
             FilesTotal = 0;
+            DirectoryFilesFound = 0;
+            TrackedFilesPreviewCount = 0;
             IsProgressIndeterminate = true;
             _lastProgressLogSignature = null;
             ProgressLogItems.Clear();
@@ -311,17 +334,37 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             AppendProgressLog(Loc.T("create_repo.progress_start"), 0);
             await Task.Yield();
 
+            ProgressMessage = Loc.T("create_repo.progress_counting_files");
+            var previewMetrics = await CountDirectoryMetricsAsync(DirectoryPath, SelectedFormats.ToArray());
+            DirectoryFilesFound = previewMetrics.TotalFiles;
+            TrackedFilesPreviewCount = previewMetrics.TrackedFiles;
+            AppendProgressLog(
+                Loc.F("create_repo.progress_counting_files_result", previewMetrics.TotalFiles, previewMetrics.TrackedFiles),
+                previewMetrics.TotalFiles);
+
             var progress = new Progress<RepositoryCreationProgressDto>(p =>
             {
-                var nextPercent = Math.Clamp(p.Percent, 0, 100);
-                if (nextPercent < ProgressPercent)
-                    nextPercent = ProgressPercent;
-
-                ProgressPercent = nextPercent;
                 ProgressMessage = p.Message;
                 FilesProcessed = p.FilesProcessed;
                 FilesTotal = p.FilesTotal;
-                IsProgressIndeterminate = p.FilesTotal <= 0 && p.Percent < 100;
+
+                var trackedFiles = Math.Max(p.FilesProcessed, p.FilesTotal);
+                if (trackedFiles > TrackedFilesPreviewCount)
+                    TrackedFilesPreviewCount = trackedFiles;
+
+                if (TryGetReliableProgressPercent(p, out var nextPercent))
+                {
+                    if (nextPercent < ProgressPercent)
+                        nextPercent = ProgressPercent;
+
+                    ProgressPercent = nextPercent;
+                    IsProgressIndeterminate = false;
+                }
+                else
+                {
+                    IsProgressIndeterminate = true;
+                }
+
                 AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
             });
 
@@ -441,8 +484,109 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 .All(selected.Contains);
 
             if (category.IsApplied != shouldBeApplied)
-                category.IsApplied = shouldBeApplied;
+            category.IsApplied = shouldBeApplied;
         }
+    }
+
+    private static bool TryGetReliableProgressPercent(RepositoryCreationProgressDto progress, out int percent)
+    {
+        if (string.Equals(progress.Stage, "done", StringComparison.OrdinalIgnoreCase))
+        {
+            percent = 100;
+            return true;
+        }
+
+        if (progress.Percent > 0)
+        {
+            percent = Math.Clamp(progress.Percent, 1, 99);
+            return true;
+        }
+
+        if (progress.FilesTotal > 0
+            && progress.FilesProcessed > 0
+            && progress.FilesProcessed < progress.FilesTotal)
+        {
+            percent = Math.Clamp(
+                (int)Math.Round((double)progress.FilesProcessed / progress.FilesTotal * 100.0),
+                1,
+                99);
+            return true;
+        }
+
+        percent = 0;
+        return false;
+    }
+
+    private static async Task<(int TotalFiles, int TrackedFiles)> CountDirectoryMetricsAsync(
+        string rootPath,
+        IReadOnlyCollection<string> selectedFormats)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+            return (0, 0);
+
+        var trackedFormats = selectedFormats
+            .Where(format => !string.IsNullOrWhiteSpace(format))
+            .Select(RepositoryFormatOptionViewModel.NormalizeFormat)
+            .Where(static format => !string.IsNullOrWhiteSpace(format))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return await Task.Run(() =>
+        {
+            var totalFiles = 0;
+            var trackedFiles = 0;
+            var stack = new Stack<DirectoryInfo>();
+            stack.Push(new DirectoryInfo(rootPath));
+
+            while (stack.Count > 0)
+            {
+                var current = stack.Pop();
+
+                IEnumerable<DirectoryInfo> directories;
+                try
+                {
+                    directories = current.EnumerateDirectories();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var directory in directories)
+                {
+                    try
+                    {
+                        if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                            continue;
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    stack.Push(directory);
+                }
+
+                IEnumerable<FileInfo> files;
+                try
+                {
+                    files = current.EnumerateFiles();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var file in files)
+                {
+                    totalFiles++;
+                    var ext = RepositoryFormatOptionViewModel.NormalizeFormat(file.Extension);
+                    if (trackedFormats.Count == 0 || trackedFormats.Contains(ext))
+                        trackedFiles++;
+                }
+            }
+
+            return (totalFiles, trackedFiles);
+        });
     }
 
     private void AppendProgressLog(string? message, int filesFound)

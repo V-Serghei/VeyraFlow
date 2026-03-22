@@ -39,6 +39,7 @@ namespace Veyra.Desktop.ViewModels.Pages.RepositorySettings;
 public sealed partial class RepositorySettingsViewModel : ObservableObject
 {
     private const string SafeDefaultRetentionTriggerFilter = "automatic";
+    private static readonly TimeSpan CloudSyncStatusRefreshInterval = TimeSpan.FromSeconds(2);
 
     private readonly IMediator _mediator;
     private readonly IWindowService _windows;
@@ -59,6 +60,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private readonly HashSet<string> _allFormatOptions = new(StringComparer.OrdinalIgnoreCase);
     private bool _manualRetentionCleanupConfirmedForCurrentPolicy;
     private bool _syncingManualHistorySafeMode;
+    private bool _syncingRetentionTriggerSelection;
+    private CancellationTokenSource? _cloudSyncStatusRefreshCts;
+    private Task? _cloudSyncStatusRefreshTask;
 
     public event Action? BackRequested;
     public event Func<int, Task>? RepositoryUpdated;
@@ -80,6 +84,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionMaxSnapshots = string.Empty;
     [ObservableProperty] private string _retentionMaxTotalSizeMb = string.Empty;
     [ObservableProperty] private string _retentionTriggerFilter = string.Empty;
+    [ObservableProperty] private bool _retentionIncludesAutomaticSnapshots = true;
+    [ObservableProperty] private bool _retentionIncludesManualSnapshots;
+    [ObservableProperty] private bool _retentionIncludesWorkingSnapshots;
     [ObservableProperty] private int _retentionRunIntervalMinutes = 60;
     [ObservableProperty] private bool _retentionMaintenanceWindowEnabled;
     [ObservableProperty] private int _selectedRetentionMaintenanceWindowStartHour = 1;
@@ -103,14 +110,20 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _cloudSyncErrorText = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SyncLocalStorageText))]
+    [NotifyPropertyChangedFor(nameof(SyncCloudStorageSavingsText))]
+    [NotifyPropertyChangedFor(nameof(HasSyncCloudStorageSavingsText))]
     private long _localRepositoryTotalSizeBytes;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SyncCloudStorageText))]
     [NotifyPropertyChangedFor(nameof(SyncCloudStorageHintText))]
+    [NotifyPropertyChangedFor(nameof(SyncCloudStorageSavingsText))]
+    [NotifyPropertyChangedFor(nameof(HasSyncCloudStorageSavingsText))]
     private long? _cloudRepositorySnapshotTotalSizeBytes;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SyncCloudStorageText))]
     [NotifyPropertyChangedFor(nameof(SyncCloudStorageHintText))]
+    [NotifyPropertyChangedFor(nameof(SyncCloudStorageSavingsText))]
+    [NotifyPropertyChangedFor(nameof(HasSyncCloudStorageSavingsText))]
     private string _cloudRepositoryStorageState = "local_only";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CloudSyncSectionHint))]
@@ -134,6 +147,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _retentionResultText = string.Empty;
     [ObservableProperty] private double _retentionProgressValue;
     [ObservableProperty] private bool _isRetentionProgressIndeterminate;
+    [ObservableProperty] private int _selectedRetentionTriggerPresetIndex;
     [ObservableProperty] private bool _isTransientActionBusy;
     [ObservableProperty] private string _transientActionTitle = string.Empty;
     [ObservableProperty] private string _transientActionDetail = string.Empty;
@@ -215,6 +229,33 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public string RetentionSectionHint => IsBasicMode
         ? Loc.T("repo_settings.retention_hint_basic")
         : Loc.T("repo_settings.retention_hint");
+    public bool ShowCloudSyncProgressCard => HasCloudAccess && (HasActiveCloudSyncWork(_lastAppliedCloudSyncStatus) || IsSyncNowRunning);
+    public bool HasMeasuredCloudSyncProgress => (_lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0) > 0;
+    public bool ShowCloudSyncProgressPercent => HasMeasuredCloudSyncProgress;
+    public bool CloudSyncProgressIsIndeterminate => !HasMeasuredCloudSyncProgress;
+    public double CloudSyncProgressValue => CalculateProgressPercent(
+        _lastAppliedCloudSyncStatus?.UploadProgressCurrent ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0);
+    public string CloudSyncProgressPhaseText => FormatCloudSyncProgressPhase(_lastAppliedCloudSyncStatus?.LastStatus);
+    public string CloudSyncProgressPercentText => HasMeasuredCloudSyncProgress
+        ? $"{Math.Clamp((int)Math.Round(CloudSyncProgressValue), 0, 100)}%"
+        : string.Empty;
+    public string CloudSyncProgressSummaryText => FormatCloudSyncProgressSummary(
+        _lastAppliedCloudSyncStatus?.LastStatus,
+        _lastAppliedCloudSyncStatus?.UploadProgressCurrent ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0);
+    public string CloudSyncProgressEtaText => FormatEtaText(
+        _lastAppliedCloudSyncStatus?.UploadProgressCurrent ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressStartedAtUtc,
+        _lastAppliedCloudSyncStatus?.UploadProgressUpdatedAtUtc);
+    public string CloudSyncProgressElapsedText => FormatElapsedText(
+        _lastAppliedCloudSyncStatus?.UploadProgressCurrent ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0,
+        _lastAppliedCloudSyncStatus?.UploadProgressStartedAtUtc,
+        _lastAppliedCloudSyncStatus?.UploadProgressUpdatedAtUtc);
+    public string CloudSyncProgressLastUpdateText => FormatLastProgressUpdateText(
+        _lastAppliedCloudSyncStatus?.UploadProgressUpdatedAtUtc);
     public string SyncLocalStorageText => FormatBytes(LocalRepositoryTotalSizeBytes);
     public string SyncCloudStorageText => CloudRepositoryStorageState switch
     {
@@ -234,11 +275,58 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         "auth_required" => Loc.T("repo_settings.sync_storage_cloud_auth_hint"),
         "no_remote" => Loc.T("repo_settings.sync_storage_cloud_no_remote_hint"),
         "unavailable" => Loc.T("repo_settings.sync_storage_cloud_unavailable_hint"),
-        _ => Loc.T("repo_settings.sync_storage_cloud_latest_snapshot_hint")
+        _ => HasCloudSnapshotSizeCloseToLocal
+            ? Loc.T("repo_settings.sync_storage_cloud_latest_snapshot_hint_close_to_local")
+            : Loc.T("repo_settings.sync_storage_cloud_latest_snapshot_hint")
     };
+    public bool HasSyncCloudStorageSavingsText => !string.IsNullOrWhiteSpace(SyncCloudStorageSavingsText);
+    public string SyncCloudStorageSavingsText
+    {
+        get
+        {
+            if (CloudRepositoryStorageState != "latest"
+                || CloudRepositorySnapshotTotalSizeBytes is not > 0
+                || LocalRepositoryTotalSizeBytes <= 0)
+            {
+                return string.Empty;
+            }
+
+            var local = Math.Max(1L, LocalRepositoryTotalSizeBytes);
+            var uploaded = Math.Max(0L, CloudRepositorySnapshotTotalSizeBytes.Value);
+            if (uploaded >= local)
+                return Loc.T("repo_settings.sync_storage_cloud_savings_none");
+
+            var savedBytes = local - uploaded;
+            var savedPercent = Math.Clamp(savedBytes * 100d / local, 0d, 100d);
+            if (savedPercent < 3d)
+                return Loc.T("repo_settings.sync_storage_cloud_savings_none");
+
+            return Loc.F(
+                "repo_settings.sync_storage_cloud_savings_reduced",
+                Math.Round(savedPercent),
+                FormatBytes(savedBytes));
+        }
+    }
     public bool CanRunSyncNow => HasCloudAccess && !IsSyncNowRunning;
     public bool CanRunCloudRepair => HasCloudAccess && !IsCloudRepairRunning;
     public bool ShowGuestCloudHint => !HasCloudAccess;
+    private bool HasCloudSnapshotSizeCloseToLocal
+    {
+        get
+        {
+            if (CloudRepositoryStorageState != "latest"
+                || CloudRepositorySnapshotTotalSizeBytes is not > 0
+                || LocalRepositoryTotalSizeBytes <= 0)
+            {
+                return false;
+            }
+
+            var local = (double)LocalRepositoryTotalSizeBytes;
+            var remote = (double)CloudRepositorySnapshotTotalSizeBytes.Value;
+            var deltaRatio = Math.Abs(local - remote) / Math.Max(local, remote);
+            return deltaRatio <= 0.2d;
+        }
+    }
 
     public async Task LoadAsync(int repositoryId)
     {
@@ -399,21 +487,6 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task BrowseExclusionFolderAsync()
     {
-        Window? owner = _windows.GetActiveWindow();
-        if (owner is null)
-            return;
-
-        var selection = await owner.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions
-            {
-                Title = Loc.T("repo_settings.excluded_paths_pick_folder_title"),
-                AllowMultiple = false
-            });
-
-        var localPath = StoragePathResolver.TryGetLocalPath(selection.FirstOrDefault());
-        if (string.IsNullOrWhiteSpace(localPath) || !Directory.Exists(localPath))
-            return;
-
         var repositoryRoot = NormalizeDirectoryPath(DirectoryPath);
         if (string.IsNullOrWhiteSpace(repositoryRoot) || !Directory.Exists(repositoryRoot))
         {
@@ -421,18 +494,24 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             return;
         }
 
-        var relativePath = TryGetRepositoryRelativePath(repositoryRoot, localPath);
-        if (relativePath is null)
+        Window? owner = _windows.GetActiveWindow();
+        if (owner is null)
+            return;
+
+        var window = _windows.Create<RepositoryFolderPickerWindow>();
+        if (window.DataContext is not RepositoryFolderPickerWindowViewModel vm)
         {
-            ErrorMessage = Loc.T("repo_settings.excluded_paths_outside_repository");
+            ErrorMessage = Loc.T("repo_settings.error_picker_unavailable");
             return;
         }
 
+        ErrorMessage = null;
+        await vm.ConfigureAsync(repositoryRoot, CustomExclusionPattern);
+        await _windows.ShowDialogAsync(window, owner);
+
+        var relativePath = vm.DialogResultRelativePath;
         if (string.IsNullOrWhiteSpace(relativePath))
-        {
-            ErrorMessage = Loc.T("repo_settings.excluded_paths_root_not_allowed");
             return;
-        }
 
         var normalized = NormalizeExclusionPattern(relativePath);
         if (!ExcludedPatterns.Contains(normalized, StringComparer.OrdinalIgnoreCase))
@@ -588,18 +667,24 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             await _cloudSync.TryPushLatestSnapshotAsync(repositoryId);
 
             if (RepositoryId == repositoryId)
-                await LoadAsync(repositoryId);
+                await RunOnUiAsync(() => LoadAsync(repositoryId));
 
             _log.LogInformation("Repository cloud sync finished. RepositoryId {RepositoryId}", repositoryId);
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to run cloud sync for repository {RepositoryId}", repositoryId);
-            ErrorMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "repo_settings.error_sync_failed");
+            await RunOnUiAsync(() =>
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "repo_settings.error_sync_failed");
+            });
         }
         finally
         {
-            IsSyncNowRunning = false;
+            await RunOnUiAsync(() =>
+            {
+                IsSyncNowRunning = false;
+            });
         }
     }
 
@@ -658,25 +743,28 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             var result = await _cloudSync.RepairRepositoryCloudDataAsync(repositoryId);
             if (RepositoryId == repositoryId)
-                await LoadAsync(repositoryId);
+                await RunOnUiAsync(() => LoadAsync(repositoryId));
 
-            CloudRepairMessage = result.Success
-                ? Loc.F(
-                    "repo_settings.cloud_repair_finished",
-                    result.ReferencedBlocks,
-                    result.AlreadyPresentBlocks,
-                    result.UploadedBlocks,
-                    result.MissingLocalBlocks)
-                : Loc.F(
-                    "repo_settings.cloud_repair_finished_with_errors",
-                    result.ReferencedBlocks,
-                    result.AlreadyPresentBlocks,
-                    result.UploadedBlocks,
-                    result.MissingLocalBlocks,
-                    result.FailedUploads);
+            await RunOnUiAsync(() =>
+            {
+                CloudRepairMessage = result.Success
+                    ? Loc.F(
+                        "repo_settings.cloud_repair_finished",
+                        result.ReferencedBlocks,
+                        result.AlreadyPresentBlocks,
+                        result.UploadedBlocks,
+                        result.MissingLocalBlocks)
+                    : Loc.F(
+                        "repo_settings.cloud_repair_finished_with_errors",
+                        result.ReferencedBlocks,
+                        result.AlreadyPresentBlocks,
+                        result.UploadedBlocks,
+                        result.MissingLocalBlocks,
+                        result.FailedUploads);
 
-            if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !result.Success)
-                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.ErrorMessage, "repo_settings.cloud_repair_failed");
+                if (!string.IsNullOrWhiteSpace(result.ErrorMessage) && !result.Success)
+                    ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(result.ErrorMessage, "repo_settings.cloud_repair_failed");
+            });
 
             _log.LogInformation(
                 "Repository cloud repair finished. RepositoryId {RepositoryId}. Success {Success}. ReferencedBlocks {ReferencedBlocks}. UploadedBlocks {UploadedBlocks}. MissingLocalBlocks {MissingLocalBlocks}. FailedUploads {FailedUploads}",
@@ -690,12 +778,18 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to repair cloud data for repository {RepositoryId}", repositoryId);
-            ErrorMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "repo_settings.cloud_repair_failed");
-            CloudRepairMessage = ErrorMessage;
+            await RunOnUiAsync(() =>
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "repo_settings.cloud_repair_failed");
+                CloudRepairMessage = ErrorMessage;
+            });
         }
         finally
         {
-            IsCloudRepairRunning = false;
+            await RunOnUiAsync(() =>
+            {
+                IsCloudRepairRunning = false;
+            });
         }
     }
 
@@ -1094,6 +1188,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (value && string.IsNullOrWhiteSpace(RetentionTriggerFilter))
             RetentionTriggerFilter = SafeDefaultRetentionTriggerFilter;
 
+        if (value && !RetentionIncludesAutomaticSnapshots && !RetentionIncludesManualSnapshots && !RetentionIncludesWorkingSnapshots)
+            RetentionIncludesAutomaticSnapshots = true;
+
         InvalidateRetentionPreview();
         RunRetentionCommandStateRefresh();
     }
@@ -1104,7 +1201,16 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     partial void OnRetentionMaxTotalSizeMbChanged(string value) => OnRetentionPolicyEdited();
 
-    partial void OnRetentionTriggerFilterChanged(string value) => OnRetentionPolicyEdited();
+    partial void OnRetentionTriggerFilterChanged(string value)
+    {
+        SyncRetentionTriggerSelectionFromFilter(value);
+        OnRetentionPolicyEdited();
+    }
+
+    partial void OnRetentionIncludesAutomaticSnapshotsChanged(bool value) => SyncRetentionTriggerFilterFromSelection();
+    partial void OnRetentionIncludesManualSnapshotsChanged(bool value) => SyncRetentionTriggerFilterFromSelection();
+    partial void OnRetentionIncludesWorkingSnapshotsChanged(bool value) => SyncRetentionTriggerFilterFromSelection();
+    partial void OnSelectedRetentionTriggerPresetIndexChanged(int value) => ApplyRetentionTriggerPresetFromIndex(value);
 
     partial void OnRetentionRunIntervalMinutesChanged(int value) => OnRetentionPolicyEdited();
 
@@ -1190,6 +1296,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     partial void OnIsSyncNowRunningChanged(bool value)
     {
         OnPropertyChanged(nameof(CanRunSyncNow));
+        NotifyCloudSyncPresentationChanged();
+        UpdateCloudSyncStatusAutoRefreshState();
     }
 
     partial void OnIsCloudRepairRunningChanged(bool value)
@@ -1449,6 +1557,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             CloudSyncLastSyncText = Loc.T("common.never");
             CloudSyncQueueText = FormatCloudQueueSummary(0, 0, 0, 0, 0);
             CloudSyncErrorText = string.Empty;
+            NotifyCloudSyncPresentationChanged();
+            UpdateCloudSyncStatusAutoRefreshState();
             return;
         }
 
@@ -1464,6 +1574,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             status.ConflictQueueCount,
             status.DeadLetterQueueCount);
         CloudSyncErrorText = status.LastError ?? string.Empty;
+        NotifyCloudSyncPresentationChanged();
+        UpdateCloudSyncStatusAutoRefreshState();
     }
 
     private void ApplyCloudStorageFootprintState(RepositoryCloudSyncStatusDto? status)
@@ -1483,13 +1595,19 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         if (!HasCloudAccess)
         {
-            CloudRepositoryStorageState = "local_only";
+            await RunOnUiAsync(() =>
+            {
+                CloudRepositoryStorageState = "local_only";
+            });
             return;
         }
 
         if (status?.LastRemoteSnapshotId is not > 0)
         {
-            CloudRepositoryStorageState = "no_remote";
+            await RunOnUiAsync(() =>
+            {
+                CloudRepositoryStorageState = "no_remote";
+            });
             return;
         }
 
@@ -1501,8 +1619,11 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             {
                 if (RepositoryId == repositoryId)
                 {
-                    CloudRepositorySnapshotTotalSizeBytes = null;
-                    CloudRepositoryStorageState = "auth_required";
+                    await RunOnUiAsync(() =>
+                    {
+                        CloudRepositorySnapshotTotalSizeBytes = null;
+                        CloudRepositoryStorageState = "auth_required";
+                    });
                 }
                 return;
             }
@@ -1513,21 +1634,31 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (package?.Snapshot is null)
             {
-                CloudRepositorySnapshotTotalSizeBytes = null;
-                CloudRepositoryStorageState = "no_remote";
+                await RunOnUiAsync(() =>
+                {
+                    CloudRepositorySnapshotTotalSizeBytes = null;
+                    CloudRepositoryStorageState = "no_remote";
+                });
                 return;
             }
 
-            CloudRepositorySnapshotTotalSizeBytes = Math.Max(0L, package.Snapshot.TotalFileBytes);
-            CloudRepositoryStorageState = "latest";
+            var latestSnapshotSizeBytes = Math.Max(0L, CalculateLatestUploadPayloadSize(package));
+            await RunOnUiAsync(() =>
+            {
+                CloudRepositorySnapshotTotalSizeBytes = latestSnapshotSizeBytes;
+                CloudRepositoryStorageState = "latest";
+            });
         }
         catch (Exception ex)
         {
             _log.LogInformation(ex, "Repository cloud storage footprint refresh failed. RepositoryId {RepositoryId}", repositoryId);
             if (RepositoryId == repositoryId)
             {
-                CloudRepositorySnapshotTotalSizeBytes = null;
-                CloudRepositoryStorageState = "unavailable";
+                await RunOnUiAsync(() =>
+                {
+                    CloudRepositorySnapshotTotalSizeBytes = null;
+                    CloudRepositoryStorageState = "unavailable";
+                });
             }
         }
     }
@@ -1654,7 +1785,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         return normalized switch
         {
             "queued" => Loc.T("dashboard.sync.queued"),
-            "syncing" => Loc.T("dashboard.sync.syncing"),
+            "syncing" or "syncing_prepare" => Loc.T("dashboard.sync.syncing_prepare"),
+            "syncing_snapshot" => Loc.T("dashboard.sync.syncing_snapshot"),
+            "syncing_finalize" => Loc.T("dashboard.sync.syncing_finalize"),
             _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => FormatSyncingUploadStatus(status),
             "offline_retry" => Loc.T("dashboard.sync.offline_retry"),
             "retrying" => Loc.T("dashboard.sync.retrying"),
@@ -1695,10 +1828,49 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var normalized = status.Trim().ToLowerInvariant();
         return normalized switch
         {
-            "queued" or "syncing" or "offline_retry" or "retrying" => Loc.T("repo_settings.sync_status_basic_working"),
+            _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_working"),
+            "queued" or "syncing" or "syncing_prepare" or "syncing_snapshot" or "syncing_finalize" or "offline_retry" or "retrying"
+                => Loc.T("repo_settings.sync_status_basic_working"),
             "auth_required" or "conflict" or "failed" or "dead_letter" => Loc.T("repo_settings.sync_status_basic_attention"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_ready"),
             _ => Loc.T("repo_settings.sync_status_basic_local")
+        };
+    }
+
+    private static string FormatCloudSyncProgressPhase(string? status)
+    {
+        var normalized = status?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "queued" => Loc.T("repo_settings.sync_phase_queued"),
+            "syncing_snapshot" => Loc.T("repo_settings.sync_phase_snapshot"),
+            "syncing_finalize" => Loc.T("repo_settings.sync_phase_finalize"),
+            "offline_retry" => Loc.T("repo_settings.sync_phase_retry"),
+            "retrying" => Loc.T("repo_settings.sync_phase_retry"),
+            _ when normalized is not null && normalized.StartsWith("syncing_upload", StringComparison.Ordinal)
+                => Loc.T("repo_settings.sync_phase_upload"),
+            _ => Loc.T("repo_settings.sync_phase_prepare")
+        };
+    }
+
+    private static string FormatCloudSyncProgressSummary(string? status, int current, int total)
+    {
+        var normalized = status?.Trim().ToLowerInvariant();
+        if (normalized is not null && normalized.StartsWith("syncing_upload", StringComparison.Ordinal))
+        {
+            return total > 0
+                ? Loc.F("repo_settings.sync_progress_summary", FormatUploadProgress(current, total))
+                : Loc.T("repo_settings.sync_progress_uploading");
+        }
+
+        return normalized switch
+        {
+            "queued" => Loc.T("repo_settings.sync_progress_queued"),
+            "syncing_snapshot" => Loc.T("repo_settings.sync_progress_snapshot"),
+            "syncing_finalize" => Loc.T("repo_settings.sync_progress_finalize"),
+            "offline_retry" => Loc.T("repo_settings.sync_progress_offline_retry"),
+            "retrying" => Loc.T("repo_settings.sync_progress_retrying"),
+            _ => Loc.T("repo_settings.sync_progress_preparing")
         };
     }
 
@@ -1722,6 +1894,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(ShowCloudConnectivityHint));
             OnPropertyChanged(nameof(CloudConnectivityHintText));
+            NotifyCloudSyncPresentationChanged();
+            UpdateCloudSyncStatusAutoRefreshState();
         });
     }
 
@@ -1760,6 +1934,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CloudGuestHint));
         OnPropertyChanged(nameof(ShowCloudConnectivityHint));
         OnPropertyChanged(nameof(CloudConnectivityHintText));
+        NotifyCloudSyncPresentationChanged();
         OnPropertyChanged(nameof(RetentionSectionHint));
         OnPropertyChanged(nameof(CanRunSyncNow));
         OnPropertyChanged(nameof(CanRunCloudRepair));
@@ -1805,6 +1980,95 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         ApplyCloudSyncStatus(_lastAppliedCloudSyncStatus);
     }
 
+    private void NotifyCloudSyncPresentationChanged()
+    {
+        OnPropertyChanged(nameof(ShowCloudSyncProgressCard));
+        OnPropertyChanged(nameof(HasMeasuredCloudSyncProgress));
+        OnPropertyChanged(nameof(ShowCloudSyncProgressPercent));
+        OnPropertyChanged(nameof(CloudSyncProgressIsIndeterminate));
+        OnPropertyChanged(nameof(CloudSyncProgressValue));
+        OnPropertyChanged(nameof(CloudSyncProgressPhaseText));
+        OnPropertyChanged(nameof(CloudSyncProgressPercentText));
+        OnPropertyChanged(nameof(CloudSyncProgressSummaryText));
+        OnPropertyChanged(nameof(CloudSyncProgressEtaText));
+        OnPropertyChanged(nameof(CloudSyncProgressElapsedText));
+        OnPropertyChanged(nameof(CloudSyncProgressLastUpdateText));
+    }
+
+    private void UpdateCloudSyncStatusAutoRefreshState()
+    {
+        var shouldRun = RepositoryId > 0
+            && HasCloudAccess
+            && (IsSyncNowRunning || HasActiveCloudSyncWork(_lastAppliedCloudSyncStatus));
+
+        if (shouldRun)
+        {
+            if (_cloudSyncStatusRefreshCts is not null)
+                return;
+
+            _cloudSyncStatusRefreshCts = new CancellationTokenSource();
+            var token = _cloudSyncStatusRefreshCts.Token;
+            _cloudSyncStatusRefreshTask = Task.Run(() => RunCloudSyncStatusAutoRefreshAsync(token), token);
+            return;
+        }
+
+        if (_cloudSyncStatusRefreshCts is null)
+            return;
+
+        _cloudSyncStatusRefreshCts.Cancel();
+        _cloudSyncStatusRefreshCts.Dispose();
+        _cloudSyncStatusRefreshCts = null;
+        _cloudSyncStatusRefreshTask = null;
+    }
+
+    private async Task RunCloudSyncStatusAutoRefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await RefreshCloudSyncStatusSnapshotAsync(ct);
+                await Task.Delay(CloudSyncStatusRefreshInterval, ct);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Repository settings cloud sync auto-refresh loop failed");
+        }
+    }
+
+    private async Task RefreshCloudSyncStatusSnapshotAsync(CancellationToken ct = default)
+    {
+        if (RepositoryId <= 0)
+            return;
+
+        try
+        {
+            var repositoryId = RepositoryId;
+            var repo = await _mediator.Send(new GetRepositoryDetailQuery(repositoryId), ct);
+            if (repo is null || RepositoryId != repositoryId)
+                return;
+
+            await RunOnUiAsync(() =>
+            {
+                ApplyCloudSyncStatus(repo.CloudSync);
+            });
+
+            if (!HasActiveCloudSyncWork(repo.CloudSync))
+                _ = RefreshCloudStorageFootprintAsync(repositoryId, repo.CloudSync);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Repository settings cloud sync snapshot refresh failed. RepositoryId {RepositoryId}", RepositoryId);
+        }
+    }
+
     private string? ResolveCloudConnectivityMessage()
         => _cloudSyncRuntime.IsPaused
             ? Loc.T("ui_error.cloud_actions_paused")
@@ -1822,12 +2086,140 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     private static string FormatCloudQueueSummary(int pending, int running, int retry, int conflict, int deadLetter)
     {
-        if (UserExperienceManager.Instance.IsBasicMode)
-            return pending == 0 && running == 0 && retry == 0 && conflict == 0 && deadLetter == 0
-                ? Loc.T("repo_settings.queue_basic_idle")
-                : Loc.T("repo_settings.queue_basic_active");
+        if (pending == 0 && running == 0 && retry == 0 && conflict == 0 && deadLetter == 0)
+            return Loc.T("repo_settings.queue_basic_idle");
 
-        return Loc.F("dashboard.queue_summary", pending, running, retry, conflict, deadLetter);
+        if (conflict > 0 || deadLetter > 0)
+            return Loc.T("repo_settings.sync_status_basic_attention");
+
+        return Loc.T("repo_settings.queue_basic_active");
+    }
+
+    private static bool HasActiveCloudSyncWork(RepositoryCloudSyncStatusDto? cloud)
+    {
+        if (cloud is null)
+            return false;
+
+        if (cloud.PendingQueueCount > 0 || cloud.RunningQueueCount > 0 || cloud.RetryQueueCount > 0)
+            return true;
+
+        if (cloud.UploadProgressTotal > 0 && cloud.UploadProgressCurrent < cloud.UploadProgressTotal)
+            return true;
+
+        var normalizedStatus = cloud.LastStatus?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedStatus))
+            return false;
+
+        return normalizedStatus.StartsWith("syncing_upload", StringComparison.Ordinal)
+               || normalizedStatus is "queued"
+                   or "syncing"
+                   or "syncing_prepare"
+                   or "syncing_snapshot"
+                   or "syncing_finalize"
+                   or "offline_retry"
+                   or "retrying";
+    }
+
+    private static string FormatUploadProgress(int current, int total)
+    {
+        if (total <= 0)
+            return Loc.T("common.not_available_short");
+
+        return Loc.F("app_settings.repository_sync_health_progress_format", Math.Clamp(current, 0, total), total);
+    }
+
+    private static double CalculateProgressPercent(int current, int total)
+    {
+        if (total <= 0)
+            return 0;
+
+        return Math.Clamp((double)Math.Clamp(current, 0, total) / total * 100d, 0d, 100d);
+    }
+
+    private static string FormatEtaText(int current, int total, DateTime? startedAtUtc, DateTime? updatedAtUtc)
+    {
+        if (total <= 0)
+            return Loc.T("common.not_available_short");
+
+        current = Math.Clamp(current, 0, total);
+        if (current >= total)
+            return Loc.T("app_settings.repository_sync_health_eta_done");
+
+        if (startedAtUtc is null)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var referenceUtc = updatedAtUtc ?? DateTime.UtcNow;
+        var elapsed = referenceUtc - startedAtUtc.Value;
+        if (elapsed <= TimeSpan.FromSeconds(2) || current <= 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var rate = current / elapsed.TotalSeconds;
+        if (rate <= 0.0001d)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        var remainingSeconds = (total - current) / rate;
+        if (double.IsNaN(remainingSeconds) || double.IsInfinity(remainingSeconds) || remainingSeconds < 0)
+            return Loc.T("app_settings.repository_sync_health_eta_calculating");
+
+        return Loc.F("app_settings.repository_sync_health_eta_format", FormatDuration(TimeSpan.FromSeconds(remainingSeconds)));
+    }
+
+    private static string FormatElapsedText(int current, int total, DateTime? startedAtUtc, DateTime? updatedAtUtc)
+    {
+        if (total <= 0 || startedAtUtc is null)
+            return Loc.T("common.not_available_short");
+
+        var referenceUtc = updatedAtUtc ?? DateTime.UtcNow;
+        var elapsed = referenceUtc - startedAtUtc.Value;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+
+        return Loc.F("app_settings.repository_sync_health_elapsed_format", FormatDuration(elapsed));
+    }
+
+    private static string FormatLastProgressUpdateText(DateTime? updatedAtUtc)
+    {
+        if (updatedAtUtc is null)
+            return Loc.T("common.not_available_short");
+
+        return Loc.F(
+            "app_settings.repository_sync_health_last_update_format",
+            updatedAtUtc.Value.ToLocalTime().ToString("HH:mm:ss"));
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        if (duration <= TimeSpan.Zero)
+            return "0s";
+
+        if (duration.TotalDays >= 1)
+            return $"{(int)duration.TotalDays}d {duration.Hours}h";
+
+        if (duration.TotalHours >= 1)
+            return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+
+        if (duration.TotalMinutes >= 1)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+
+        return $"{Math.Max(1, duration.Seconds)}s";
+    }
+
+    private static long CalculateLatestUploadPayloadSize(CloudSnapshotPackageDto package)
+    {
+        if (package.FileVersions.Count == 0)
+            return Math.Max(0L, package.Snapshot.TotalFileBytes);
+
+        var uniqueBlocks = package.FileVersions
+            .SelectMany(version => version.Blocks)
+            .Where(block => !string.IsNullOrWhiteSpace(block.BlockHash))
+            .GroupBy(block => block.BlockHash, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (long)Math.Max(0, group.First().StoredSizeBytes))
+            .ToList();
+
+        if (uniqueBlocks.Count == 0)
+            return Math.Max(0L, package.Snapshot.TotalFileBytes);
+
+        return Math.Max(0L, uniqueBlocks.Sum());
     }
 
     private static string FormatBytes(long bytes)
@@ -2021,6 +2413,115 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         _syncingManualHistorySafeMode = false;
     }
 
+    private void SyncRetentionTriggerSelectionFromFilter(string value)
+    {
+        if (_syncingRetentionTriggerSelection)
+            return;
+
+        var triggers = value
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Where(static trigger => !string.IsNullOrWhiteSpace(trigger))
+            .Select(static trigger => trigger.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var includeAll = triggers.Contains("all");
+
+        _syncingRetentionTriggerSelection = true;
+        try
+        {
+            RetentionIncludesAutomaticSnapshots = includeAll || triggers.Contains("automatic") || triggers.Contains("auto");
+            RetentionIncludesManualSnapshots = includeAll || triggers.Contains("manual");
+            RetentionIncludesWorkingSnapshots = includeAll || triggers.Contains("working");
+            SelectedRetentionTriggerPresetIndex = GetRetentionTriggerPresetIndex(
+                RetentionIncludesAutomaticSnapshots,
+                RetentionIncludesManualSnapshots,
+                RetentionIncludesWorkingSnapshots);
+        }
+        finally
+        {
+            _syncingRetentionTriggerSelection = false;
+        }
+    }
+
+    private void ApplyRetentionTriggerPresetFromIndex(int value)
+    {
+        if (_syncingRetentionTriggerSelection)
+            return;
+
+        _syncingRetentionTriggerSelection = true;
+        try
+        {
+            (RetentionIncludesAutomaticSnapshots, RetentionIncludesManualSnapshots, RetentionIncludesWorkingSnapshots) = value switch
+            {
+                1 => (true, false, true),
+                2 => (true, true, false),
+                3 => (false, true, false),
+                4 => (false, false, true),
+                5 => (false, true, true),
+                6 => (true, true, true),
+                _ => (true, false, false)
+            };
+        }
+        finally
+        {
+            _syncingRetentionTriggerSelection = false;
+        }
+
+        SyncRetentionTriggerFilterFromSelection();
+    }
+
+    private static int GetRetentionTriggerPresetIndex(bool includeAutomatic, bool includeManual, bool includeWorking)
+    {
+        return (includeAutomatic, includeManual, includeWorking) switch
+        {
+            (true, false, true) => 1,
+            (true, true, false) => 2,
+            (false, true, false) => 3,
+            (false, false, true) => 4,
+            (false, true, true) => 5,
+            (true, true, true) => 6,
+            _ => 0
+        };
+    }
+
+    private void SyncRetentionTriggerFilterFromSelection()
+    {
+        if (_syncingRetentionTriggerSelection)
+            return;
+
+        var triggers = new List<string>(3);
+        if (RetentionIncludesAutomaticSnapshots)
+            triggers.Add("automatic");
+        if (RetentionIncludesManualSnapshots)
+            triggers.Add("manual");
+        if (RetentionIncludesWorkingSnapshots)
+            triggers.Add("working");
+
+        if (RetentionEnabled && triggers.Count == 0)
+        {
+            _syncingRetentionTriggerSelection = true;
+            try
+            {
+                RetentionIncludesAutomaticSnapshots = true;
+                triggers.Add("automatic");
+            }
+            finally
+            {
+                _syncingRetentionTriggerSelection = false;
+            }
+        }
+
+        var nextValue = string.Join(", ", triggers);
+        if (string.Equals(RetentionTriggerFilter, nextValue, StringComparison.OrdinalIgnoreCase))
+        {
+            OnRetentionPolicyEdited();
+            return;
+        }
+
+        RetentionTriggerFilter = nextValue;
+    }
+
     private void ApplyManualHistorySafeMode()
     {
         var currentTriggers = BuildRetentionTriggerFiltersFromState();
@@ -2152,11 +2653,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     private IReadOnlyList<string> BuildRetentionTriggerFiltersFromState()
     {
-        var triggers = RetentionTriggerFilter
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Where(static value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var triggers = new List<string>(3);
+        if (RetentionIncludesAutomaticSnapshots)
+            triggers.Add("automatic");
+        if (RetentionIncludesManualSnapshots)
+            triggers.Add("manual");
+        if (RetentionIncludesWorkingSnapshots)
+            triggers.Add("working");
 
         if (RetentionEnabled && triggers.Count == 0)
             triggers = [SafeDefaultRetentionTriggerFilter];
@@ -2277,5 +2780,40 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             && parsed > 0
             ? parsed
             : null;
+    }
+
+    private static async Task RunOnUiAsync(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(action);
+    }
+
+    private static async Task RunOnUiAsync(Func<Task> action)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            await action();
+            return;
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await action();
+                completion.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        });
+        await completion.Task;
     }
 }

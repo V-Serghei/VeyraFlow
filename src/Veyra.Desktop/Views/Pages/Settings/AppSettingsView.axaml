@@ -39,9 +39,25 @@
                                TextWrapping="Wrap"/>
                 </StackPanel>
 
-                <Border Grid.Column="2" Classes="badge" VerticalAlignment="Center">
-                    <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
-                </Border>
+                <StackPanel Grid.Column="2"
+                            Spacing="8"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+                    <Border Classes="badge" HorizontalAlignment="Right">
+                        <TextBlock Text="{loc:Tr app_settings.live_badge}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraInfoBrush}"/>
+                    </Border>
+
+                    <Border Classes="metric-card"
+                            Padding="10"
+                            MinWidth="240"
+                            IsVisible="{Binding ShowRefreshActivityCard}">
+                        <StackPanel Classes="loading-state" Spacing="8">
+                            <TextBlock Text="{Binding RefreshActivityTitle}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding RefreshActivityDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
             </Border>
 
@@ -371,6 +387,19 @@
                                         </Button>
                                     </WrapPanel>
 
+                                    <Border Classes="metric-card">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{loc:Tr app_settings.sync_queue_card_title}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding SyncQueuePurposeText}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding SyncQueueSummaryText}"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+
                                     <Border Classes="metric-card" IsVisible="{Binding IsSyncBusy}">
                                         <StackPanel Classes="loading-state">
                                             <TextBlock Text="{loc:Tr app_settings.sync_running_title}" FontWeight="SemiBold"/>
@@ -387,26 +416,29 @@
 
                                 <Border Classes="filter-sheet" Padding="12">
                                     <StackPanel Spacing="12">
-                                        <StackPanel Spacing="10">
-                                            <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock Text="{loc:Tr app_settings.local_storage_title}" FontSize="16" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding LocalStorageHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <WrapPanel Grid.Column="1"
+                                                       Orientation="Horizontal"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Top">
                                                 <Button Command="{Binding RefreshLocalStorageMetricsCommand}"
                                                         IsEnabled="{Binding IsLoading, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="subtle compact responsive-icon"
+                                                        Classes="subtle compact"
                                                         Margin="0,0,0,8">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
                                                             <TextBlock Classes="button-icon" Text="&#xE72C;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                                                            <TextBlock Classes="button-label persistent" Text="{loc:Tr common.refresh}"/>
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
                                             </WrapPanel>
-                                        </StackPanel>
+                                        </Grid>
 
                                         <TextBlock Text="{loc:Tr app_settings.local_storage_empty_hint}"
                                                    Classes="muted"
@@ -463,51 +495,44 @@
 
                                 <Border Classes="filter-sheet" Padding="12">
                                     <StackPanel Spacing="12">
-                                        <StackPanel Spacing="10">
-                                            <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock Text="{loc:Tr app_settings.system_diagnostics_title}" FontSize="16" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding SystemDiagnosticsHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <WrapPanel Grid.Column="1"
+                                                       Orientation="Horizontal"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Top">
                                                 <Button
                                                         Command="{Binding RunSystemDiagnosticsCommand}"
                                                         IsEnabled="{Binding IsSystemDiagnosticsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="primary compact responsive-icon"
+                                                        Classes="primary compact"
                                                         Margin="0,0,8,8">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
                                                             <TextBlock Classes="button-icon" Text="&#xE9D9;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.system_diagnostics_run}"/>
+                                                            <TextBlock Classes="button-label persistent" Text="{loc:Tr app_settings.system_diagnostics_run}"/>
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
                                                 <Button
                                                         Command="{Binding ExportSystemDiagnosticsTextCommand}"
                                                         IsEnabled="{Binding HasSystemDiagnostics}"
-                                                        Classes="subtle compact responsive-icon"
+                                                        Classes="subtle compact"
                                                         Margin="0,0,8,8">
-                                                    <Button.Content>
-                                                        <StackPanel Classes="button-content">
-                                                            <TextBlock Classes="button-icon" Text="&#xE74E;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.system_diagnostics_export_text_button}"/>
-                                                        </StackPanel>
-                                                    </Button.Content>
+                                                    <TextBlock Text="{loc:Tr app_settings.system_diagnostics_export_text_button}"/>
                                                 </Button>
                                                 <Button
                                                         Command="{Binding ExportSystemDiagnosticsJsonCommand}"
                                                         IsEnabled="{Binding HasSystemDiagnostics}"
-                                                        Classes="subtle compact responsive-icon"
+                                                        Classes="subtle compact"
                                                         Margin="0,0,0,8">
-                                                    <Button.Content>
-                                                        <StackPanel Classes="button-content">
-                                                            <TextBlock Classes="button-icon" Text="&#xE74E;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.system_diagnostics_export_json_button}"/>
-                                                        </StackPanel>
-                                                    </Button.Content>
+                                                    <TextBlock Text="{loc:Tr app_settings.system_diagnostics_export_json_button}"/>
                                                 </Button>
                                             </WrapPanel>
-                                        </StackPanel>
+                                        </Grid>
 
                                         <Border Classes="metric-card" IsVisible="{Binding IsSystemDiagnosticsBusy}">
                                             <StackPanel Classes="loading-state">
@@ -522,7 +547,14 @@
                                                    TextWrapping="Wrap"
                                                    IsVisible="{Binding HasSystemDiagnostics, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
 
-                                        <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="10" IsVisible="{Binding HasSystemDiagnostics}">
+                                        <Grid ColumnSpacing="10" IsVisible="{Binding HasSystemDiagnostics}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="{Binding ShowSystemDiagnosticsCloudUsageMetric, Converter={x:Static conv:BooleanToGridLengthConverter.Instance}, ConverterParameter=*}"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
                                             <Border Grid.Column="0" Classes="metric-card">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="{loc:Tr app_settings.system_diagnostics_metric_memory}" Classes="muted" FontSize="11"/>
@@ -530,21 +562,30 @@
                                                     <TextBlock Text="{Binding SystemDiagnosticsMemoryStatusText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="1" Classes="metric-card">
+                                            <Border Grid.Column="1"
+                                                    Classes="metric-card"
+                                                    IsVisible="{Binding ShowSystemDiagnosticsCloudUsageMetric}">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{loc:Tr app_settings.system_diagnostics_metric_cloud_usage}" Classes="muted" FontSize="11"/>
+                                                    <TextBlock Text="{Binding SystemDiagnosticsCloudUsageText}" FontSize="22" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding SystemDiagnosticsCloudUsageStatusText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Grid.Column="2" Classes="metric-card">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="{loc:Tr app_settings.system_diagnostics_metric_history}" Classes="muted" FontSize="11"/>
                                                     <TextBlock Text="{Binding SystemDiagnosticsHistoryText}" FontSize="22" FontWeight="SemiBold"/>
                                                     <TextBlock Text="{Binding SystemDiagnosticsHistoryStatusText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="2" Classes="metric-card">
+                                            <Border Grid.Column="3" Classes="metric-card">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="{loc:Tr app_settings.system_diagnostics_metric_scan}" Classes="muted" FontSize="11"/>
                                                     <TextBlock Text="{Binding SystemDiagnosticsScanText}" FontSize="22" FontWeight="SemiBold"/>
                                                     <TextBlock Text="{Binding SystemDiagnosticsScanStatusText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                                 </StackPanel>
                                             </Border>
-                                            <Border Grid.Column="3" Classes="metric-card">
+                                            <Border Grid.Column="4" Classes="metric-card">
                                                 <StackPanel Spacing="4">
                                                     <TextBlock Text="{loc:Tr app_settings.system_diagnostics_metric_dedup}" Classes="muted" FontSize="11"/>
                                                     <TextBlock Text="{Binding SystemDiagnosticsDedupText}" FontSize="22" FontWeight="SemiBold"/>
@@ -577,39 +618,42 @@
 
                                 <Border Classes="filter-sheet" Padding="12" IsVisible="{Binding ShowCloudStorageDiagnostics}">
                                     <StackPanel Spacing="12">
-                                        <StackPanel Spacing="10">
-                                            <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock Text="{loc:Tr app_settings.cloud_storage_title}" FontSize="16" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding CloudStorageHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <WrapPanel Grid.Column="1"
+                                                       Orientation="Horizontal"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Top">
                                                 <Button
                                                         Command="{Binding RefreshCloudStorageMetricsCommand}"
                                                         IsEnabled="{Binding IsCloudMaintenanceBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="subtle compact responsive-icon"
+                                                        Classes="subtle compact"
                                                         Margin="0,0,8,8">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
                                                             <TextBlock Classes="button-icon" Text="&#xE72C;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.cloud_storage_refresh}"/>
+                                                            <TextBlock Classes="button-label persistent" Text="{loc:Tr app_settings.cloud_storage_refresh}"/>
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
                                                 <Button
                                                         Command="{Binding RepairCloudStorageCommand}"
                                                         IsEnabled="{Binding IsCloudMaintenanceBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                        Classes="primary compact responsive-icon"
+                                                        Classes="primary compact"
                                                         Margin="0,0,0,8">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
                                                             <TextBlock Classes="button-icon" Text="&#xE90F;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.cloud_storage_repair}"/>
+                                                            <TextBlock Classes="button-label persistent" Text="{loc:Tr app_settings.cloud_storage_repair}"/>
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
                                             </WrapPanel>
-                                        </StackPanel>
+                                        </Grid>
 
                                         <TextBlock Text="{loc:Tr app_settings.cloud_storage_empty_hint}"
                                                    Classes="muted"
@@ -679,21 +723,24 @@
 
                                 <Border Classes="filter-sheet" Padding="12">
                                     <StackPanel Spacing="12">
-                                        <StackPanel Spacing="10">
-                                            <StackPanel Spacing="2">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="2">
                                                 <TextBlock Text="{loc:Tr app_settings.repository_sync_health_title}" FontSize="16" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding RepositorySyncHealthHelpText}" Classes="muted" TextWrapping="Wrap"/>
                                             </StackPanel>
 
-                                            <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <WrapPanel Grid.Column="1"
+                                                       Orientation="Horizontal"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Top">
                                                 <Button Command="{Binding OpenCloudSyncHealthCenterCommand}"
-                                                        Classes="subtle compact responsive-icon"
+                                                        Classes="subtle compact"
                                                         VerticalAlignment="Top"
                                                         Margin="0,0,8,8">
                                                     <Button.Content>
                                                         <StackPanel Classes="button-content">
                                                             <TextBlock Classes="button-icon" Text="&#xE7C1;"/>
-                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.sync_health_center_button}"/>
+                                                            <TextBlock Classes="button-label persistent" Text="{loc:Tr app_settings.sync_health_center_button}"/>
                                                         </StackPanel>
                                                     </Button.Content>
                                                 </Button>
@@ -702,7 +749,7 @@
                                                     <TextBlock Text="{Binding RepositorySyncIssueCount}" FontWeight="SemiBold"/>
                                                 </Border>
                                             </WrapPanel>
-                                        </StackPanel>
+                                        </Grid>
 
                                         <TextBlock Text="{loc:Tr app_settings.repository_sync_health_empty}"
                                                    Classes="muted"
@@ -1045,9 +1092,16 @@
 
                                         <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
                                             <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_trigger_filter_label}" Opacity="0.8"/>
-                                            <TextBox Grid.Column="1"
-                                                     Watermark="{loc:Tr common.not_available_short}"
-                                                     Text="{Binding GlobalRetentionTriggerFilter, Mode=TwoWay}"/>
+                                            <ComboBox Grid.Column="1"
+                                                      SelectedIndex="{Binding SelectedGlobalRetentionTriggerPresetIndex, Mode=TwoWay}">
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_working}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_manual}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_working_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_working}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_all}"/>
+                                            </ComboBox>
                                         </Grid>
 
                                         <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
@@ -1411,7 +1465,7 @@
         </DockPanel>
 
         <Border Classes="loading-overlay"
-                IsVisible="{Binding IsLoading}">
+                IsVisible="{Binding ShowInitialLoadingOverlay}">
             <Border Classes="loading-card"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"

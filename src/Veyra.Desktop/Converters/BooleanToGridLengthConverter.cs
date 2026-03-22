@@ -22,6 +22,16 @@ public sealed class BooleanToGridLengthConverter : IValueConverter
             if (string.Equals(normalized, "Auto", StringComparison.OrdinalIgnoreCase))
                 return GridLength.Auto;
 
+            if (normalized.EndsWith('*'))
+            {
+                var weightText = normalized[..^1];
+                if (string.IsNullOrWhiteSpace(weightText))
+                    return new GridLength(1, GridUnitType.Star);
+
+                if (double.TryParse(weightText, NumberStyles.Float, CultureInfo.InvariantCulture, out var weight))
+                    return new GridLength(Math.Max(0, weight), GridUnitType.Star);
+            }
+
             if (double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var pixels))
                 return new GridLength(Math.Max(0, pixels), GridUnitType.Pixel);
         }

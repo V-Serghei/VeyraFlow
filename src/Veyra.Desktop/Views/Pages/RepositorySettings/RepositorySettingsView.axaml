@@ -332,6 +332,10 @@
                                         <StackPanel Spacing="4">
                                             <TextBlock Text="{Binding SyncCloudStorageText}" FontSize="16" FontWeight="SemiBold"/>
                                             <TextBlock Text="{loc:Tr repo_settings.sync_storage_cloud}" Classes="caption"/>
+                                            <TextBlock Text="{Binding SyncCloudStorageSavingsText}"
+                                                       FontWeight="SemiBold"
+                                                       TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasSyncCloudStorageSavingsText}"/>
                                             <TextBlock Text="{Binding SyncCloudStorageHintText}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Border>
@@ -450,21 +454,41 @@
                                             </StackPanel>
                                         </Button.Content>
                                     </Button>
-                                    <TextBlock Text="{loc:Tr common.running}"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,8,8"
-                                               IsVisible="{Binding IsSyncNowRunning}"/>
-                                    <TextBlock Text="{loc:Tr common.running}"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,8,8"
-                                               IsVisible="{Binding IsCloudRepairRunning}"/>
                                 </WrapPanel>
 
-                                <Border Classes="metric-card" IsVisible="{Binding IsSyncNowRunning}">
-                                    <StackPanel Classes="loading-state">
+                                <Border Classes="metric-card" IsVisible="{Binding ShowCloudSyncProgressCard}">
+                                    <StackPanel Spacing="10">
                                         <TextBlock Text="{loc:Tr repo_settings.sync_now_running}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr repo_settings.sync_now_running_detail}" Classes="muted" TextWrapping="Wrap"/>
-                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                        <TextBlock Text="{Binding CloudSyncProgressSummaryText}" Classes="muted" TextWrapping="Wrap"/>
+                                        <ProgressBar Classes="loading-progress"
+                                                     Minimum="0"
+                                                     Maximum="100"
+                                                     Value="{Binding CloudSyncProgressValue}"
+                                                     IsIndeterminate="{Binding CloudSyncProgressIsIndeterminate}"/>
+                                        <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="10">
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding CloudSyncProgressPhaseText}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr repo_settings.sync_progress_phase}" Classes="caption"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock Text="{Binding CloudSyncProgressPercentText}"
+                                                           FontWeight="SemiBold"
+                                                           IsVisible="{Binding ShowCloudSyncProgressPercent}"/>
+                                                <TextBlock Text="{loc:Tr repo_settings.sync_progress_percent}" Classes="caption"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Spacing="2">
+                                                <TextBlock Text="{Binding CloudSyncProgressEtaText}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr repo_settings.sync_progress_eta}" Classes="caption"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="3" Spacing="2">
+                                                <TextBlock Text="{Binding CloudSyncProgressLastUpdateText}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr repo_settings.sync_progress_last_update}" Classes="caption"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="{Binding CloudSyncProgressElapsedText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>
 
@@ -615,9 +639,21 @@
                                 </StackPanel>
                             </Grid>
 
-                            <StackPanel Spacing="6" IsVisible="{Binding ShowAdvancedRetentionSettings}">
+                            <StackPanel Spacing="8" IsVisible="{Binding ShowAdvancedRetentionSettings}">
                                 <TextBlock Text="{loc:Tr repo_settings.trigger_filter}" Classes="label"/>
-                                <TextBox Text="{Binding RetentionTriggerFilter, Mode=TwoWay}" Watermark="{loc:Tr repo_settings.trigger_placeholder}"/>
+                                <ComboBox SelectedIndex="{Binding SelectedRetentionTriggerPresetIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_only}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_working}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_manual}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_only}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_working_only}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_working}"/>
+                                    <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_all}"/>
+                                </ComboBox>
+                                <TextBlock Text="{loc:Tr repo_settings.retention_trigger_picker_hint}"
+                                           Classes="muted"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
 
                             <Border Classes="metric-card" IsVisible="{Binding RetentionEnabled}">

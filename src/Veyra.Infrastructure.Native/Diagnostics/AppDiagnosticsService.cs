@@ -199,12 +199,42 @@ public sealed class AppDiagnosticsService(
     private static AppDiagnosticsNativeRuntimeDto CaptureNativeRuntime()
     {
         var report = VeyraCoreNative.ProbeRuntimeHealth();
+        var featureUsage = NativeFeatureUsageTracker.Snapshot()
+            .Select(entry => new AppDiagnosticsNativeFeatureUsageDto(
+                entry.FeatureKey,
+                IsFeatureSupported(report, entry.FeatureKey),
+                entry.NativeHits,
+                entry.ManagedFallbacks))
+            .ToArray();
+
         return new AppDiagnosticsNativeRuntimeDto(
             report.IsLoaded,
             report.IsHealthy,
             report.SupportsScan,
+            report.SupportsStoreFileBlocks,
+            report.SupportsRestoreFileBlocks,
+            report.SupportsTextDiff,
+            report.SupportsSnapshotComparison,
+            report.SupportsRepositoryPathComparison,
+            report.SupportsVersionPlanning,
+            report.SupportsImageDiff,
+            featureUsage,
             report.LoadedPath,
             report.ErrorMessage);
     }
+
+    private static bool IsFeatureSupported(NativeRuntimeHealthReport report, string featureKey)
+        => featureKey switch
+        {
+            NativeFeatureUsageTracker.Scan => report.SupportsScan,
+            NativeFeatureUsageTracker.StoreBlocks => report.SupportsStoreFileBlocks,
+            NativeFeatureUsageTracker.RestoreBlocks => report.SupportsRestoreFileBlocks,
+            NativeFeatureUsageTracker.TextDiff => report.SupportsTextDiff,
+            NativeFeatureUsageTracker.SnapshotComparison => report.SupportsSnapshotComparison,
+            NativeFeatureUsageTracker.RepositoryPathComparison => report.SupportsRepositoryPathComparison,
+            NativeFeatureUsageTracker.VersionPlanning => report.SupportsVersionPlanning,
+            NativeFeatureUsageTracker.ImageDiff => report.SupportsImageDiff,
+            _ => false
+        };
 
 }

@@ -1917,9 +1917,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
                 visible.Add(selected);
         }
 
-        VisibleFileVersions.Clear();
-        foreach (var version in visible)
-            VisibleFileVersions.Add(version);
+        ReplaceCollectionItems(VisibleFileVersions, visible, AreReferenceItemsEquivalent);
 
         OnPropertyChanged(nameof(CanToggleFileVersionsView));
         OnPropertyChanged(nameof(FileVersionsToggleLabel));
@@ -3216,9 +3214,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .ThenByDescending(x => x.SnapshotId)
             .ToList();
 
-        SnapshotHistory.Clear();
-        foreach (var row in rows)
-            SnapshotHistory.Add(row);
+        ReplaceCollectionItems(SnapshotHistory, rows, AreReferenceItemsEquivalent);
 
         HasSnapshotHistory = SnapshotHistory.Count > 0;
 
@@ -3307,9 +3303,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             .OrderBy(x => x.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        SnapshotFiles.Clear();
-        foreach (var row in rows)
-            SnapshotFiles.Add(row);
+        ReplaceCollectionItems(SnapshotFiles, rows, AreReferenceItemsEquivalent);
 
         HasSnapshotFiles = SnapshotFiles.Count > 0;
 
@@ -3592,38 +3586,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
 
     private void ReplaceExplorerItems(IReadOnlyList<ExplorerItemViewModel> rows)
     {
-        if (AreExplorerItemsEquivalent(Items, rows))
-            return;
-
-        Items.Clear();
-        foreach (var row in rows)
-            Items.Add(row);
+        ReplaceCollectionItems(Items, rows, AreExplorerItemsEquivalent);
     }
 
     private static bool AreExplorerItemsEquivalent(
-        IReadOnlyList<ExplorerItemViewModel> current,
-        IReadOnlyList<ExplorerItemViewModel> next)
+        ExplorerItemViewModel left,
+        ExplorerItemViewModel right)
     {
-        if (current.Count != next.Count)
-            return false;
-
-        for (var i = 0; i < current.Count; i++)
-        {
-            var left = current[i];
-            var right = next[i];
-            if (left.IsDirectory != right.IsDirectory
-                || !left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(left.Name, right.Name, StringComparison.Ordinal)
-                || !string.Equals(left.Type, right.Type, StringComparison.Ordinal)
-                || !string.Equals(left.SizeDisplay, right.SizeDisplay, StringComparison.Ordinal)
-                || !string.Equals(left.ModifiedDisplay, right.ModifiedDisplay, StringComparison.Ordinal)
-                || !string.Equals(left.HashSha256, right.HashSha256, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return left.IsDirectory == right.IsDirectory
+            && left.RelativePath.Equals(right.RelativePath, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+            && string.Equals(left.Type, right.Type, StringComparison.Ordinal)
+            && string.Equals(left.SizeDisplay, right.SizeDisplay, StringComparison.Ordinal)
+            && string.Equals(left.ModifiedDisplay, right.ModifiedDisplay, StringComparison.Ordinal)
+            && string.Equals(left.HashSha256, right.HashSha256, StringComparison.Ordinal);
     }
 
     private async Task RunTransientPreparationAsync(
@@ -3738,9 +3714,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _suppressFileVersionsCollectionChanged = true;
         try
         {
-            FileVersions.Clear();
-            foreach (var version in versions)
-                FileVersions.Add(version);
+            ReplaceCollectionItems(FileVersions, versions, AreExplorerFileVersionsEquivalent);
         }
         finally
         {
@@ -3758,9 +3732,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         _suppressComparableVersionsCollectionChanged = true;
         try
         {
-            ComparableFileVersions.Clear();
-            foreach (var version in versions)
-                ComparableFileVersions.Add(version);
+            ReplaceCollectionItems(ComparableFileVersions, versions, AreReferenceItemsEquivalent);
         }
         finally
         {
@@ -3768,6 +3740,43 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasComparableVersions));
+    }
+
+    private static void ReplaceCollectionItems<T>(
+        ObservableCollection<T> collection,
+        IReadOnlyList<T> rows,
+        Func<T, T, bool> areEquivalent)
+    {
+        var sharedCount = Math.Min(collection.Count, rows.Count);
+
+        for (var i = 0; i < sharedCount; i++)
+        {
+            if (!areEquivalent(collection[i], rows[i]))
+                collection[i] = rows[i];
+        }
+
+        while (collection.Count > rows.Count)
+            collection.RemoveAt(collection.Count - 1);
+
+        for (var i = sharedCount; i < rows.Count; i++)
+            collection.Add(rows[i]);
+    }
+
+    private static bool AreReferenceItemsEquivalent<T>(T left, T right)
+        where T : class
+        => ReferenceEquals(left, right);
+
+    private static bool AreExplorerFileVersionsEquivalent(
+        ExplorerFileVersionViewModel left,
+        ExplorerFileVersionViewModel right)
+    {
+        return left.FileVersionId == right.FileVersionId
+            && left.CreatedAtUtc == right.CreatedAtUtc
+            && left.SizeBytes == right.SizeBytes
+            && left.IsDeletionMarker == right.IsDeletionMarker
+            && left.HasContentBlocks == right.HasContentBlocks
+            && string.Equals(left.ContentHashSha256, right.ContentHashSha256, StringComparison.Ordinal)
+            && string.Equals(left.RelativePath, right.RelativePath, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnDiffPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)

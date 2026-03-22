@@ -16,8 +16,6 @@ public partial class RepositoryExplorerView : UserControl
 {
     private const double CompactWidth = 1240;
     private const double NarrowWidth = 980;
-    private const double SnapshotCompactWidth = 1440;
-    private const double SnapshotNarrowWidth = 1120;
     private readonly HashSet<TreeViewItem> _observedTreeItems = [];
     private INotifyPropertyChanged? _observedViewModel;
 
@@ -72,6 +70,14 @@ public partial class RepositoryExplorerView : UserControl
         e.Handled = true;
     }
 
+    private void OnExplorerFiltersBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is RepositoryExplorerViewModel vm)
+            vm.IsExplorerFiltersVisible = false;
+
+        e.Handled = true;
+    }
+
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {
         ApplyResponsiveLayout(e.NewSize.Width);
@@ -84,7 +90,6 @@ public partial class RepositoryExplorerView : UserControl
 
         ApplyHeroLayout(width);
         ApplyExplorerPanelsLayout(width);
-        ApplySnapshotHistoryLayout(width);
         ApplyExplorerItemGridLayout(width);
     }
 
@@ -130,7 +135,7 @@ public partial class RepositoryExplorerView : UserControl
         if (width < NarrowWidth)
         {
             ExplorerLayoutGrid.ColumnDefinitions = new ColumnDefinitions("*");
-            ExplorerLayoutGrid.RowDefinitions = new RowDefinitions("160,12,1*,12,Auto");
+            ExplorerLayoutGrid.RowDefinitions = new RowDefinitions("152,10,1.12*,6,0.88*");
 
             Grid.SetColumn(ExplorerTreePanel, 0);
             Grid.SetRow(ExplorerTreePanel, 0);
@@ -143,15 +148,20 @@ public partial class RepositoryExplorerView : UserControl
             Grid.SetRow(ExplorerDetailsPanel, 4);
             ExplorerDetailsPanel.Margin = new Thickness(0, 10, 0, 0);
 
+            Grid.SetColumn(ExplorerBottomSplitter, 0);
+            Grid.SetRow(ExplorerBottomSplitter, 3);
+            Grid.SetColumnSpan(ExplorerBottomSplitter, 1);
+
             ExplorerLeftSplitter.IsVisible = false;
             ExplorerRightSplitter.IsVisible = false;
+            ExplorerBottomSplitter.IsVisible = true;
             return;
         }
 
         ExplorerLayoutGrid.RowDefinitions = new RowDefinitions("*");
         ExplorerLayoutGrid.ColumnDefinitions = width < CompactWidth
-            ? new ColumnDefinitions("0.74*,4,1.38*,4,0.96*")
-            : new ColumnDefinitions("0.82*,4,1.72*,4,1.02*");
+            ? new ColumnDefinitions("0.72*,4,1.34*,4,1.12*")
+            : new ColumnDefinitions("0.78*,4,1.56*,4,1.14*");
 
         Grid.SetColumn(ExplorerTreePanel, 0);
         Grid.SetRow(ExplorerTreePanel, 0);
@@ -166,47 +176,7 @@ public partial class RepositoryExplorerView : UserControl
 
         ExplorerLeftSplitter.IsVisible = true;
         ExplorerRightSplitter.IsVisible = true;
-    }
-
-    private void ApplySnapshotHistoryLayout(double width)
-    {
-        if (width < SnapshotNarrowWidth)
-        {
-            SnapshotHistoryLayoutGrid.ColumnDefinitions = new ColumnDefinitions("*");
-            SnapshotHistoryLayoutGrid.RowDefinitions = new RowDefinitions("0.95*,12,1.05*,12,1.05*");
-
-            Grid.SetColumn(SnapshotHistoryCommitsPanel, 0);
-            Grid.SetRow(SnapshotHistoryCommitsPanel, 0);
-
-            Grid.SetColumn(SnapshotHistoryFilesPanel, 0);
-            Grid.SetRow(SnapshotHistoryFilesPanel, 2);
-            SnapshotHistoryFilesPanel.Margin = new Thickness(0);
-
-            Grid.SetColumn(SnapshotHistoryVersionsPanel, 0);
-            Grid.SetRow(SnapshotHistoryVersionsPanel, 4);
-
-            SnapshotHistoryLeftSplitter.IsVisible = false;
-            SnapshotHistoryRightSplitter.IsVisible = false;
-            return;
-        }
-
-        SnapshotHistoryLayoutGrid.RowDefinitions = new RowDefinitions("*");
-        SnapshotHistoryLayoutGrid.ColumnDefinitions = width < SnapshotCompactWidth
-            ? new ColumnDefinitions("0.96*,6,1.04*,6,1.02*")
-            : new ColumnDefinitions("1.02*,6,1.12*,6,1.16*");
-
-        Grid.SetColumn(SnapshotHistoryCommitsPanel, 0);
-        Grid.SetRow(SnapshotHistoryCommitsPanel, 0);
-
-        Grid.SetColumn(SnapshotHistoryFilesPanel, 2);
-        Grid.SetRow(SnapshotHistoryFilesPanel, 0);
-        SnapshotHistoryFilesPanel.Margin = new Thickness(14, 0);
-
-        Grid.SetColumn(SnapshotHistoryVersionsPanel, 4);
-        Grid.SetRow(SnapshotHistoryVersionsPanel, 0);
-
-        SnapshotHistoryLeftSplitter.IsVisible = true;
-        SnapshotHistoryRightSplitter.IsVisible = true;
+        ExplorerBottomSplitter.IsVisible = false;
     }
 
     private void ApplyExplorerItemGridLayout(double width)

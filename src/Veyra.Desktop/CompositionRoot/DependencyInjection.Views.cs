@@ -27,6 +27,7 @@ public static partial class DependencyInjection
         services.AddWindowWithDataContext<RepositoryBundleExportWizardWindow, RepositoryBundleExportWizardWindowViewModel>();
         services.AddWindowWithDataContext<RepositoryBundleImportWizardWindow, RepositoryBundleImportWizardWindowViewModel>();
         services.AddWindowWithDataContext<TrayPanelWindow, TrayPanelWindowViewModel>();
+        services.AddWindowWithDataContext<RepositoryFolderPickerWindow, RepositoryFolderPickerWindowViewModel>();
 
         services.AddTransient<CloudSyncHealthWindow>();
         services.AddTransient<SnapshotHistoryWindow>();

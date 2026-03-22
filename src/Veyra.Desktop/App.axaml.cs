@@ -1,11 +1,15 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Threading;
 using Avalonia.Markup.Xaml;
+using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Platform;
+using Avalonia.Threading;
+using FluentAvalonia.Styling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
@@ -34,7 +38,17 @@ public partial class App : AvaloniaApplication
     private static bool _databaseInitialized;
     private IAppTrayService? _trayService;
 
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Default;
+
+        DataTemplates.Add(new ViewLocator());
+        Styles.Add(new FluentAvaloniaTheme());
+        Styles.Add(new StyleInclude(new Uri("avares://Veyra.Desktop/"))
+        {
+            Source = new Uri("avares://Veyra.Desktop/Styles/Controls.axaml")
+        });
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -55,6 +69,7 @@ public partial class App : AvaloniaApplication
             classicDesktop.ShutdownMode = ShutdownMode.OnLastWindowClose;
             classicDesktop.Exit += OnDesktopExit;
 
+            EnsureTrayIconRegistered();
             _trayService = _serviceProvider.GetService<IAppTrayService>();
             var trayIcon = TrayIcon.GetIcons(this)?.FirstOrDefault();
             if (_trayService is not null && trayIcon is not null)
@@ -70,6 +85,70 @@ public partial class App : AvaloniaApplication
         _startupBackgroundTask = Task.Run(RunDeferredStartupAsync);
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void EnsureTrayIconRegistered()
+    {
+        var existingIcons = TrayIcon.GetIcons(this);
+        if (existingIcons?.Any() == true)
+            return;
+
+        try
+        {
+            var trayIcon = new TrayIcon
+            {
+                ToolTipText = "VeyraFlow",
+                IsVisible = false,
+                Menu = new NativeMenu()
+            };
+
+            try
+            {
+                var iconUri = new Uri("avares://Veyra.Desktop/Assets/avalonia-logo.ico");
+                using var stream = AssetLoader.Open(iconUri);
+                var icon = CreateWindowIcon(stream);
+                if (icon is not null)
+                    trayIcon.Icon = icon;
+            }
+            catch
+            {
+            }
+
+            var trayIcons = new TrayIcons();
+            trayIcons.Add(trayIcon);
+            TrayIcon.SetIcons(this, trayIcons);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to register tray icon resources programmatically.");
+        }
+    }
+
+    private static WindowIcon? CreateWindowIcon(Stream stream)
+    {
+        var streamCtor = typeof(WindowIcon).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, [typeof(Stream)], null);
+        if (streamCtor is not null)
+            return streamCtor.Invoke([stream]) as WindowIcon;
+
+        var bytes = ReadAllBytes(stream);
+        var stringCtor = typeof(WindowIcon).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, [typeof(string)], null);
+        if (stringCtor is null)
+            return null;
+
+        var tempIconPath = Path.Combine(Path.GetTempPath(), "VeyraFlow", "tray-icon.ico");
+        Directory.CreateDirectory(Path.GetDirectoryName(tempIconPath)!);
+        File.WriteAllBytes(tempIconPath, bytes);
+        return stringCtor.Invoke([tempIconPath]) as WindowIcon;
+    }
+
+    private static byte[] ReadAllBytes(Stream stream)
+    {
+        if (stream is MemoryStream memoryStream)
+            return memoryStream.ToArray();
+
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
     }
 
     private void OnDesktopExit(object? sender, ControlledApplicationLifetimeExitEventArgs e)

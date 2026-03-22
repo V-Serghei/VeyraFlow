@@ -124,10 +124,12 @@ public sealed class RustRepositoryScanner(
                 entryProjectionMs,
                 entries.Count,
                 scannedFiles);
+            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.Scan);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
             engineName = "managed_fallback";
+            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.Scan);
             log.LogWarning(ex,
                 "Rust scanner unavailable for repository {RepositoryId}. Falling back to managed scan.",
                 repositoryId);

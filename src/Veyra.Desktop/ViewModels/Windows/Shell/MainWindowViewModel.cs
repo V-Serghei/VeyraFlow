@@ -130,7 +130,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         AppSettings.BackRequested += ShowDashboard;
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
         AppSettings.ExperienceModeRefreshRequested += OnExperienceModeRefreshRequestedAsync;
-        AppSettings.LanguageRefreshRequested += OnLanguageRefreshRequestedAsync;
         Dashboard.PropertyChanged += OnChildCloudAccessChanged;
         Settings.PropertyChanged += OnChildCloudAccessChanged;
         AppSettings.PropertyChanged += OnChildCloudAccessChanged;
@@ -208,16 +207,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ? 0
             : (currentIndex + 1) % languages.Count;
 
-        await RunShellBusyActionAsync(
-            "main.language_switch_title",
-            "main.language_switch_detail",
-            async () =>
-            {
-                _localization.SetLanguage(languages[nextIndex].Code);
-                RefreshLanguageState();
-                _log.LogInformation("Language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
-                await RefreshShellStateAsync();
-            });
+        await WaitForUiFrameAsync();
+        _localization.SetLanguage(languages[nextIndex].Code);
+        RefreshLanguageState();
+        _log.LogInformation("Language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
     }
 
     public async void OnLoaded()
@@ -400,15 +393,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
             RefreshShellStateAsync);
     }
 
-    private async Task OnLanguageRefreshRequestedAsync(string languageCode)
-    {
-        _log.LogInformation("Refreshing app after language change. Language {Language}", languageCode);
-        await RunShellBusyActionAsync(
-            "main.language_switch_title",
-            "main.language_switch_detail",
-            RefreshShellStateAsync);
-    }
-
     [RelayCommand]
     private async Task GuidedTourNextAsync()
     {
@@ -555,24 +539,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var lastEntry = recentEntries.FirstOrDefault();
-        if (lastEntry is not null)
-        {
-            var localized = UserFacingMessageLocalizer.TryLocalize(lastEntry.Message) ?? lastEntry.Message;
-            ShowShellActivityStrip = ShouldShowShellActivity(
-                $"last:{lastEntry.Level}:{lastEntry.Category}:{lastEntry.Action}:{localized}");
-            ShellActivityText = Loc.F("main.shell_activity_last", localized);
-            ShellActivityDetailText = Loc.F("main.shell_activity_last_detail", FormatRelativeTime(lastEntry.OccurredAtUtc));
-            ShellActivityAccentColor = "#4ADE80";
-            ShellActivityBackgroundColor = "#164ADE80";
-            ShellActivityBadgeText = string.Empty;
-            ShowShellActivityBadge = false;
-            return;
-        }
-
-        ShowShellActivityStrip = ShouldShowShellActivity("idle");
-        ShellActivityText = Loc.T("main.shell_activity_idle");
-        ShellActivityDetailText = Loc.T("main.shell_activity_idle_detail");
+        ShowShellActivityStrip = false;
+        _shellActivityStateKey = string.Empty;
+        _isShellActivityDismissed = false;
+        ShellActivityText = string.Empty;
+        ShellActivityDetailText = string.Empty;
         ShellActivityAccentColor = "#94A3B8";
         ShellActivityBackgroundColor = "#1494A3B8";
         ShellActivityBadgeText = string.Empty;

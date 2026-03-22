@@ -809,6 +809,98 @@ public sealed class EfRepositorySnapshotRepository(
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<RepositoryScanEntryDto>>> GetLatestEntriesBatchAsync(
+        IReadOnlyCollection<int> repositoryIds,
+        CancellationToken ct = default)
+    {
+        var normalizedRepositoryIds = NormalizeRepositoryIds(repositoryIds);
+        if (normalizedRepositoryIds.Length == 0)
+            return new Dictionary<int, IReadOnlyList<RepositoryScanEntryDto>>();
+
+        var result = normalizedRepositoryIds.ToDictionary(
+            repositoryId => repositoryId,
+            static _ => (IReadOnlyList<RepositoryScanEntryDto>)Array.Empty<RepositoryScanEntryDto>());
+
+        var shouldCloseConnection = db.Database.GetDbConnection().State != ConnectionState.Open;
+        if (shouldCloseConnection)
+            await db.Database.OpenConnectionAsync(ct);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            var repositoryIdSql = AddRepositoryIdParameters(command, normalizedRepositoryIds);
+            command.CommandText = $"""
+                WITH ranked_snapshots AS (
+                    SELECT
+                        s.Id AS SnapshotId,
+                        s.RepositoryId,
+                        ROW_NUMBER() OVER (PARTITION BY s.RepositoryId ORDER BY s.CreatedAt DESC, s.Id DESC) AS RowNumber
+                    FROM RepositorySnapshots AS s
+                    WHERE s.IsDeleted = 0
+                      AND s.RepositoryId IN ({repositoryIdSql})
+                )
+                SELECT
+                    e.RepositoryId,
+                    e.RelativePath,
+                    e.ParentRelativePath,
+                    e.Name,
+                    e.IsDirectory,
+                    e.Extension,
+                    e.SizeBytes,
+                    e.LastWriteUtc,
+                    e.ContentHashSha256
+                FROM RepositorySnapshotEntries AS e
+                INNER JOIN ranked_snapshots AS rs
+                    ON rs.RepositoryId = e.RepositoryId
+                   AND rs.SnapshotId = e.SnapshotId
+                WHERE rs.RowNumber = 1
+                  AND e.IsDeleted = 0
+                ORDER BY e.RepositoryId, e.RelativePath;
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            var repositoryIdOrdinal = reader.GetOrdinal("RepositoryId");
+            var relativePathOrdinal = reader.GetOrdinal("RelativePath");
+            var parentRelativePathOrdinal = reader.GetOrdinal("ParentRelativePath");
+            var nameOrdinal = reader.GetOrdinal("Name");
+            var isDirectoryOrdinal = reader.GetOrdinal("IsDirectory");
+            var extensionOrdinal = reader.GetOrdinal("Extension");
+            var sizeBytesOrdinal = reader.GetOrdinal("SizeBytes");
+            var lastWriteUtcOrdinal = reader.GetOrdinal("LastWriteUtc");
+            var contentHashOrdinal = reader.GetOrdinal("ContentHashSha256");
+
+            var entriesByRepository = new Dictionary<int, List<RepositoryScanEntryDto>>();
+            while (await reader.ReadAsync(ct))
+            {
+                var repositoryId = reader.GetInt32(repositoryIdOrdinal);
+                if (!entriesByRepository.TryGetValue(repositoryId, out var entries))
+                {
+                    entries = [];
+                    entriesByRepository[repositoryId] = entries;
+                }
+
+                entries.Add(new RepositoryScanEntryDto(
+                    reader.GetString(relativePathOrdinal),
+                    ReadNullableString(reader, parentRelativePathOrdinal),
+                    reader.GetString(nameOrdinal),
+                    ReadBoolean(reader, isDirectoryOrdinal),
+                    ReadNullableString(reader, extensionOrdinal),
+                    reader.GetInt64(sizeBytesOrdinal),
+                    ReadDateTime(reader, lastWriteUtcOrdinal),
+                    ReadNullableString(reader, contentHashOrdinal)));
+            }
+
+            foreach (var pair in entriesByRepository)
+                result[pair.Key] = pair.Value;
+
+            return result;
+        }
+        finally
+        {
+            if (shouldCloseConnection)
+                await db.Database.CloseConnectionAsync();
+        }
+    }
+
     public async Task<IReadOnlyList<FileVersionInfoDto>> GetFileVersionsAsync(
         int repositoryId,
         string relativePath,
@@ -1009,53 +1101,141 @@ public sealed class EfRepositorySnapshotRepository(
                 g => g.Key,
                 g => (IReadOnlyList<SnapshotLinkStateDto>)g.Select(ToSnapshotLinkStateDto).ToList());
 
-        var pairs = snapshots
-            .Take(limit)
-            .Select((current, index) => new
-            {
-                current,
-                previous = index + 1 < snapshots.Count ? snapshots[index + 1] : null,
-                index
-            })
-            .ToList();
+        return await BuildSnapshotHistoryAsync(snapshots, statesBySnapshot, limit, ct);
+    }
 
-        var result = new RepositorySnapshotHistoryItemDto?[pairs.Count];
-        var concurrency = Math.Clamp(Environment.ProcessorCount, 2, SnapshotComparisonMaxConcurrency);
-        using var gate = new SemaphoreSlim(concurrency, concurrency);
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<RepositorySnapshotHistoryItemDto>>> GetSnapshotHistoryBatchAsync(
+        IReadOnlyCollection<int> repositoryIds,
+        int take = 100,
+        CancellationToken ct = default)
+    {
+        var normalizedRepositoryIds = NormalizeRepositoryIds(repositoryIds);
+        if (normalizedRepositoryIds.Length == 0)
+            return new Dictionary<int, IReadOnlyList<RepositorySnapshotHistoryItemDto>>();
 
-        var comparisonTasks = pairs.Select(async pair =>
+        var limit = Math.Clamp(take, 1, 500);
+        var snapshotRowsByRepository = normalizedRepositoryIds.ToDictionary(
+            repositoryId => repositoryId,
+            static _ => new List<SnapshotLight>());
+
+        var shouldCloseConnection = db.Database.GetDbConnection().State != ConnectionState.Open;
+        if (shouldCloseConnection)
+            await db.Database.OpenConnectionAsync(ct);
+        try
         {
-            await gate.WaitAsync(ct);
-            try
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            var repositoryIdSql = AddRepositoryIdParameters(command, normalizedRepositoryIds);
+            AddCommandParameter(command, "@SnapshotLimit", limit + 1);
+            command.CommandText = $"""
+                WITH ranked_snapshots AS (
+                    SELECT
+                        s.Id AS SnapshotId,
+                        s.RepositoryId,
+                        s.Title,
+                        s.CreatedAt,
+                        s.IsArchived,
+                        s.Trigger,
+                        s.TagsCsv,
+                        ROW_NUMBER() OVER (PARTITION BY s.RepositoryId ORDER BY s.CreatedAt DESC, s.Id DESC) AS RowNumber
+                    FROM RepositorySnapshots AS s
+                    WHERE s.IsDeleted = 0
+                      AND s.RepositoryId IN ({repositoryIdSql})
+                      AND EXISTS (
+                          SELECT 1
+                          FROM SnapshotFileLinks AS l
+                          WHERE l.SnapshotId = s.Id
+                            AND l.IsDeleted = 0
+                      )
+                )
+                SELECT
+                    SnapshotId,
+                    RepositoryId,
+                    Title,
+                    CreatedAt,
+                    IsArchived,
+                    Trigger,
+                    TagsCsv
+                FROM ranked_snapshots
+                WHERE RowNumber <= @SnapshotLimit
+                ORDER BY RepositoryId, CreatedAt DESC, SnapshotId DESC;
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            var snapshotIdOrdinal = reader.GetOrdinal("SnapshotId");
+            var repositoryIdOrdinal = reader.GetOrdinal("RepositoryId");
+            var titleOrdinal = reader.GetOrdinal("Title");
+            var createdAtOrdinal = reader.GetOrdinal("CreatedAt");
+            var isArchivedOrdinal = reader.GetOrdinal("IsArchived");
+            var triggerOrdinal = reader.GetOrdinal("Trigger");
+            var tagsCsvOrdinal = reader.GetOrdinal("TagsCsv");
+
+            while (await reader.ReadAsync(ct))
             {
-                var currentStates = statesBySnapshot.GetValueOrDefault(pair.current.SnapshotId, EmptySnapshotLinkStates);
-                var previousStates = pair.previous is null
-                    ? EmptySnapshotLinkStates
-                    : statesBySnapshot.GetValueOrDefault(pair.previous.SnapshotId, EmptySnapshotLinkStates);
+                var repositoryId = reader.GetInt32(repositoryIdOrdinal);
+                if (!snapshotRowsByRepository.TryGetValue(repositoryId, out var snapshots))
+                {
+                    snapshots = [];
+                    snapshotRowsByRepository[repositoryId] = snapshots;
+                }
 
-                var comparison = await snapshotComparison.CompareSnapshotLinksAsync(currentStates, previousStates, ct);
-                result[pair.index] = new RepositorySnapshotHistoryItemDto(
-                    pair.current.SnapshotId,
-                    pair.current.Title,
-                    pair.current.CreatedAtUtc,
-                    RepositorySnapshotTriggerClassifier.GetKind(pair.current.Trigger),
-                    pair.current.IsArchived,
-                    pair.current.Trigger,
-                    comparison.ChangedFilesCount,
-                    ParseSnapshotTags(pair.current.TagsCsv));
+                snapshots.Add(new SnapshotLight(
+                    reader.GetInt64(snapshotIdOrdinal),
+                    ReadNullableString(reader, titleOrdinal),
+                    ReadDateTime(reader, createdAtOrdinal),
+                    ReadBoolean(reader, isArchivedOrdinal),
+                    reader.GetString(triggerOrdinal),
+                    ReadNullableString(reader, tagsCsvOrdinal)));
             }
-            finally
-            {
-                gate.Release();
-            }
-        });
+        }
+        finally
+        {
+            if (shouldCloseConnection)
+                await db.Database.CloseConnectionAsync();
+        }
 
-        await Task.WhenAll(comparisonTasks);
-
-        return result
-            .Where(item => item is not null)
-            .Select(item => item!)
+        var snapshotIds = snapshotRowsByRepository.Values
+            .SelectMany(rows => rows)
+            .Select(snapshot => snapshot.SnapshotId)
+            .Distinct()
             .ToList();
+
+        var result = normalizedRepositoryIds.ToDictionary(
+            repositoryId => repositoryId,
+            static _ => (IReadOnlyList<RepositorySnapshotHistoryItemDto>)Array.Empty<RepositorySnapshotHistoryItemDto>());
+
+        if (snapshotIds.Count == 0)
+            return result;
+
+        var linkRows = await db.Set<SnapshotFileLink>()
+            .IgnoreQueryFilters()
+            .Where(l => snapshotIds.Contains(l.SnapshotId) && !l.IsDeleted && !l.Snapshot.IsDeleted && !l.FileVersion.IsDeleted && !l.FileIdentity.Repository.IsDeleted)
+            .Select(l => new SnapshotLinkState(
+                l.SnapshotId,
+                l.FileIdentityId,
+                l.FileVersionId,
+                l.FileVersion != null && l.FileVersion.IsDeletionMarker,
+                l.FileVersion != null ? l.FileVersion.SizeBytes : 0,
+                l.FileVersion != null ? l.FileVersion.CreatedAt : DateTime.MinValue,
+                l.FileIdentity.RelativePath,
+                l.FileIdentity.Name))
+            .ToListAsync(ct);
+
+        var statesBySnapshot = linkRows
+            .GroupBy(l => l.SnapshotId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<SnapshotLinkStateDto>)g.Select(ToSnapshotLinkStateDto).ToList());
+
+        foreach (var repositoryId in normalizedRepositoryIds)
+        {
+            var snapshots = snapshotRowsByRepository.GetValueOrDefault(repositoryId);
+            if (snapshots is null || snapshots.Count == 0)
+                continue;
+
+            result[repositoryId] = await BuildSnapshotHistoryAsync(snapshots, statesBySnapshot, limit, ct);
+        }
+
+        return result;
     }
 
     public async Task<IReadOnlyList<RepositorySnapshotFileChangeDto>> GetSnapshotChangedFilesAsync(
@@ -1761,10 +1941,11 @@ public sealed class EfRepositorySnapshotRepository(
             var diffKey = ComputeDiffKeySha256(diff.LeftFileVersionId, diff.RightFileVersionId, normalizedMaxLines);
 
             var existing = await db.Set<FileVersionTextDiff>()
+                .IgnoreQueryFilters()
                 .Include(d => d.Hunks)
                 .Include(d => d.Lines)
                 .AsSplitQuery()
-                .FirstOrDefaultAsync(d => !d.IsDeleted && d.LeftFileVersionId == diff.LeftFileVersionId
+                .FirstOrDefaultAsync(d => d.LeftFileVersionId == diff.LeftFileVersionId
                                           && d.RightFileVersionId == diff.RightFileVersionId
                                           && d.MaxLines == normalizedMaxLines,
                     ct);
@@ -1914,7 +2095,14 @@ public sealed class EfRepositorySnapshotRepository(
                 db.AddRange(diffLines);
             }
 
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsTextDiffUniqueConflict(ex))
+            {
+                db.ChangeTracker.Clear();
+            }
         }
         finally
         {
@@ -1956,6 +2144,11 @@ public sealed class EfRepositorySnapshotRepository(
             version.ContentHashSha256,
             blocks);
     }
+
+    private static bool IsTextDiffUniqueConflict(DbUpdateException ex)
+        => ex.InnerException?.Message.Contains(
+               "UNIQUE constraint failed: FileVersionTextDiffs.LeftFileVersionId, FileVersionTextDiffs.RightFileVersionId, FileVersionTextDiffs.MaxLines",
+               StringComparison.OrdinalIgnoreCase) == true;
 
 
     private async Task PrecomputeSnapshotDiffsAsync(
@@ -2889,6 +3082,103 @@ public sealed class EfRepositorySnapshotRepository(
     }
 
     private static readonly IReadOnlyList<SnapshotLinkStateDto> EmptySnapshotLinkStates = Array.Empty<SnapshotLinkStateDto>();
+
+    private async Task<IReadOnlyList<RepositorySnapshotHistoryItemDto>> BuildSnapshotHistoryAsync(
+        IReadOnlyList<SnapshotLight> snapshots,
+        IReadOnlyDictionary<long, IReadOnlyList<SnapshotLinkStateDto>> statesBySnapshot,
+        int limit,
+        CancellationToken ct)
+    {
+        if (snapshots.Count == 0)
+            return Array.Empty<RepositorySnapshotHistoryItemDto>();
+
+        var pairs = snapshots
+            .Take(limit)
+            .Select((current, index) => new
+            {
+                current,
+                previous = index + 1 < snapshots.Count ? snapshots[index + 1] : null,
+                index
+            })
+            .ToList();
+
+        var result = new RepositorySnapshotHistoryItemDto?[pairs.Count];
+        var concurrency = Math.Clamp(Environment.ProcessorCount, 2, SnapshotComparisonMaxConcurrency);
+        using var gate = new SemaphoreSlim(concurrency, concurrency);
+
+        var comparisonTasks = pairs.Select(async pair =>
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                var currentStates = statesBySnapshot.GetValueOrDefault(pair.current.SnapshotId, EmptySnapshotLinkStates);
+                var previousStates = pair.previous is null
+                    ? EmptySnapshotLinkStates
+                    : statesBySnapshot.GetValueOrDefault(pair.previous.SnapshotId, EmptySnapshotLinkStates);
+
+                var comparison = await snapshotComparison.CompareSnapshotLinksAsync(currentStates, previousStates, ct);
+                result[pair.index] = new RepositorySnapshotHistoryItemDto(
+                    pair.current.SnapshotId,
+                    pair.current.Title,
+                    pair.current.CreatedAtUtc,
+                    RepositorySnapshotTriggerClassifier.GetKind(pair.current.Trigger),
+                    pair.current.IsArchived,
+                    pair.current.Trigger,
+                    comparison.ChangedFilesCount,
+                    ParseSnapshotTags(pair.current.TagsCsv));
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(comparisonTasks);
+
+        return result
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToList();
+    }
+
+    private static int[] NormalizeRepositoryIds(IReadOnlyCollection<int> repositoryIds)
+        => repositoryIds
+            .Where(repositoryId => repositoryId > 0)
+            .Distinct()
+            .ToArray();
+
+    private static string AddRepositoryIdParameters(DbCommand command, IReadOnlyList<int> repositoryIds)
+    {
+        var parameterNames = new string[repositoryIds.Count];
+        for (var index = 0; index < repositoryIds.Count; index++)
+        {
+            var parameterName = $"@repositoryId{index}";
+            AddCommandParameter(command, parameterName, repositoryIds[index]);
+            parameterNames[index] = parameterName;
+        }
+
+        return string.Join(", ", parameterNames);
+    }
+
+    private static void AddCommandParameter(DbCommand command, string parameterName, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = parameterName;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
+
+    private static bool ReadBoolean(DbDataReader reader, int ordinal)
+        => !reader.IsDBNull(ordinal) && Convert.ToBoolean(reader.GetValue(ordinal));
+
+    private static DateTime ReadDateTime(DbDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal)
+            ? DateTime.MinValue
+            : Convert.ToDateTime(reader.GetValue(ordinal));
+
+    private static string? ReadNullableString(DbDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
     private static string? NormalizeSnapshotTitle(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

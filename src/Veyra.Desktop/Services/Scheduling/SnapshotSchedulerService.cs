@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,11 +39,12 @@ public sealed class SnapshotSchedulerService(
         _loop = Task.Run(() => RunAsync(_cts.Token));
 
         log.LogInformation(
-            "Snapshot scheduler started. Poll {PollSeconds}s. Interval {IntervalMinutes}m. QuietHours {Start}-{End}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}. Retries {Retries}. Integrity {IntegrityEnabled} every {IntegrityIntervalMinutes}m",
+            "Snapshot scheduler started. Poll {PollSeconds}s. Interval {IntervalMinutes}m. QuietHours {Start}-{End}. MaxConcurrentScans {MaxConcurrentScans}. MaxReadBps {MaxReadBps}. MaxIops {MaxIops}. Retries {Retries}. Integrity {IntegrityEnabled} every {IntegrityIntervalMinutes}m",
             options.PollSeconds,
             options.IntervalMinutes,
             options.QuietHoursStartHour,
             options.QuietHoursEndHour,
+            options.MaxConcurrentScans,
             options.MaxReadBytesPerSecond,
             options.MaxIoOperationsPerSecond,
             options.RetryCount,
@@ -117,7 +119,6 @@ public sealed class SnapshotSchedulerService(
         await using var scope = scopeFactory.CreateAsyncScope();
 
         var repositories = scope.ServiceProvider.GetRequiredService<IRepositoryRepository>();
-        var scanner = scope.ServiceProvider.GetRequiredService<IRepositoryScanner>();
         var retention = scope.ServiceProvider.GetRequiredService<IRepositoryRetentionService>();
         var integrity = scope.ServiceProvider.GetRequiredService<IRepositoryIntegrityService>();
         var cloudSync = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
@@ -132,16 +133,11 @@ public sealed class SnapshotSchedulerService(
 
         var interval = TimeSpan.FromMinutes(Math.Clamp(options.IntervalMinutes, 1, 24 * 60));
         var nowUtc = DateTime.UtcNow;
+        var dueRepositories = all
+            .Where(repo => repo.LastScannedAt is null || nowUtc - repo.LastScannedAt.Value >= interval)
+            .ToList();
 
-        foreach (var repo in all)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (repo.LastScannedAt is not null && nowUtc - repo.LastScannedAt.Value < interval)
-                continue;
-
-            await RunScheduledScanWithRetryAsync(scanner, cloudSync, repo.Id, repo.AutoCaptureFileVersions, ct);
-        }
+        await RunDueScheduledScansAsync(dueRepositories, ct);
 
         var retentionRuns = await retention.RunDueRetentionAsync(ct: ct);
         if (retentionRuns.Count > 0)
@@ -195,6 +191,54 @@ public sealed class SnapshotSchedulerService(
         }
 
         await cloudSync.ProcessPendingQueueAsync(ct);
+    }
+
+    private async Task RunDueScheduledScansAsync(
+        IReadOnlyList<RepositoryDto> dueRepositories,
+        CancellationToken ct)
+    {
+
+        if (dueRepositories.Count == 0)
+            return;
+
+        var maxConcurrency = Math.Max(1, Math.Min(options.MaxConcurrentScans, dueRepositories.Count));
+
+        log.LogInformation(
+            "Snapshot scheduler starting scheduled scans. DueRepositories {DueRepositories}. MaxConcurrentScans {MaxConcurrentScans}",
+            dueRepositories.Count,
+            maxConcurrency);
+
+        await Parallel.ForEachAsync(
+            dueRepositories,
+            new ParallelOptions
+            {
+                CancellationToken = ct,
+                MaxDegreeOfParallelism = maxConcurrency
+            },
+            async (repo, itemCt) =>
+            {
+                await RunScheduledScanWithRetryInIsolatedScopeAsync(
+                    repo.Id,
+                    repo.AutoCaptureFileVersions,
+                    itemCt);
+            });
+    }
+
+    private async Task RunScheduledScanWithRetryInIsolatedScopeAsync(
+        int repositoryId,
+        bool autoCaptureFileVersions,
+        CancellationToken ct)
+    {
+        await using var scanScope = scopeFactory.CreateAsyncScope();
+        var scanner = scanScope.ServiceProvider.GetRequiredService<IRepositoryScanner>();
+        var cloudSync = scanScope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
+
+        await RunScheduledScanWithRetryAsync(
+            scanner,
+            cloudSync,
+            repositoryId,
+            autoCaptureFileVersions,
+            ct);
     }
 
     private async Task RunScheduledScanWithRetryAsync(

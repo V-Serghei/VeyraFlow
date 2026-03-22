@@ -8,7 +8,7 @@ use super::{
     clear_last_error, copy_bytes_to_out, get_last_error, ptr_to_str, set_error_from,
     set_last_error, write_bytes,
 };
-use crate::{block_store, crypto, hash, scan, snapshot_compare, text_diff};
+use crate::{block_store, crypto, hash, image_diff, scan, snapshot_compare, text_diff};
 #[no_mangle]
 pub extern "C" fn veyra_last_error_utf8(out: *mut u8, out_len: u64, written: *mut u64) -> i32 {
     let data = get_last_error();
@@ -376,6 +376,48 @@ pub extern "C" fn veyra_build_text_diff_utf8(
 
     let payload = match text_diff::build_text_diff_json(left_path, right_path, effective_max_lines)
     {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &payload, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_render_image_diff_utf8(
+    baseline_path_ptr: *const c_char,
+    current_path_ptr: *const c_char,
+    sensitivity_percent: u32,
+    mode: u32,
+    split_percent: u32,
+    show_region_boxes: c_int,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(baseline_path_str) = ptr_to_str(baseline_path_ptr) else {
+        set_last_error("baseline image path is null or invalid utf-8");
+        return -1;
+    };
+
+    let Some(current_path_str) = ptr_to_str(current_path_ptr) else {
+        set_last_error("current image path is null or invalid utf-8");
+        return -1;
+    };
+
+    let payload = match image_diff::render_image_diff_json(
+        Path::new(baseline_path_str),
+        Path::new(current_path_str),
+        sensitivity_percent,
+        mode,
+        split_percent,
+        show_region_boxes != 0,
+    ) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);

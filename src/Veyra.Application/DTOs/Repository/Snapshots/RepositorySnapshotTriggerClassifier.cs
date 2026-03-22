@@ -29,7 +29,8 @@ public static class RepositorySnapshotTriggerClassifier
     private static bool IsAutomaticCore(string trigger)
     {
         return trigger.StartsWith("auto_snapshot", StringComparison.OrdinalIgnoreCase)
-               || trigger.StartsWith("scheduled_snapshot", StringComparison.OrdinalIgnoreCase);
+               || trigger.StartsWith("scheduled_snapshot", StringComparison.OrdinalIgnoreCase)
+               || trigger.StartsWith("initial_snapshot", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsWorkingCore(string trigger)

@@ -125,7 +125,7 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
-                Math.Max(reportedPercent, 99),
+                Math.Clamp(reportedPercent, 1, 99),
                 lastFilesProcessed,
                 lastFilesTotal,
                 "Applying system configuration"));

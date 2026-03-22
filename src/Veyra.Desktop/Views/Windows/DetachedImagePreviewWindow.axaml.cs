@@ -129,13 +129,7 @@ public partial class DetachedImagePreviewWindow : Window
     }
 
     private static Bitmap? LoadBitmap(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            return null;
-
-        using var stream = File.OpenRead(path);
-        return new Bitmap(stream);
-    }
+        => PreviewBitmapLoader.LoadBitmap(path);
 
     private Bitmap? GetReferenceBitmap()
     {
