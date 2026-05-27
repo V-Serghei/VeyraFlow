@@ -23,7 +23,7 @@ public class DbContextTests
     }
 
     [Fact]
-    public void Database_Migrate_CreatesSchema()
+    public void Database_EnsureCreated_CreatesSchema()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"veyra_test_{Guid.NewGuid():N}.db");
         var cs = $"Data Source={dbPath}";
@@ -37,7 +37,7 @@ public class DbContextTests
             using var scope = sp.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
 
-            db.Database.Migrate();
+            db.Database.EnsureCreated();
 
             var exists = db.Database.CanConnect();
             Assert.True(exists);

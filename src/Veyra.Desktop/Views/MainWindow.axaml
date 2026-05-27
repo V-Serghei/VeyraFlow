@@ -1,26 +1,390 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
-         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
-         mc:Ignorable="d"
-         x:Class="Veyra.Desktop.Views.MainWindow"
-         x:DataType="windows:MainWindowViewModel"
-         Icon="/Assets/avalonia-logo.ico"
-         Title="VeyraFlow — Версионный Проводник"
-         Width="1280" Height="820"
-         MinWidth="980" MinHeight="640"
-         Background="#0D0D0D" Foreground="#EEEEEE"
-         WindowStartupLocation="CenterScreen">
-    <DockPanel>
-        <Border DockPanel.Dock="Top" Padding="18,12" Background="#0A0A0A" BorderBrush="#1A1A1A" BorderThickness="0,0,0,1">
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.MainWindow"
+        x:Name="RootWindow"
+        x:DataType="windows:MainWindowViewModel"
+        Title="{loc:Tr main.window_title}"
+        Width="1280" Height="820"
+        MinWidth="980" MinHeight="640"
+        Background="{DynamicResource VeyraCanvasBrush}" Foreground="{DynamicResource VeyraTextPrimaryBrush}"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14" RowSpacing="8">
+        <Border x:Name="MainToolbar" Grid.Row="0" Classes="toolbar" Padding="12,10">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Button Command="{Binding ShellBackCommand}"
+                            Classes="subtle responsive-icon"
+                            IsVisible="{Binding ShowShellBackButton}"
+                            ToolTip.Tip="{loc:Tr common.back}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72B;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.back}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+
+                    <Border Classes="badge" Padding="10,6" IsVisible="{Binding ShowShellBrandBadge}">
+                        <TextBlock Text="&#x25C8;"
+                                   FontSize="16"
+                                   Foreground="{DynamicResource VeyraAccentBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding ShellTitle}"
+                                   FontSize="17"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding ShellSubtitle}"
+                                   Classes="muted hide-on-narrow"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding HasShellSubtitle}"
+                                   ToolTip.Tip="{Binding ShellSubtitleTooltip}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="MainSearchButton"
+                            MinWidth="90"
+                            Height="34"
+                            Command="{Binding OpenGlobalSearchCommand}"
+                            ToolTip.Tip="{loc:Tr search.title}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE721;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.open_search}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainTagsButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding ToggleGlobalTagPickerCommand}"
+                            ToolTip.Tip="{loc:Tr search.tags_button}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE8EC;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr search.tags_button_short}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainHelpButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding OpenHelpCenterCommand}"
+                            ToolTip.Tip="{loc:Tr help.center_title}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE946;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.open_help}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainCloudInfoButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding OpenCloudInformationCommand}"
+                            ToolTip.Tip="{loc:Tr cloud_info.tooltip}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE753;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.cloud}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button
+                            x:Name="MainLanguageButton"
+                            MinWidth="52"
+                            Height="34"
+                            FontWeight="SemiBold"
+                            Command="{Binding ToggleLanguageCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_language}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE909;"/>
+                                <TextBlock Classes="button-label" Text="{Binding LanguageToggleLabel}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainThemeButton"
+                            Content="{Binding ThemeToggleGlyph}"
+                            Command="{Binding ToggleThemeCommand}"
+                            ToolTip.Tip="{loc:Tr main.toggle_theme}"
+                            Classes="subtle icon"/>
+                    <Button x:Name="MainGlobalSettingsButton"
+                            Content="&#xE713;"
+                            ToolTip.Tip="{loc:Tr common.settings}"
+                            Command="{Binding OpenGlobalSettingsCommand}"
+                            Classes="subtle icon"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Classes="card"
+                Padding="12,10"
+                Background="{Binding ConnectivityBannerBackgroundColor}"
+                BorderBrush="{Binding ConnectivityBannerAccentColor}"
+                IsVisible="{Binding ShowConnectivityBanner}">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="◈" FontSize="18" Foreground="#3B82F6" VerticalAlignment="Center"/>
-                <TextBlock Text="Версионный Проводник" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Text="&#xE783;"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="{Binding ConnectivityBannerAccentColor}"
+                           VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding ConnectivityBannerText}"
+                           Foreground="{Binding ConnectivityBannerAccentColor}"
+                           TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
-        <ContentControl Content="{Binding CurrentPage}"/>
-    </DockPanel>
 
+        <ContentControl x:Name="MainPageHost" Grid.Row="2" Content="{Binding CurrentPage}"/>
 
+        <Border Grid.RowSpan="4"
+                Background="#01000000"
+                IsVisible="{Binding Search.IsTagPickerVisible}"
+                PointerPressed="OnGlobalTagPickerBackdropPressed"/>
+
+        <Border Grid.RowSpan="4"
+                Classes="filter-sheet floating-panel"
+                Padding="14"
+                Width="340"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,44,126,0"
+                IsVisible="{Binding Search.IsTagPickerVisible}">
+            <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="{loc:Tr search.tags_picker_title}" Classes="section-title"/>
+                        <TextBlock Text="{loc:Tr search.tags_picker_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="{loc:Tr common.close}"
+                            Command="{Binding Search.CloseTagPickerCommand}"
+                            Classes="subtle compact"/>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding Search.TagPickerSearchQuery, Mode=TwoWay}"
+                             Watermark="{loc:Tr search.tags_picker_search_placeholder}"/>
+                    <Button Grid.Column="1"
+                            Content="&#xE711;"
+                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Command="{Binding Search.ClearTagPickerSearchCommand}"
+                            IsVisible="{Binding Search.HasTagPickerSearchQuery}"
+                            Classes="ghost icon compact"/>
+                </Grid>
+
+                <TextBlock Text="{loc:Tr search.tags_picker_empty}"
+                           Classes="muted"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding Search.HasTagPickerItems, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                <ItemsControl ItemsSource="{Binding Search.TagPickerItems}" IsVisible="{Binding Search.HasTagPickerItems}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Classes="subtle compact"
+                                    Margin="0,0,8,8"
+                                    Padding="10,5"
+                                    Command="{Binding #RootWindow.((windows:MainWindowViewModel)DataContext).Search.SelectSnapshotTagCommand}"
+                                    CommandParameter="{Binding .}">
+                                <StackPanel Orientation="Horizontal" Spacing="0">
+                                    <TextBlock Text="#" Foreground="{DynamicResource VeyraInfoBrush}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding .}" Foreground="{DynamicResource VeyraInfoBrush}" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="3"
+                Classes="card"
+                Padding="10,8"
+                IsVisible="{Binding ShowShellActivityStrip}"
+                Background="{Binding ShellActivityBackgroundColor}"
+                BorderBrush="{Binding ShellActivityAccentColor}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10">
+                <TextBlock Text="&#xE823;"
+                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="{Binding ShellActivityAccentColor}"
+                           VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock Text="{Binding ShellActivityText}"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding ShellActivityAccentColor}"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ShellActivityDetailText}"
+                               FontSize="11"
+                               Foreground="{Binding ShellActivityAccentColor}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Border Grid.Column="2"
+                        Classes="badge"
+                        Padding="8,4"
+                        BorderBrush="{Binding ShellActivityAccentColor}"
+                        IsVisible="{Binding ShowShellActivityBadge}">
+                    <TextBlock Text="{Binding ShellActivityBadgeText}"
+                               FontSize="10"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding ShellActivityAccentColor}"/>
+                </Border>
+
+                <Button Grid.Column="3"
+                        Command="{Binding OpenShellSyncHealthCenterCommand}"
+                        Classes="subtle responsive-icon compact"
+                        IsVisible="{Binding ShowShellSyncCenterAction}">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xEA39;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_sync_center}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="4"
+                        Command="{Binding OpenShellOperationJournalCommand}"
+                        Classes="subtle responsive-icon compact">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_journal}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="5"
+                        Command="{Binding OpenShellOperationMonitorCommand}"
+                        Classes="subtle responsive-icon compact">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE9D2;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr main.open_monitor}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
+
+                <Button Grid.Column="6"
+                        Command="{Binding DismissShellActivityStripCommand}"
+                        Classes="subtle icon compact"
+                        Content="&#xE711;"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.RowSpan="4"
+                Classes="loading-overlay"
+                IsVisible="{Binding IsShellBusy}"
+                ZIndex="40">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{Binding ShellBusyTitle}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding ShellBusyDetail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <Grid x:Name="GuidedTourOverlayRoot"
+              Grid.RowSpan="4"
+              IsVisible="{Binding IsGuidedTourVisible}"
+              Background="#B30B1018"
+              ZIndex="50">
+            <Canvas x:Name="GuidedTourCanvas">
+                <Border x:Name="GuidedTourHighlight"
+                        Width="0"
+                        Height="0"
+                        IsVisible="False"
+                        BorderThickness="2"
+                        BorderBrush="{DynamicResource VeyraAccentBrush}"
+                        Background="#14000000"
+                        CornerRadius="18"/>
+
+                <Border x:Name="GuidedTourBubble"
+                        Width="360"
+                        MaxWidth="360"
+                        Classes="card guided-tour-bubble"
+                        Padding="18">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{Binding GuidedTourStepText}"
+                                       Classes="muted"
+                                       FontSize="11"/>
+                            <TextBlock Text="{Binding GuidedTourTitle}"
+                                       FontSize="20"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding GuidedTourDescription}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <WrapPanel Orientation="Horizontal">
+                            <Button Command="{Binding GuidedTourBackCommand}"
+                                    IsEnabled="{Binding CanGuidedTourGoBack}"
+                                    Margin="0,0,8,8"
+                                    Classes="subtle responsive-icon"
+                                    ToolTip.Tip="{loc:Tr common.back}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE72B;"/>
+                                        <TextBlock Classes="button-label" Text="{loc:Tr common.back}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
+                            <Button Command="{Binding GuidedTourSkipCommand}"
+                                    Margin="0,0,8,8"
+                                    Classes="subtle responsive-icon"
+                                    ToolTip.Tip="{loc:Tr common.close}">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                        <TextBlock Classes="button-label" Text="{loc:Tr tour.skip}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+
+                            <Button Command="{Binding GuidedTourNextCommand}"
+                                    Margin="0,0,0,8"
+                                    Classes="primary responsive-icon">
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE72A;"/>
+                                        <TextBlock Classes="button-label" Text="{Binding GuidedTourNextLabel}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </Canvas>
+        </Grid>
+    </Grid>
 </Window>

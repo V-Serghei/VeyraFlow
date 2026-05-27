@@ -1,4 +1,4 @@
-﻿using Veyra.Application.DTOs;
+using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Abstractions.Setup;
 
@@ -6,6 +6,18 @@ public interface IRepositoryRepository
 {
     Task<int> CreateRepositoryAsync(string name, string? description, int directoryId, CancellationToken ct = default);
     Task UpdateRepositoryAsync(int id, string name, string? description, CancellationToken ct = default);
+    Task UpdateRepositoryAsync(
+        int id,
+        string name,
+        string? description,
+        bool autoCaptureFileVersions,
+        bool protectCloudMetadata,
+        IReadOnlyCollection<string> excludedPatterns,
+        RepositoryRetentionPolicyDto retentionPolicy,
+        string syncConflictStrategy,
+        int syncRetryMaxAttempts,
+        int syncRetryBaseDelaySeconds,
+        CancellationToken ct = default);
     Task DeleteRepositoryAsync(int id, CancellationToken ct = default);
     Task RestoreRepositoryAsync(int id, CancellationToken ct = default);
 
@@ -18,5 +30,3 @@ public interface IRepositoryRepository
     /// </summary>
     Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default);
 }
-
-

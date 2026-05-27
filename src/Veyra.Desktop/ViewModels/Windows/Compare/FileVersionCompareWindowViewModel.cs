@@ -1,0 +1,3379 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using MediatR;
+using Microsoft.Extensions.Logging;
+using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Results;
+using Veyra.Application.DTOs;
+using Veyra.Application.Queries.Repository;
+using Veyra.Application.Services.Diff;
+using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Execution;
+using Veyra.Desktop.Services.Preview;
+using Veyra.Desktop.ViewModels.Pages.Explorer;
+
+namespace Veyra.Desktop.ViewModels.Windows;
+
+public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
+{
+    private const int EngineBackedTextDiffMaxLines = 20_000;
+
+    private readonly IServiceScopeExecutor _scopeExecutor;
+    private readonly ILogger<FileVersionCompareWindowViewModel> _log;
+    private readonly ITextDiffEngine _textDiffEngine;
+    private readonly INativeWordCompareService _nativeWordCompare;
+    private readonly IAudioPreviewPlaybackService _audioPlayback;
+    private readonly LocalizationManager _localization = LocalizationManager.Instance;
+    private readonly List<string> _tempPreviewFiles = [];
+    private CancellationTokenSource? _previewCts;
+    private CancellationTokenSource? _imageDiffRenderCts;
+    private FileVersionCompareListItemViewModel? _leftVersion;
+    private FileVersionCompareListItemViewModel? _rightVersion;
+    private bool _isWordSemanticPreview;
+    private PendingBinaryDiffSummaryDto? _lastBinarySummary;
+    private PendingImageDiffPreviewDto? _lastImagePreview;
+    private PendingAudioDiffPreviewDto? _lastAudioPreview;
+    private PendingArchiveDiffPreviewDto? _lastArchivePreview;
+    private readonly List<ArchiveDiffEntryItemViewModel> _allArchiveEntries = [];
+    private bool _isSvgCodePreviewActive;
+    private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+    private int _lastRenderedChangedPixelCount;
+    private double? _lastRenderedChangedPixelRatio;
+    private int _lastRenderedChangedRegionCount;
+    private bool _suspendImageDiffRerender;
+    private readonly Stopwatch _loadingStopwatch = new();
+    private readonly DispatcherTimer _loadingStatusTimer;
+    private readonly DispatcherTimer _audioPlaybackTimer;
+    private bool _suppressAudioSeek;
+
+    private int _repositoryId;
+    private string _repositoryPath = string.Empty;
+    private string _relativePath = string.Empty;
+    private string _displayName = string.Empty;
+    private string? _audioPlaybackStatusKey;
+    private object[] _audioPlaybackStatusArgs = Array.Empty<object>();
+    private ArchiveDiffFilterMode _archiveFilter = ArchiveDiffFilterMode.All;
+
+    public event Action? RequestClose;
+    public event Action? RequestSaveImageDiffPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
+    private string? _errorMessage;
+
+    [ObservableProperty]
+    private string _windowTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _instructionText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoVersions))]
+    private bool _isVersionListLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
+    [NotifyPropertyChangedFor(nameof(IsBusyOverlayVisible))]
+    [NotifyPropertyChangedFor(nameof(CanToggleSvgCodePreview))]
+    private bool _isPreviewLoading;
+
+    [ObservableProperty]
+    private string _loadingTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _loadingDetail = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    [NotifyPropertyChangedFor(nameof(LoadingProgressLabel))]
+    [NotifyPropertyChangedFor(nameof(LoadingStatusLabel))]
+    [NotifyPropertyChangedFor(nameof(HasLoadingStatusLabel))]
+    private double _loadingProgressValue;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDeterminateLoadingProgress))]
+    [NotifyPropertyChangedFor(nameof(LoadingStatusLabel))]
+    [NotifyPropertyChangedFor(nameof(HasLoadingStatusLabel))]
+    private bool _isLoadingProgressIndeterminate;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(LoadingStatusLabel))]
+    [NotifyPropertyChangedFor(nameof(HasLoadingStatusLabel))]
+    private string _loadingElapsedLabel = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBusyOverlayVisible))]
+    [NotifyPropertyChangedFor(nameof(CanOpenNativeWordCompare))]
+    private bool _isOpeningNativeWordCompare;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTextPreview))]
+    [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
+    [NotifyPropertyChangedFor(nameof(IsImagePreview))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPreview))]
+    [NotifyPropertyChangedFor(nameof(IsArchivePreview))]
+    [NotifyPropertyChangedFor(nameof(IsWordRichPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowNoDiffPreviewMessage))]
+    [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
+    [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
+    [NotifyPropertyChangedFor(nameof(CanToggleSvgCodePreview))]
+    [NotifyPropertyChangedFor(nameof(ShowNonImagePreviewToolbar))]
+    private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
+    [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    private Bitmap? _leftImagePreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
+    [NotifyPropertyChangedFor(nameof(HasImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    private Bitmap? _rightImagePreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveImageDiffPreviewCommand))]
+    [NotifyPropertyChangedFor(nameof(HasOverlayImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasAnyImagePreview))]
+    [NotifyPropertyChangedFor(nameof(HasNoImagePreviews))]
+    private Bitmap? _overlayImagePreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioWaveformPreview))]
+    private Bitmap? _audioWaveformPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectrogramPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowAudioSpectralHero))]
+    private Bitmap? _audioSpectrogramPreview;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioSpectralDeltaPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowAudioSpectralHero))]
+    private Bitmap? _audioSpectralDeltaPreview;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StopAudioPlaybackCommand))]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
+    private bool _isAudioPlaybackActive;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    private string _audioPlaybackStatus = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
+    private double _audioPlaybackPositionSeconds;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPlaybackSeekEnabled))]
+    private double _audioPlaybackDurationSeconds;
+
+    [ObservableProperty] private string _leftImageCaption = string.Empty;
+    [ObservableProperty] private string _rightImageCaption = string.Empty;
+    [ObservableProperty] private string _overlayImageCaption = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
+    private double _imageDiffSensitivity = ImageDiffPreviewDefaults.SensitivityPercent;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SplitPositionLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
+    private double _comparisonSplitPercent = ImageDiffPreviewDefaults.SplitPercent;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSplitImageDiffMode))]
+    [NotifyPropertyChangedFor(nameof(IsHeatmapImageDiffMode))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
+    private ImageDiffModeOptionViewModel? _selectedImageDiffMode;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageRegionBoxesLabel))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
+    private bool _showImageDiffRegionBoxes = ImageDiffPreviewDefaults.ShowRegionBoxes;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
+    private bool _showSourceImagePanels = ImageDiffPreviewDefaults.ShowSourceImagePanels;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffSettingsToggleLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
+    private bool _showImageDiffSettings;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ImageDiffDetailsToggleLabel))]
+    private bool _showImageDiffDetails;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNonImagePreviewToolbar))]
+    private bool _showPreviewToolbar;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
+    private bool _isWrapEnabled;
+
+    [ObservableProperty] private string _selectedPairSummary = string.Empty;
+    [ObservableProperty] private string _previewSummary = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowFullFilePreviewPanel))]
+    [NotifyPropertyChangedFor(nameof(ShowFullPreviewTextFallback))]
+    [NotifyPropertyChangedFor(nameof(ShowNoDiffPreviewMessage))]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
+    [NotifyPropertyChangedFor(nameof(FullPreviewToggleLabel))]
+    private bool _isFullFilePreviewMode;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private bool _isFullFilePreviewLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFullFilePreviewContent))]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private string _fullPreviewBeforeText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasFullFilePreviewContent))]
+    [NotifyPropertyChangedFor(nameof(ShowNoFullFilePreviewMessage))]
+    private string _fullPreviewAfterText = string.Empty;
+
+    [ObservableProperty] private string _fullPreviewSummary = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedArchiveEntry))]
+    private ArchiveDiffEntryItemViewModel? _selectedArchiveEntry;
+
+    [ObservableProperty]
+    private ArchiveDiffTreeNodeViewModel? _selectedArchiveTreeNode;
+
+    [ObservableProperty]
+    private string _archiveSearchQuery = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsArchiveListViewEnabled))]
+    [NotifyPropertyChangedFor(nameof(ArchiveViewModeLabel))]
+    private bool _isArchiveTreeViewEnabled;
+
+    public ObservableCollection<FileVersionCompareListItemViewModel> Versions { get; } = [];
+    public ObservableCollection<DiffPreviewRowViewModel> PreviewRows { get; } = [];
+    public ObservableCollection<DiffPreviewRowViewModel> FullPreviewRows { get; } = [];
+    public ObservableCollection<WordSemanticDiffRowViewModel> WordPreviewRows { get; } = [];
+    public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
+    public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
+    public ObservableCollection<AudioChangedSegmentItemViewModel> AudioChangedSegments { get; } = [];
+    public ObservableCollection<ArchiveDiffEntryItemViewModel> ArchiveEntries { get; } = [];
+    public ObservableCollection<ArchiveDiffTreeNodeViewModel> ArchiveTreeRoots { get; } = [];
+
+    public FileVersionCompareWindowViewModel(
+        IServiceScopeExecutor scopeExecutor,
+        ILogger<FileVersionCompareWindowViewModel> log,
+        ITextDiffEngine textDiffEngine,
+        INativeWordCompareService nativeWordCompare,
+        IAudioPreviewPlaybackService audioPlayback)
+    {
+        _scopeExecutor = scopeExecutor;
+        _log = log;
+        _textDiffEngine = textDiffEngine;
+        _nativeWordCompare = nativeWordCompare;
+        _audioPlayback = audioPlayback;
+        _loadingStatusTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, OnLoadingStatusTimerTick);
+        _audioPlaybackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, OnAudioPlaybackTimerTick);
+
+        Versions.CollectionChanged += OnVersionsCollectionChanged;
+        PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
+        FullPreviewRows.CollectionChanged += OnFullPreviewRowsCollectionChanged;
+        WordPreviewRows.CollectionChanged += OnWordPreviewRowsCollectionChanged;
+        PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
+        AudioChangedSegments.CollectionChanged += OnAudioChangedSegmentsCollectionChanged;
+        ArchiveEntries.CollectionChanged += OnArchiveEntriesCollectionChanged;
+        ArchiveTreeRoots.CollectionChanged += OnArchiveTreeRootsCollectionChanged;
+        _localization.LanguageChanged += OnLanguageChanged;
+        _audioPlayback.PlaybackStateChanged += OnAudioPlaybackStateChanged;
+        RefreshLocalizationState();
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLocalizationState();
+    }
+
+    private void RefreshLocalizationState()
+    {
+        WindowTitle = BuildWindowTitle();
+        InstructionText = Loc.T("compare.instructions");
+        OnPropertyChanged(nameof(FullPreviewToggleLabel));
+        OnPropertyChanged(nameof(SvgCodePreviewToggleLabel));
+        OnPropertyChanged(nameof(WrapToggleLabel));
+        OnPropertyChanged(nameof(NativeWordCompareHint));
+        OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
+        OnPropertyChanged(nameof(ImageSensitivityLabel));
+        OnPropertyChanged(nameof(SplitPositionLabel));
+        OnPropertyChanged(nameof(ImageRegionBoxesLabel));
+        OnPropertyChanged(nameof(SourceImagePanelsLabel));
+        OnPropertyChanged(nameof(ImageDiffCompactSummary));
+        OnPropertyChanged(nameof(ImageDiffCompactStateText));
+        OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
+        OnPropertyChanged(nameof(ArchiveAllFilterLabel));
+        OnPropertyChanged(nameof(ArchiveAddedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveRemovedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveChangedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveViewModeLabel));
+        RefreshImageDiffModes();
+        RefreshAudioPlaybackStatusLocalization();
+
+        RefreshVersionsBindings();
+        RefreshSelectedPairSummary();
+
+        if (_leftVersion is not null && _rightVersion is not null && !IsPreviewLoading)
+        {
+            if (_isSvgCodePreviewActive && IsSvgFile)
+                _ = LoadSvgCodePreviewAsync(IsFullFilePreviewMode, CancellationToken.None);
+            else if (IsFullFilePreviewMode)
+                _ = LoadFullFilePreviewAsync();
+            else
+                _ = LoadPreviewAsync(CancellationToken.None);
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(PreviewSummary))
+                PreviewSummary = Loc.T("compare.choose_versions");
+            LeftImageCaption = BuildImageCaption(Loc.T("common.before"), null, null);
+            RightImageCaption = BuildImageCaption(Loc.T("common.after"), null, null);
+            OverlayImageCaption = Loc.T("compare.overlay");
+        }
+    }
+
+    private void RefreshImageDiffModes()
+    {
+        var selectedMode = SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay;
+        ImageDiffModes.Clear();
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Overlay, Loc.T("compare.image_mode.overlay")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Heatmap, Loc.T("compare.image_mode.heatmap")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Split, Loc.T("compare.image_mode.split")));
+        ImageDiffModes.Add(new ImageDiffModeOptionViewModel(ImageDiffVisualizationMode.Composite, Loc.T("compare.image_mode.composite")));
+        SelectedImageDiffMode = ImageDiffModes.FirstOrDefault(x => x.Mode == selectedMode) ?? ImageDiffModes.FirstOrDefault();
+        UpdateImageDiffModeSelection();
+    }
+
+    private string BuildWindowTitle()
+    {
+        return string.IsNullOrWhiteSpace(_displayName)
+            ? Loc.T("compare.window_title")
+            : Loc.F("compare.window_title_with_name", _displayName);
+    }
+
+    partial void OnImageDiffSensitivityChanged(double value)
+    {
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    partial void OnComparisonSplitPercentChanged(double value)
+    {
+        var clamped = Math.Clamp(value, ImageDiffPreviewDefaults.MinSplitPercent, ImageDiffPreviewDefaults.MaxSplitPercent);
+        if (Math.Abs(clamped - value) > 0.001d)
+        {
+            ComparisonSplitPercent = clamped;
+            return;
+        }
+
+        if (_suspendImageDiffRerender)
+            return;
+    }
+
+    partial void OnSelectedImageDiffModeChanged(ImageDiffModeOptionViewModel? value)
+    {
+        OverlayImageCaption = BuildImageOverlayCaption();
+        OnPropertyChanged(nameof(IsSplitImageDiffMode));
+        OnPropertyChanged(nameof(IsHeatmapImageDiffMode));
+        UpdateImageDiffModeSelection();
+
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    [RelayCommand]
+    private void SelectImageDiffMode(ImageDiffModeOptionViewModel? option)
+    {
+        if (option is null)
+            return;
+
+        if (ReferenceEquals(SelectedImageDiffMode, option))
+        {
+            UpdateImageDiffModeSelection();
+            return;
+        }
+
+        SelectedImageDiffMode = option;
+    }
+
+    [RelayCommand]
+    private void ShowAllArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.All);
+
+    [RelayCommand]
+    private void ShowAddedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Added);
+
+    [RelayCommand]
+    private void ShowRemovedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Removed);
+
+    [RelayCommand]
+    private void ShowChangedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Changed);
+
+    [RelayCommand]
+    private void ToggleArchiveTreeView()
+    {
+        IsArchiveTreeViewEnabled = !IsArchiveTreeViewEnabled;
+        RebuildArchiveEntries();
+    }
+
+    partial void OnArchiveSearchQueryChanged(string value)
+        => RebuildArchiveEntries();
+
+    partial void OnSelectedArchiveTreeNodeChanged(ArchiveDiffTreeNodeViewModel? value)
+    {
+        if (value?.Entry is not null)
+            SelectedArchiveEntry = value.Entry;
+    }
+
+    partial void OnShowImageDiffRegionBoxesChanged(bool value)
+    {
+        if (_suspendImageDiffRerender)
+            return;
+
+        _ = ReRenderImageDiffPreviewAsync();
+    }
+
+    partial void OnShowSourceImagePanelsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSourceImagePanelsSection));
+    }
+
+    private async Task ReRenderImageDiffPreviewAsync()
+    {
+        if (PreviewKind != PendingDiffPreviewKind.Image || _lastImagePreview is null)
+            return;
+
+        try
+        {
+            var delayMs = (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
+                ? 18
+                : 80;
+            await Task.Delay(delayMs);
+            await RenderInteractiveImagePreviewAsync(_lastImagePreview, CancellationToken.None);
+            RebuildPreviewMetrics();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogDebug(ex, "Interactive image preview re-render failed.");
+        }
+    }
+
+    private void UpdateImageDiffModeSelection()
+    {
+        foreach (var option in ImageDiffModes)
+            option.IsSelected = ReferenceEquals(option, SelectedImageDiffMode);
+    }
+
+    private void RefreshVersionsBindings()
+    {
+        if (Versions.Count == 0)
+            return;
+
+        var leftId = _leftVersion?.FileVersionId;
+        var rightId = _rightVersion?.FileVersionId;
+        var versions = Versions.ToList();
+        foreach (var version in versions)
+            version.RefreshLocalization();
+
+        _leftVersion = leftId is > 0
+            ? Versions.FirstOrDefault(x => x.FileVersionId == leftId.Value)
+            : null;
+        _rightVersion = rightId is > 0
+            ? Versions.FirstOrDefault(x => x.FileVersionId == rightId.Value)
+            : null;
+        ApplySelectionStates();
+
+        foreach (var entry in _allArchiveEntries)
+            entry.RefreshLocalization();
+
+        RebuildArchiveEntries();
+    }
+
+    public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
+    public bool HasVersions => Versions.Count > 0;
+    public bool HasNoVersions => !IsVersionListLoading && Versions.Count == 0;
+
+    public bool HasPreviewRows => PreviewRows.Count > 0;
+    public bool HasWordPreviewRows => WordPreviewRows.Count > 0;
+    public bool HasPreviewMetrics => PreviewMetrics.Count > 0;
+    public bool IsBusyOverlayVisible => IsPreviewLoading || IsOpeningNativeWordCompare;
+    public bool HasDeterminateLoadingProgress => !IsLoadingProgressIndeterminate;
+    public string LoadingProgressLabel => $"{Math.Clamp(Math.Round(LoadingProgressValue), 0, 100):0}%";
+    public string LoadingStatusLabel => HasDeterminateLoadingProgress ? LoadingProgressLabel : LoadingElapsedLabel;
+    public bool HasLoadingStatusLabel => !string.IsNullOrWhiteSpace(LoadingStatusLabel);
+    public bool IsTextPreview => PreviewKind == PendingDiffPreviewKind.Text && (HasPreviewRows || HasWordPreviewRows);
+    public bool IsWordRichPreview => IsTextPreview && _isWordSemanticPreview && HasWordPreviewRows;
+    public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
+    public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
+    public bool IsAudioPreview => PreviewKind == PendingDiffPreviewKind.Audio;
+    public bool IsArchivePreview => PreviewKind == PendingDiffPreviewKind.Archive;
+    public bool IsSvgFile => string.Equals(Path.GetExtension(_relativePath), ".svg", StringComparison.OrdinalIgnoreCase);
+    public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
+    public bool HasOverlayImagePreview => OverlayImagePreview is not null;
+    public bool HasAnyImagePreview => HasImagePreviews || HasOverlayImagePreview;
+    public bool HasNoImagePreviews => !HasAnyImagePreview;
+    public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
+    public bool HasAudioSpectrogramPreview => AudioSpectrogramPreview is not null;
+    public bool HasAudioSpectralDeltaPreview => AudioSpectralDeltaPreview is not null;
+    public bool ShowAudioSpectralHero => HasAudioSpectrogramPreview || HasAudioSpectralDeltaPreview;
+    public bool HasAudioChangedSegments => AudioChangedSegments.Count > 0;
+    public bool HasArchiveEntries => ArchiveEntries.Count > 0;
+    public bool HasArchiveTreeRoots => ArchiveTreeRoots.Count > 0;
+    public bool HasSelectedArchiveEntry => SelectedArchiveEntry is not null;
+    public bool HasAudioPlaybackStatus => !string.IsNullOrWhiteSpace(AudioPlaybackStatus);
+    public bool IsAudioPlaybackSeekEnabled => AudioPlaybackDurationSeconds > 0.05d;
+    public string AudioPlaybackTimerText =>
+        $"{FormatAudioTime(TimeSpan.FromSeconds(Math.Max(0d, AudioPlaybackPositionSeconds)))} / {FormatAudioTime(TimeSpan.FromSeconds(Math.Max(0d, AudioPlaybackDurationSeconds)))}";
+    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview && !IsArchivePreview;
+    public bool ShowNonImagePreviewToolbar => ShowPreviewToolbar && !IsImagePreview;
+    public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
+    public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
+    public bool ShowSourceImagePanelsSection => false;
+    public bool CanSaveImageDiffPreview => IsImagePreview && HasOverlayImagePreview && _lastRenderedOverlayPngBytes.Length > 0;
+    public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
+    public string ImageDiffCompactSummary => (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
+        ? Loc.F("compare.image_quick_summary_split", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel, SplitPositionLabel)
+        : Loc.F("compare.image_quick_summary", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel);
+    public string ImageDiffCompactStateText => ImageRegionBoxesLabel;
+    public double MinComparisonSplitPercent => ImageDiffPreviewDefaults.MinSplitPercent;
+    public double MaxComparisonSplitPercent => ImageDiffPreviewDefaults.MaxSplitPercent;
+    public string ImageDiffSettingsToggleLabel => ShowImageDiffSettings
+        ? Loc.T("compare.hide_diff_settings")
+        : Loc.T("compare.show_diff_settings");
+    public string ImageDiffDetailsToggleLabel => ShowImageDiffDetails
+        ? Loc.T("compare.hide_details")
+        : Loc.T("compare.show_details");
+    public string SplitPositionLabel => $"{Math.Round(ComparisonSplitPercent):0}%";
+    public string ImageRegionBoxesLabel => ShowImageDiffRegionBoxes
+        ? Loc.T("compare.image_regions.on")
+        : Loc.T("compare.image_regions.off");
+    public string SourceImagePanelsLabel => ShowSourceImagePanels
+        ? Loc.T("compare.source_panels.on")
+        : Loc.T("compare.source_panels.off");
+    public bool HasFullFilePreviewContent
+        => HasFullPreviewRows || !string.IsNullOrWhiteSpace(FullPreviewBeforeText) || !string.IsNullOrWhiteSpace(FullPreviewAfterText);
+    public bool HasFullPreviewRows => FullPreviewRows.Count > 0;
+    public bool ShowDiffRowsPanel => !IsFullFilePreviewMode && HasPreviewRows && !IsWordRichPreview;
+    public bool ShowWordDiffRowsPanel => !IsFullFilePreviewMode && IsWordRichPreview && HasWordPreviewRows;
+    public bool ShowNoDiffPreviewMessage
+        => !IsFullFilePreviewMode
+           && !IsPreviewLoading
+           && !HasPreviewRows
+           && !HasWordPreviewRows
+           && !IsBinaryPreview
+           && !IsImagePreview
+           && !IsAudioPreview
+           && !IsArchivePreview;
+    public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode && !IsWordRichPreview;
+    public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
+    public bool ShowFullPreviewTextFallback => ShowFullFilePreviewPanel && !HasFullPreviewRows;
+    public bool CanToggleFullFilePreview
+        => !IsPreviewLoading
+           && PreviewKind == PendingDiffPreviewKind.Text
+           && !_isWordSemanticPreview
+           && !IsNativeWordPreferredForPreview
+           && _leftVersion is not null
+           && _rightVersion is not null;
+
+    public bool IsArchiveListViewEnabled => !IsArchiveTreeViewEnabled;
+    public string ArchiveViewModeLabel => IsArchiveTreeViewEnabled
+        ? Loc.T("compare.archive_view_list")
+        : Loc.T("compare.archive_view_tree");
+    public string ArchiveAllFilterLabel => BuildArchiveFilterLabel(Loc.T("filter.option.all"), _allArchiveEntries.Count);
+    public string ArchiveAddedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.added"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Added));
+    public string ArchiveRemovedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.removed"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Removed));
+    public string ArchiveChangedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.modified"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Changed));
+    public bool CanToggleSvgCodePreview
+        => IsSvgFile
+           && !IsPreviewLoading
+           && _leftVersion is not null
+           && _rightVersion is not null
+           && _leftVersion.FileVersionId != _rightVersion.FileVersionId;
+
+    public string FullPreviewToggleLabel => IsFullFilePreviewMode
+        ? Loc.T("compare.full_preview.show_changes_only")
+        : Loc.T("compare.full_preview.view_full_file");
+    public string SvgCodePreviewToggleLabel => _isSvgCodePreviewActive
+        ? Loc.T("compare.svg_code.show_visual")
+        : Loc.T("compare.svg_code.show_code");
+    public string WrapToggleLabel => IsWrapEnabled ? Loc.T("compare.wrap.on") : Loc.T("compare.wrap.off");
+
+    public bool CanOpenSourceFileOnDisk => GetSourceFilePath() is not null;
+
+    public bool IsWordDocument => WordSemanticProjection.IsWordOoxmlExtension(Path.GetExtension(_relativePath));
+
+    private void SetSvgCodePreviewActive(bool value)
+    {
+        if (_isSvgCodePreviewActive == value)
+            return;
+
+        _isSvgCodePreviewActive = value;
+        OnPropertyChanged(nameof(SvgCodePreviewToggleLabel));
+        OnPropertyChanged(nameof(CanToggleSvgCodePreview));
+    }
+
+    public bool CanOpenNativeWordCompare
+        => IsWordDocument
+           && !IsOpeningNativeWordCompare
+           && _leftVersion is not null
+           && _rightVersion is not null
+           && _leftVersion.FileVersionId != _rightVersion.FileVersionId;
+
+    public bool IsNativeWordPreferredForPreview
+        => IsWordDocument && _nativeWordCompare.IsAvailable;
+
+    public string NativeWordCompareHint => _nativeWordCompare.IsAvailable
+        ? Loc.T("compare.native_word.hint")
+        : Loc.T("compare.native_word.required");
+
+    public string NativeWordCompareFormattingHint => _nativeWordCompare.IsAvailable
+        ? Loc.T("compare.native_word.hint_formatting")
+        : Loc.T("compare.native_word.required");
+
+    public async Task InitializeAsync(
+        int repositoryId,
+        string repositoryPath,
+        string relativePath,
+        string? fileDisplayName,
+        long? preferredLeftVersionId,
+        long? preferredRightVersionId,
+        CancellationToken ct = default)
+    {
+        var scheduleInitialPreviewLoad = false;
+        long initialLeftVersionId = 0;
+        long initialRightVersionId = 0;
+
+        _repositoryId = repositoryId;
+        _repositoryPath = repositoryPath ?? string.Empty;
+        _relativePath = NormalizeRelativePath(relativePath);
+        SetSvgCodePreviewActive(false);
+
+        var displayName = string.IsNullOrWhiteSpace(fileDisplayName)
+            ? Path.GetFileName(_relativePath)
+            : fileDisplayName;
+        _displayName = displayName ?? string.Empty;
+
+        WindowTitle = BuildWindowTitle();
+
+        SelectedPairSummary = Loc.T("compare.loading_versions");
+        ErrorMessage = null;
+        IsVersionListLoading = true;
+
+        CleanupPreviewResources();
+        SetLoadingState(Loc.T("compare.loading.title"), Loc.T("compare.loading.fetch_versions"), 8);
+
+        Versions.Clear();
+        PreviewRows.Clear();
+        WordPreviewRows.Clear();
+        PreviewMetrics.Clear();
+        PreviewKind = PendingDiffPreviewKind.None;
+        PreviewSummary = Loc.T("compare.preview.pick_both");
+        _isWordSemanticPreview = false;
+        ResetFullPreviewState();
+
+        try
+        {
+            var versions = await SendScopedAsync(
+                new GetFileVersionHistoryQuery(repositoryId, _relativePath, 500),
+                ct);
+
+            var orderedVersions = versions
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .ThenByDescending(v => v.FileVersionId)
+                .ToList();
+            var totalVersionCount = orderedVersions.Count;
+            for (var i = 0; i < totalVersionCount; i++)
+            {
+                var version = orderedVersions[i];
+                Versions.Add(new FileVersionCompareListItemViewModel
+                {
+                    FileVersionId = version.FileVersionId,
+                    VersionOrdinal = totalVersionCount - i,
+                    CreatedAtUtc = version.CreatedAtUtc,
+                    SizeBytes = version.SizeBytes,
+                    IsDeletionMarker = version.IsDeletionMarker,
+                    HasContentBlocks = version.HasContentBlocks
+                });
+            }
+
+            if (Versions.Count == 0)
+            {
+                SelectedPairSummary = Loc.T("compare.no_versions");
+                PreviewSummary = Loc.T("compare.create_snapshot_to_compare");
+                return;
+            }
+
+            _leftVersion = preferredLeftVersionId is > 0
+                ? Versions.FirstOrDefault(v => v.FileVersionId == preferredLeftVersionId.Value)
+                : null;
+
+            _rightVersion = preferredRightVersionId is > 0
+                ? Versions.FirstOrDefault(v => v.FileVersionId == preferredRightVersionId.Value)
+                : null;
+
+            _rightVersion ??= Versions.FirstOrDefault(v => v.IsSelectable);
+            _leftVersion ??= Versions.FirstOrDefault(v => v.IsSelectable && (_rightVersion is null || v.FileVersionId != _rightVersion.FileVersionId));
+
+            ApplySelectionStates();
+            RefreshSelectedPairSummary();
+
+            if (_leftVersion is not null && _rightVersion is not null && _leftVersion.FileVersionId != _rightVersion.FileVersionId)
+            {
+                scheduleInitialPreviewLoad = true;
+                initialLeftVersionId = _leftVersion.FileVersionId;
+                initialRightVersionId = _rightVersion.FileVersionId;
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to initialize version compare window. RepositoryId {RepositoryId}. Path {Path}",
+                repositoryId,
+                _relativePath);
+            ErrorMessage = Loc.T("compare.load_failed");
+            SelectedPairSummary = Loc.T("compare.unable_to_load_versions");
+        }
+        finally
+        {
+            IsVersionListLoading = false;
+            if (!scheduleInitialPreviewLoad || ct.IsCancellationRequested)
+                ClearLoadingState();
+            OnPropertyChanged(nameof(CanOpenSourceFileOnDisk));
+            OnPropertyChanged(nameof(IsWordDocument));
+            OnPropertyChanged(nameof(IsSvgFile));
+            OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+            OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
+            OnPropertyChanged(nameof(NativeWordCompareHint));
+            OnPropertyChanged(nameof(NativeWordCompareFormattingHint));
+            OnPropertyChanged(nameof(CanToggleSvgCodePreview));
+        }
+
+        if (scheduleInitialPreviewLoad && !ct.IsCancellationRequested)
+            _ = QueueInitialPreviewLoadAsync(initialLeftVersionId, initialRightVersionId, ct);
+    }
+
+    public void SelectVersion(FileVersionCompareListItemViewModel item, bool selectRightSide)
+    {
+        if (item is null)
+            return;
+
+        if (!item.IsSelectable)
+        {
+            ErrorMessage = Loc.T("compare.version.not_comparable");
+            return;
+        }
+
+        ErrorMessage = null;
+
+        if (selectRightSide)
+            _rightVersion = item;
+        else
+            _leftVersion = item;
+
+        ApplySelectionStates();
+        RefreshSelectedPairSummary();
+        OnPropertyChanged(nameof(CanOpenNativeWordCompare));
+        OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
+        OnPropertyChanged(nameof(CanToggleSvgCodePreview));
+
+        if (_isSvgCodePreviewActive && IsSvgFile)
+            _ = LoadSvgCodePreviewAsync(IsFullFilePreviewMode, CancellationToken.None);
+        else
+            _ = LoadPreviewAsync(CancellationToken.None);
+    }
+
+    [RelayCommand]
+    private void ToggleWrapMode()
+    {
+        IsWrapEnabled = !IsWrapEnabled;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffRegionBoxes()
+    {
+        ShowImageDiffRegionBoxes = !ShowImageDiffRegionBoxes;
+    }
+
+    [RelayCommand]
+    private void ToggleShowSourceImagePanels()
+    {
+        ShowSourceImagePanels = !ShowSourceImagePanels;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffSettings()
+    {
+        ShowImageDiffSettings = !ShowImageDiffSettings;
+        if (ShowImageDiffSettings)
+            ShowPreviewToolbar = false;
+    }
+
+    public void HideImageDiffSettingsPane()
+    {
+        ShowImageDiffSettings = false;
+        ShowPreviewToolbar = false;
+    }
+
+    [RelayCommand]
+    private void ToggleShowImageDiffDetails()
+    {
+        ShowImageDiffDetails = !ShowImageDiffDetails;
+    }
+
+    [RelayCommand]
+    private void ToggleImagePreviewToolbar()
+    {
+        ShowPreviewToolbar = !ShowPreviewToolbar;
+        if (ShowPreviewToolbar)
+            ShowImageDiffSettings = false;
+    }
+
+    [RelayCommand]
+    private async Task ResetImageDiffSettingsAsync()
+    {
+        _suspendImageDiffRerender = true;
+        try
+        {
+            SelectedImageDiffMode = ImageDiffModes.FirstOrDefault(x => x.Mode == ImageDiffVisualizationMode.Overlay) ?? ImageDiffModes.FirstOrDefault();
+            ImageDiffSensitivity = ImageDiffPreviewDefaults.SensitivityPercent;
+            ComparisonSplitPercent = ImageDiffPreviewDefaults.SplitPercent;
+            ShowImageDiffRegionBoxes = ImageDiffPreviewDefaults.ShowRegionBoxes;
+            ShowSourceImagePanels = ImageDiffPreviewDefaults.ShowSourceImagePanels;
+            ShowImageDiffDetails = false;
+        }
+        finally
+        {
+            _suspendImageDiffRerender = false;
+        }
+
+        if (IsImagePreview)
+            await ReRenderImageDiffPreviewAsync();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSaveImageDiffPreview))]
+    private void SaveImageDiffPreview()
+    {
+        RequestSaveImageDiffPreview?.Invoke();
+    }
+
+    [RelayCommand]
+    private async Task ToggleFullFilePreviewAsync()
+    {
+        if (!CanToggleFullFilePreview)
+            return;
+
+        if (IsFullFilePreviewMode)
+        {
+            IsFullFilePreviewMode = false;
+            if (_isSvgCodePreviewActive && IsSvgFile)
+                await LoadSvgCodePreviewAsync(showFullFileMode: false, CancellationToken.None);
+            else
+                await LoadPreviewAsync(CancellationToken.None);
+            return;
+        }
+
+        if (_isSvgCodePreviewActive && IsSvgFile)
+        {
+            await LoadSvgCodePreviewAsync(showFullFileMode: true, CancellationToken.None);
+            return;
+        }
+
+        await LoadFullFilePreviewAsync();
+    }
+
+    [RelayCommand]
+    private async Task ToggleSvgCodePreviewAsync()
+    {
+        if (!CanToggleSvgCodePreview)
+            return;
+
+        if (_isSvgCodePreviewActive)
+        {
+            SetSvgCodePreviewActive(false);
+            IsFullFilePreviewMode = false;
+            await LoadPreviewAsync(CancellationToken.None);
+            return;
+        }
+
+        await LoadSvgCodePreviewAsync(showFullFileMode: false, CancellationToken.None);
+    }
+
+    [RelayCommand]
+    private void OpenSourceFile()
+    {
+        var fullPath = GetSourceFilePath();
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            ErrorMessage = Loc.T("compare.source_file.unavailable");
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            ErrorMessage = Loc.T("compare.source_file.missing");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo { FileName = fullPath, UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void OpenSourceFileInExplorer()
+    {
+        var fullPath = GetSourceFilePath();
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            ErrorMessage = Loc.T("compare.source_file.unavailable");
+            return;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            ErrorMessage = Loc.T("compare.source_file.missing");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"/select,\"{fullPath}\"",
+            UseShellExecute = true
+        });
+    }
+
+    [RelayCommand]
+    private Task OpenNativeWordCompareAsync()
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.ContentOnly, Loc.T("compare.native_word.opened_content"));
+
+    [RelayCommand]
+    private Task OpenNativeWordCompareWithFormattingAsync()
+        => OpenNativeWordCompareCoreAsync(NativeWordCompareOptions.WithFormatting, Loc.T("compare.native_word.opened_formatting"));
+
+    [RelayCommand]
+    private Task PlayBeforeAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioAsync()
+        => PlayAudioPreviewAsync(playAfter: true);
+
+    [RelayCommand]
+    private Task PlayDifferenceAudioAsync()
+        => PlayAudioDifferenceAsync();
+
+    [RelayCommand]
+    private Task PlayBeforeAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: false);
+
+    [RelayCommand]
+    private Task PlayAfterAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => PlayAudioSegmentAsync(segment, playAfter: true);
+
+    [RelayCommand]
+    private Task LoopAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment)
+        => LoopAudioSegmentCoreAsync(segment);
+
+    [RelayCommand(CanExecute = nameof(IsAudioPlaybackActive))]
+    private void StopAudioPlayback()
+    {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+    }
+
+    private async Task OpenNativeWordCompareCoreAsync(NativeWordCompareOptions options, string successMessage)
+    {
+        if (!CanOpenNativeWordCompare || _leftVersion is null || _rightVersion is null)
+            return;
+
+        if (!_nativeWordCompare.IsAvailable)
+        {
+            ErrorMessage = Loc.T("compare.native_word.required");
+            return;
+        }
+
+        ErrorMessage = null;
+        IsOpeningNativeWordCompare = true;
+        SetLoadingState(
+            Loc.T("compare.word_loading_title"),
+            Loc.T("compare.word_loading_prepare_left"),
+            0,
+            indeterminate: true,
+            restartElapsed: true);
+
+        var extension = Path.GetExtension(_relativePath);
+        var tempRoot = Path.Combine(Path.GetTempPath(), "VeyraFlow", "word-native-compare");
+        Directory.CreateDirectory(tempRoot);
+        CleanupStaleNativeWordCompareFiles(tempRoot);
+
+        var leftTemp = Path.Combine(tempRoot, $"{Guid.NewGuid():N}.left{extension}");
+        var rightTemp = Path.Combine(tempRoot, $"{Guid.NewGuid():N}.right{extension}");
+
+        try
+        {
+            var leftRestore = await RunInBackgroundAsync(
+                token => SendScopedAsync(new RestoreFileVersionCommand(
+                    _repositoryId,
+                    _relativePath,
+                    _leftVersion.FileVersionId,
+                    OverwriteCurrent: false,
+                    TargetPath: leftTemp), token),
+                CancellationToken.None);
+
+            if (!leftRestore.Success || string.IsNullOrWhiteSpace(leftRestore.Value))
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(leftRestore.Error, "compare.native_word.prepare_left_failed");
+                return;
+            }
+
+            SetLoadingState(
+                Loc.T("compare.word_loading_title"),
+                Loc.T("compare.word_loading_prepare_right"),
+                0,
+                indeterminate: true);
+
+            var rightRestore = await RunInBackgroundAsync(
+                token => SendScopedAsync(new RestoreFileVersionCommand(
+                    _repositoryId,
+                    _relativePath,
+                    _rightVersion.FileVersionId,
+                    OverwriteCurrent: false,
+                    TargetPath: rightTemp), token),
+                CancellationToken.None);
+
+            if (!rightRestore.Success || string.IsNullOrWhiteSpace(rightRestore.Value))
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(rightRestore.Error, "compare.native_word.prepare_right_failed");
+                return;
+            }
+
+            SetLoadingState(
+                Loc.T("compare.word_loading_title"),
+                Loc.T("compare.word_loading_launch"),
+                0,
+                indeterminate: true);
+            var launch = await _nativeWordCompare.OpenCompareAsync(leftRestore.Value, rightRestore.Value, options);
+            if (!launch.Success)
+            {
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(launch.ErrorMessage, "compare.native_word.open_failed");
+                return;
+            }
+
+            PreviewSummary = successMessage;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to open native Word compare. RepositoryId {RepositoryId}. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _repositoryId,
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+
+            ErrorMessage = Loc.T("compare.native_word.launch_failed");
+        }
+        finally
+        {
+            IsOpeningNativeWordCompare = false;
+            ClearLoadingState();
+            OnPropertyChanged(nameof(IsNativeWordPreferredForPreview));
+        }
+    }
+
+    private async Task PlayAudioPreviewAsync(bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus(playAfter ? "compare.audio_playing_after" : "compare.audio_playing_before");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio preview playback. Path {Path}", audioPath);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioDifferenceAsync()
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(audioPath);
+            SetAudioPlaybackStatus("compare.audio_playing_difference");
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio difference playback. Path {Path}", audioPath);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task PlayAudioSegmentAsync(AudioChangedSegmentItemViewModel? segment, bool playAfter)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = playAfter
+            ? audioPreview?.CurrentAudioPath
+            : audioPreview?.BaselineAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)));
+
+            SetAudioPlaybackStatus(
+                playAfter ? "compare.audio_playing_segment_after" : "compare.audio_playing_segment_before",
+                segment.SegmentLabel);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio segment playback. Path {Path}. Segment {Segment}", audioPath, segment.SegmentLabel);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private async Task LoopAudioSegmentCoreAsync(AudioChangedSegmentItemViewModel? segment)
+    {
+        var audioPreview = _lastAudioPreview;
+        var audioPath = audioPreview?.DifferenceAudioPath;
+
+        if (segment is null || audioPreview is null || string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath))
+            return;
+
+        try
+        {
+            await _audioPlayback.PlayAsync(
+                audioPath,
+                TimeSpan.FromSeconds(Math.Max(0d, segment.StartSeconds)),
+                TimeSpan.FromSeconds(Math.Max(0.05d, segment.DurationSeconds)),
+                loop: true);
+
+            SetAudioPlaybackStatus("compare.audio_looping_segment_difference", segment.SegmentLabel);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to start audio segment loop playback. Path {Path}. Segment {Segment}", audioPath, segment.SegmentLabel);
+            ErrorMessage = Loc.T("compare.audio_playback_failed");
+        }
+    }
+
+    private void OnAudioPlaybackStateChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_audioPlayback.IsPlaying)
+            {
+                ClearAudioPlaybackStatus();
+            }
+            else
+            {
+                IsAudioPlaybackActive = true;
+                StartAudioPlaybackUi();
+            }
+        });
+    }
+
+    private void SetAudioPlaybackStatus(string localizationKey, params object[] args)
+    {
+        _audioPlaybackStatusKey = localizationKey;
+        _audioPlaybackStatusArgs = args;
+        AudioPlaybackStatus = args.Length == 0
+            ? Loc.T(localizationKey)
+            : Loc.F(localizationKey, args);
+        IsAudioPlaybackActive = true;
+        StartAudioPlaybackUi();
+    }
+
+    private void ClearAudioPlaybackStatus()
+    {
+        _audioPlaybackStatusKey = null;
+        _audioPlaybackStatusArgs = Array.Empty<object>();
+        AudioPlaybackStatus = string.Empty;
+        IsAudioPlaybackActive = false;
+        StopAudioPlaybackUi();
+    }
+
+    partial void OnAudioPlaybackPositionSecondsChanged(double value)
+    {
+        if (_suppressAudioSeek || !IsAudioPlaybackSeekEnabled)
+            return;
+
+        _audioPlayback.Seek(TimeSpan.FromSeconds(Math.Clamp(value, 0d, AudioPlaybackDurationSeconds)));
+        UpdateAudioPlaybackPositionState();
+    }
+
+    private void OnAudioPlaybackTimerTick(object? sender, EventArgs e)
+        => UpdateAudioPlaybackPositionState();
+
+    private void StartAudioPlaybackUi()
+    {
+        UpdateAudioPlaybackPositionState();
+        if (!_audioPlaybackTimer.IsEnabled)
+            _audioPlaybackTimer.Start();
+    }
+
+    private void StopAudioPlaybackUi()
+    {
+        _audioPlaybackTimer.Stop();
+        _suppressAudioSeek = true;
+        try
+        {
+            AudioPlaybackPositionSeconds = 0d;
+            AudioPlaybackDurationSeconds = 0d;
+        }
+        finally
+        {
+            _suppressAudioSeek = false;
+        }
+    }
+
+    private void UpdateAudioPlaybackPositionState()
+    {
+        _suppressAudioSeek = true;
+        try
+        {
+            AudioPlaybackDurationSeconds = Math.Max(0d, _audioPlayback.TotalTime.TotalSeconds);
+            var maxPosition = Math.Max(0d, AudioPlaybackDurationSeconds);
+            AudioPlaybackPositionSeconds = Math.Clamp(_audioPlayback.CurrentTime.TotalSeconds, 0d, maxPosition);
+        }
+        finally
+        {
+            _suppressAudioSeek = false;
+        }
+    }
+
+    private static string FormatAudioTime(TimeSpan value)
+        => value.TotalHours >= 1d
+            ? value.ToString(@"h\:mm\:ss")
+            : value.ToString(@"m\:ss");
+
+    private void RefreshAudioPlaybackStatusLocalization()
+    {
+        if (IsAudioPlaybackActive && !string.IsNullOrWhiteSpace(_audioPlaybackStatusKey))
+        {
+            AudioPlaybackStatus = _audioPlaybackStatusArgs.Length == 0
+                ? Loc.T(_audioPlaybackStatusKey)
+                : Loc.F(_audioPlaybackStatusKey, _audioPlaybackStatusArgs);
+        }
+        else if (!IsAudioPlaybackActive)
+        {
+            AudioPlaybackStatus = string.Empty;
+        }
+    }
+
+    [RelayCommand]
+    private void Close()
+    {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+        RequestClose?.Invoke();
+    }
+
+    public byte[] GetCurrentImageDiffPreviewPngBytes()
+        => _lastRenderedOverlayPngBytes.Length == 0
+            ? Array.Empty<byte>()
+            : _lastRenderedOverlayPngBytes.ToArray();
+
+    public DetachedImagePreviewRequest? BuildDetachedImagePreviewRequest()
+    {
+        if (!IsImagePreview)
+            return null;
+
+        var overlayBytes = GetCurrentImageDiffPreviewPngBytes();
+        var leftPath = _lastImagePreview?.BaselineImagePath;
+        var rightPath = _lastImagePreview?.CurrentImagePath;
+        var hasSplitSource = !string.IsNullOrWhiteSpace(leftPath) && !string.IsNullOrWhiteSpace(rightPath);
+
+        if (overlayBytes.Length == 0 && !hasSplitSource)
+            return null;
+
+        var previewTitle = string.IsNullOrWhiteSpace(OverlayImageCaption)
+            ? Loc.T("compare.window_title")
+            : OverlayImageCaption;
+
+        return new DetachedImagePreviewRequest
+        {
+            Title = previewTitle,
+            LeftImagePath = leftPath,
+            RightImagePath = rightPath,
+            OverlayPngBytes = overlayBytes,
+            IsSplitMode = IsSplitImageDiffMode && hasSplitSource,
+            InitialSplitPercent = ComparisonSplitPercent
+        };
+    }
+
+    public string BuildSuggestedImageDiffFileName()
+    {
+        var baseName = string.IsNullOrWhiteSpace(_displayName)
+            ? "image-diff"
+            : Path.GetFileNameWithoutExtension(_displayName);
+
+        if (string.IsNullOrWhiteSpace(baseName))
+            baseName = "image-diff";
+
+        var modeSuffix = (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) switch
+        {
+            ImageDiffVisualizationMode.Heatmap => "heatmap",
+            ImageDiffVisualizationMode.Split => "split",
+            ImageDiffVisualizationMode.Composite => "composite",
+            _ => "overlay"
+        };
+
+        return $"{baseName}-diff-{modeSuffix}.png";
+    }
+
+    public async Task SaveCurrentImageDiffPreviewAsync(string outputPath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+            return;
+
+        if (_lastImagePreview is not null)
+        {
+            var renderResult = await TryRenderCurrentImageDiffAsync(ct);
+            if (renderResult is not null)
+            {
+                _lastRenderedOverlayPngBytes = renderResult.PngBytes;
+                _lastRenderedChangedPixelCount = renderResult.ChangedPixelCount;
+                _lastRenderedChangedPixelRatio = renderResult.ChangedPixelRatio;
+                _lastRenderedChangedRegionCount = renderResult.ChangedRegionCount;
+            }
+        }
+
+        if (_lastRenderedOverlayPngBytes.Length == 0)
+        {
+            ErrorMessage = Loc.T("compare.image_save_missing");
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
+
+            await File.WriteAllBytesAsync(outputPath, _lastRenderedOverlayPngBytes, ct);
+            ErrorMessage = null;
+            PreviewSummary = Loc.F("compare.image_save_success", Path.GetFileName(outputPath));
+            _log.LogInformation(
+                "Saved interactive image diff preview. RepositoryId {RepositoryId}. Path {Path}. Output {Output}",
+                _repositoryId,
+                _relativePath,
+                outputPath);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(
+                ex,
+                "Failed to save interactive image diff preview. RepositoryId {RepositoryId}. Path {Path}. Output {Output}",
+                _repositoryId,
+                _relativePath,
+                outputPath);
+            ErrorMessage = Loc.T("compare.image_save_failed");
+        }
+    }
+
+    public async Task RefreshInteractiveImageDiffPreviewAsync(CancellationToken ct = default)
+    {
+        if (!IsImagePreview || _lastImagePreview is null)
+            return;
+
+        await RenderInteractiveImagePreviewAsync(_lastImagePreview, ct);
+        RebuildPreviewMetrics();
+    }
+
+    public void CleanupPreviewResources()
+    {
+        _previewCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+        ReleasePreviewResources();
+    }
+
+    private async Task QueueInitialPreviewLoadAsync(long leftVersionId, long rightVersionId, CancellationToken ct)
+    {
+        await Task.Yield();
+        if (ct.IsCancellationRequested)
+            return;
+
+        if (_leftVersion?.FileVersionId != leftVersionId || _rightVersion?.FileVersionId != rightVersionId)
+            return;
+
+        await LoadPreviewAsync(ct);
+    }
+
+    private async Task LoadPreviewAsync(CancellationToken externalCt)
+    {
+        _previewCts?.Cancel();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+        _previewCts = cts;
+        SetSvgCodePreviewActive(false);
+
+        if (_leftVersion is null || _rightVersion is null)
+        {
+            ResetPreview(Loc.T("compare.preview.pick_both"));
+            return;
+        }
+
+        if (_leftVersion.FileVersionId == _rightVersion.FileVersionId)
+        {
+            ResetPreview(Loc.T("compare.preview.select_two_different"));
+            return;
+        }
+
+        ErrorMessage = null;
+        IsPreviewLoading = true;
+        PreviewSummary = Loc.F("compare.preview.building", _leftVersion.VersionName, _rightVersion.VersionName);
+        PreviewKind = PendingDiffPreviewKind.None;
+        ResetFullPreviewState();
+        ReleasePreviewResources();
+        SetLoadingState(
+            Loc.T("compare.loading.title"),
+            Loc.T("compare.loading.fetch"),
+            0,
+            indeterminate: true,
+            restartElapsed: true);
+
+        try
+        {
+            OperationResult<PendingFileDiffPreviewDto> result = await RunInBackgroundAsync(
+                token => SendScopedAsync(
+                    new GetFileVersionDiffPreviewQuery(_leftVersion.FileVersionId, _rightVersion.FileVersionId, 4000),
+                    token),
+                cts.Token);
+
+            if (cts.IsCancellationRequested)
+                return;
+
+            if (!result.Success || result.Value is null)
+            {
+                ResetPreview(UserFacingMessageLocalizer.LocalizeOrFallback(result.Error, "compare.preview.build_failed"));
+                return;
+            }
+
+            var preview = result.Value;
+            if (!preview.IsAvailable)
+            {
+                ResetPreview(preview.Message);
+                return;
+            }
+
+            switch (preview.Kind)
+            {
+                case PendingDiffPreviewKind.Text:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.text"),
+                        0,
+                        indeterminate: true);
+                    PreviewRows.Clear();
+                    WordPreviewRows.Clear();
+                    _isWordSemanticPreview = false;
+
+                    if (WordSemanticDiffBuilder.LooksLikeSemanticWordDiff(preview.Lines))
+                    {
+                        foreach (var row in WordSemanticDiffBuilder.Build(preview.Lines, preview.Hunks))
+                            WordPreviewRows.Add(row);
+
+                        _isWordSemanticPreview = WordPreviewRows.Count > 0;
+                    }
+
+                    // Fallback to regular diff rows when semantic Word layout is too noisy or empty.
+                    if (!_isWordSemanticPreview)
+                    {
+                        foreach (var row in BuildDiffPreviewRows(preview.Lines, preview.Hunks))
+                            PreviewRows.Add(row);
+                    }
+
+                    PreviewKind = PendingDiffPreviewKind.Text;
+                    var previewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.F(
+                            preview.IsTruncated ? "compare.diff_line_summary_truncated" : "compare.diff_line_summary",
+                            preview.AddedLines,
+                            preview.RemovedLines)
+                        : preview.Message;
+                    PreviewSummary = IsNativeWordPreferredForPreview
+                        ? $"{previewSummary} {Loc.T("compare.preview.use_word_native")}"
+                        : previewSummary;
+                    break;
+
+                case PendingDiffPreviewKind.Binary:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.binary"),
+                        0,
+                        indeterminate: true);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = null;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
+                    _lastRenderedChangedPixelCount = 0;
+                    _lastRenderedChangedPixelRatio = null;
+                    _lastRenderedChangedRegionCount = 0;
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Binary;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.binary_ready")
+                        : preview.Message;
+                    break;
+
+                case PendingDiffPreviewKind.Image:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.images"),
+                        0,
+                        indeterminate: true);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = preview.ImagePreview;
+                    _lastAudioPreview = null;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
+                    await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.render"),
+                        0,
+                        indeterminate: true);
+                    await RenderInteractiveImagePreviewAsync(preview.ImagePreview, cts.Token);
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.finalize"),
+                        0,
+                        indeterminate: true);
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Image;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.image_ready")
+                        : preview.Message;
+                    break;
+
+                case PendingDiffPreviewKind.Audio:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.audio"),
+                        0,
+                        indeterminate: true);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = preview.AudioPreview;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
+                    await LoadAudioPreviewAsync(preview.AudioPreview, cts.Token);
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.finalize"),
+                        0,
+                        indeterminate: true);
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Audio;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.audio_ready")
+                        : preview.Message;
+                    break;
+
+                case PendingDiffPreviewKind.Archive:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.archive"),
+                        0,
+                        indeterminate: true);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = null;
+                    _lastArchivePreview = preview.ArchivePreview;
+                    _allArchiveEntries.Clear();
+                    ArchiveSearchQuery = string.Empty;
+                    if (preview.ArchivePreview is not null)
+                    {
+                        _allArchiveEntries.AddRange(preview.ArchivePreview.Entries
+                            .Select(dto => new ArchiveDiffEntryItemViewModel(dto))
+                            .OrderBy(x => x.ChangeKind == PendingArchiveEntryChangeKind.Unchanged ? 1 : 0)
+                            .ThenBy(x => x.EntryPath, StringComparer.OrdinalIgnoreCase)
+                            .ThenBy(x => x.EntryPath, StringComparer.Ordinal));
+                    }
+
+                    _archiveFilter = ArchiveDiffFilterMode.All;
+                    RebuildArchiveEntries();
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Archive;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.archive_ready")
+                        : preview.Message;
+                    break;
+
+                default:
+                    ResetPreview(Loc.T("compare.preview.unsupported"));
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load file-version preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+            ResetPreview(Loc.T("compare.preview.load_failed"));
+        }
+        finally
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                IsPreviewLoading = false;
+                ClearLoadingState();
+            }
+
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        }
+    }
+
+    private async Task LoadSvgCodePreviewAsync(bool showFullFileMode, CancellationToken externalCt)
+    {
+        if (!IsSvgFile || _leftVersion is null || _rightVersion is null)
+            return;
+
+        _previewCts?.Cancel();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(externalCt);
+        _previewCts = cts;
+
+        SetSvgCodePreviewActive(true);
+        ReleasePreviewResources();
+        IsFullFilePreviewMode = showFullFileMode;
+        IsPreviewLoading = true;
+        IsFullFilePreviewLoading = showFullFileMode;
+        FullPreviewBeforeText = string.Empty;
+        FullPreviewAfterText = string.Empty;
+        FullPreviewRows.Clear();
+        FullPreviewSummary = string.Empty;
+        PreviewRows.Clear();
+        WordPreviewRows.Clear();
+        ErrorMessage = null;
+        PreviewSummary = Loc.F("compare.preview.building", _leftVersion.VersionName, _rightVersion.VersionName);
+        SetLoadingState(
+            Loc.T("compare.loading.title"),
+            Loc.T(showFullFileMode ? "compare.loading.svg_code_full" : "compare.loading.svg_code"),
+            0,
+            indeterminate: true,
+            restartElapsed: true);
+
+        try
+        {
+            var before = await RunInBackgroundAsync(
+                token => SendScopedAsync(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000), token),
+                cts.Token);
+            if (cts.IsCancellationRequested)
+                return;
+
+            var after = await RunInBackgroundAsync(
+                token => SendScopedAsync(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000), token),
+                cts.Token);
+            if (cts.IsCancellationRequested)
+                return;
+
+            SetLoadingState(
+                Loc.T("compare.loading.title"),
+                Loc.T("compare.loading.finalize"),
+                0,
+                indeterminate: true);
+
+            if (showFullFileMode)
+            {
+                var summaryParts = new List<string>(2);
+
+                if (before.Success && before.Value is not null)
+                {
+                    FullPreviewBeforeText = before.Value.Content;
+                    summaryParts.Add(Loc.F(
+                        "compare.full_preview.before_size",
+                        FormatBytes(before.Value.SizeBytes),
+                        before.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
+                }
+                else
+                {
+                    FullPreviewBeforeText = $"{Loc.T("compare.full_preview.before_unavailable")}.{Environment.NewLine}{Environment.NewLine}{before.Error}";
+                    summaryParts.Add(Loc.T("compare.full_preview.before_unavailable_short"));
+                }
+
+                if (after.Success && after.Value is not null)
+                {
+                    FullPreviewAfterText = after.Value.Content;
+                    summaryParts.Add(Loc.F(
+                        "compare.full_preview.after_size",
+                        FormatBytes(after.Value.SizeBytes),
+                        after.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
+                }
+                else
+                {
+                    FullPreviewAfterText = $"{Loc.T("compare.full_preview.after_unavailable")}.{Environment.NewLine}{Environment.NewLine}{after.Error}";
+                    summaryParts.Add(Loc.T("compare.full_preview.after_unavailable_short"));
+                }
+
+                if (before.Success && before.Value is not null && after.Success && after.Value is not null)
+                {
+                    foreach (var row in await BuildFullPreviewRowsAsync(before.Value.Content, after.Value.Content, cts.Token))
+                        FullPreviewRows.Add(row);
+                }
+
+                FullPreviewSummary = string.Join(" | ", summaryParts);
+                PreviewKind = PendingDiffPreviewKind.Text;
+                PreviewSummary = Loc.T("compare.full_preview.ready");
+                return;
+            }
+
+            if (!before.Success || before.Value is null || !after.Success || after.Value is null)
+            {
+                var errors = new[]
+                    {
+                        before.Success ? null : before.Error,
+                        after.Success ? null : after.Error
+                    }
+                    .Where(static x => !string.IsNullOrWhiteSpace(x))
+                    .Cast<string>()
+                    .ToArray();
+
+                ResetPreview(errors.Length > 0
+                    ? string.Join(Environment.NewLine, errors)
+                    : Loc.T("compare.preview.load_failed"));
+                return;
+            }
+
+            var diff = await BuildEngineBackedTextDiffAsync(before.Value.Content, after.Value.Content, cts.Token);
+            foreach (var row in BuildDiffPreviewRows(diff.Lines, diff.Hunks))
+                PreviewRows.Add(row);
+
+            PreviewKind = PendingDiffPreviewKind.Text;
+            PreviewSummary = Loc.F(
+                "compare.preview.svg_code_ready",
+                diff.AddedLines,
+                diff.RemovedLines);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load SVG code preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+            ResetPreview(Loc.T("compare.preview.load_failed"));
+        }
+        finally
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                IsPreviewLoading = false;
+                IsFullFilePreviewLoading = false;
+                ClearLoadingState();
+            }
+
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+            OnPropertyChanged(nameof(CanToggleSvgCodePreview));
+        }
+    }
+
+    private async Task LoadFullFilePreviewAsync()
+    {
+        if (_leftVersion is null || _rightVersion is null)
+            return;
+
+        _previewCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _previewCts = cts;
+
+        IsFullFilePreviewMode = true;
+        IsPreviewLoading = true;
+        IsFullFilePreviewLoading = true;
+        FullPreviewBeforeText = string.Empty;
+        FullPreviewAfterText = string.Empty;
+        FullPreviewRows.Clear();
+        FullPreviewSummary = string.Empty;
+        PreviewSummary = Loc.F("compare.full_preview.loading", _leftVersion.VersionName, _rightVersion.VersionName);
+        ErrorMessage = null;
+        SetLoadingState(
+            Loc.T("compare.loading.title"),
+            Loc.T("compare.loading.full_text"),
+            0,
+            indeterminate: true,
+            restartElapsed: true);
+
+        try
+        {
+            var beforeTask = RunInBackgroundAsync(
+                token => SendScopedAsync(new GetFileVersionTextContentQuery(_leftVersion.FileVersionId, 4_000_000), token),
+                cts.Token);
+            var before = await beforeTask;
+            if (cts.IsCancellationRequested)
+                return;
+
+            SetLoadingState(
+                Loc.T("compare.loading.title"),
+                Loc.T("compare.loading.full_text"),
+                0,
+                indeterminate: true);
+
+            var afterTask = RunInBackgroundAsync(
+                token => SendScopedAsync(new GetFileVersionTextContentQuery(_rightVersion.FileVersionId, 4_000_000), token),
+                cts.Token);
+            var after = await afterTask;
+            if (cts.IsCancellationRequested)
+                return;
+
+            SetLoadingState(
+                Loc.T("compare.loading.title"),
+                Loc.T("compare.loading.finalize"),
+                0,
+                indeterminate: true);
+
+            var summaryParts = new List<string>(2);
+
+            if (before.Success && before.Value is not null)
+            {
+                FullPreviewBeforeText = before.Value.Content;
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.before_size",
+                    FormatBytes(before.Value.SizeBytes),
+                    before.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
+            }
+            else
+            {
+                FullPreviewBeforeText = $"{Loc.T("compare.full_preview.before_unavailable")}.{Environment.NewLine}{Environment.NewLine}{before.Error}";
+                summaryParts.Add(Loc.T("compare.full_preview.before_unavailable_short"));
+            }
+
+            if (after.Success && after.Value is not null)
+            {
+                FullPreviewAfterText = after.Value.Content;
+                summaryParts.Add(Loc.F(
+                    "compare.full_preview.after_size",
+                    FormatBytes(after.Value.SizeBytes),
+                    after.Value.IsTruncated ? Loc.T("compare.full_preview.truncated_suffix") : string.Empty));
+            }
+            else
+            {
+                FullPreviewAfterText = $"{Loc.T("compare.full_preview.after_unavailable")}.{Environment.NewLine}{Environment.NewLine}{after.Error}";
+                summaryParts.Add(Loc.T("compare.full_preview.after_unavailable_short"));
+            }
+
+            if (before.Success && before.Value is not null && after.Success && after.Value is not null)
+            {
+                foreach (var row in await BuildFullPreviewRowsAsync(before.Value.Content, after.Value.Content, cts.Token))
+                    FullPreviewRows.Add(row);
+            }
+
+            FullPreviewSummary = string.Join(" | ", summaryParts);
+            PreviewKind = PendingDiffPreviewKind.Text;
+            PreviewSummary = Loc.T("compare.full_preview.ready");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Failed to load full-file preview. LeftVersion {LeftVersion}. RightVersion {RightVersion}",
+                _leftVersion.FileVersionId,
+                _rightVersion.FileVersionId);
+
+            FullPreviewBeforeText = string.Empty;
+            FullPreviewAfterText = string.Empty;
+            FullPreviewRows.Clear();
+            FullPreviewSummary = Loc.T("compare.full_preview.failed");
+            PreviewSummary = Loc.T("compare.full_preview.load_failed");
+        }
+        finally
+        {
+            if (!cts.IsCancellationRequested)
+            {
+                IsPreviewLoading = false;
+                IsFullFilePreviewLoading = false;
+                ClearLoadingState();
+            }
+
+            OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        }
+    }
+
+    private void ApplySelectionStates()
+    {
+        foreach (var version in Versions)
+        {
+            version.IsSelectedLeft = _leftVersion is not null && version.FileVersionId == _leftVersion.FileVersionId;
+            version.IsSelectedRight = _rightVersion is not null && version.FileVersionId == _rightVersion.FileVersionId;
+        }
+    }
+
+    private void RefreshSelectedPairSummary()
+    {
+        if (_leftVersion is null && _rightVersion is null)
+        {
+            SelectedPairSummary = Loc.T("compare.selected.select_from_list");
+            return;
+        }
+
+        if (_leftVersion is null || _rightVersion is null)
+        {
+            var selected = _leftVersion ?? _rightVersion;
+            SelectedPairSummary = selected is null
+                ? Loc.T("compare.selected.select_from_list")
+                : Loc.F("compare.selected.pick_second_side", selected.VersionName);
+            return;
+        }
+
+        if (_leftVersion.FileVersionId == _rightVersion.FileVersionId)
+        {
+            SelectedPairSummary = Loc.T("compare.selected.select_two_different");
+            return;
+        }
+
+        SelectedPairSummary = Loc.F(
+            "compare.selected.left_right",
+            _leftVersion.VersionName,
+            _leftVersion.CreatedAtDisplay,
+            _rightVersion.VersionName,
+            _rightVersion.CreatedAtDisplay);
+    }
+
+    private async Task LoadImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
+    {
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
+        OverlayImageCaption = BuildImageOverlayCaption();
+
+        if (imagePreview is null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath) && File.Exists(imagePreview.BaselineImagePath))
+            TrackTempFile(imagePreview.BaselineImagePath, imagePreview.IsBaselineTempFile);
+
+        if (!string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath) && File.Exists(imagePreview.CurrentImagePath))
+            TrackTempFile(imagePreview.CurrentImagePath, imagePreview.IsCurrentTempFile);
+
+        if (!string.IsNullOrWhiteSpace(imagePreview.OverlayImagePath) && File.Exists(imagePreview.OverlayImagePath))
+            TrackTempFile(imagePreview.OverlayImagePath, imagePreview.IsOverlayTempFile);
+
+        var leftImageTask = LoadBitmapAsync(imagePreview.BaselineImagePath, ct);
+        var rightImageTask = LoadBitmapAsync(imagePreview.CurrentImagePath, ct);
+        await Task.WhenAll(leftImageTask, rightImageTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        LeftImagePreview = await leftImageTask;
+        RightImagePreview = await rightImageTask;
+
+        LeftImageCaption = BuildImageCaption(Loc.T("common.before"), imagePreview.BaselineWidth, imagePreview.BaselineHeight);
+        RightImageCaption = BuildImageCaption(Loc.T("common.after"), imagePreview.CurrentWidth, imagePreview.CurrentHeight);
+    }
+
+    private async Task LoadAudioPreviewAsync(PendingAudioDiffPreviewDto? audioPreview, CancellationToken ct)
+    {
+        if (audioPreview is null)
+            return;
+
+        var waveformTask = LoadBitmapAsync(audioPreview.WaveformImagePath, ct);
+        var spectrogramTask = LoadBitmapAsync(audioPreview.SpectrogramImagePath, ct);
+        var spectralDeltaTask = LoadBitmapAsync(audioPreview.SpectralDeltaImagePath, ct);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.WaveformImagePath) && File.Exists(audioPreview.WaveformImagePath))
+            TrackTempFile(audioPreview.WaveformImagePath, audioPreview.IsWaveformTempFile);
+
+        TrackTempFile(audioPreview.DifferenceAudioPath, audioPreview.IsDifferenceTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectrogramImagePath) && File.Exists(audioPreview.SpectrogramImagePath))
+            TrackTempFile(audioPreview.SpectrogramImagePath, audioPreview.IsSpectrogramTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.SpectralDeltaImagePath) && File.Exists(audioPreview.SpectralDeltaImagePath))
+            TrackTempFile(audioPreview.SpectralDeltaImagePath, audioPreview.IsSpectralDeltaTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.BaselineAudioPath) && File.Exists(audioPreview.BaselineAudioPath))
+            TrackTempFile(audioPreview.BaselineAudioPath, audioPreview.IsBaselineTempFile);
+
+        if (!string.IsNullOrWhiteSpace(audioPreview.CurrentAudioPath) && File.Exists(audioPreview.CurrentAudioPath))
+            TrackTempFile(audioPreview.CurrentAudioPath, audioPreview.IsCurrentTempFile);
+
+        await Task.WhenAll(waveformTask, spectrogramTask, spectralDeltaTask);
+        if (ct.IsCancellationRequested)
+            return;
+
+        AudioWaveformPreview = await waveformTask;
+        AudioSpectrogramPreview = await spectrogramTask;
+        AudioSpectralDeltaPreview = await spectralDeltaTask;
+    }
+
+    private async Task RenderInteractiveImagePreviewAsync(PendingImageDiffPreviewDto? imagePreview, CancellationToken ct)
+    {
+        _imageDiffRenderCts?.Cancel();
+
+        if (imagePreview is null
+            || string.IsNullOrWhiteSpace(imagePreview.BaselineImagePath)
+            || string.IsNullOrWhiteSpace(imagePreview.CurrentImagePath))
+        {
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = null;
+            _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+            _lastRenderedChangedPixelCount = 0;
+            _lastRenderedChangedPixelRatio = null;
+            _lastRenderedChangedRegionCount = 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        var localCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _imageDiffRenderCts = localCts;
+
+        try
+        {
+            var renderResult = await RunInBackgroundAsync(
+                token => InteractiveImageDiffRenderer.TryRenderAsync(
+                    imagePreview.BaselineImagePath,
+                    imagePreview.CurrentImagePath,
+                    ImageDiffSensitivity,
+                    SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay,
+                    ComparisonSplitPercent,
+                    ShowImageDiffRegionBoxes,
+                    Loc.T("common.before"),
+                    Loc.T("common.after"),
+                    token),
+                localCts.Token);
+
+            if (localCts.IsCancellationRequested)
+                return;
+
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = renderResult?.Bitmap;
+            OverlayImageCaption = BuildImageOverlayCaption();
+            _lastRenderedOverlayPngBytes = renderResult?.PngBytes ?? Array.Empty<byte>();
+
+            _lastRenderedChangedPixelCount = renderResult?.ChangedPixelCount ?? 0;
+            _lastRenderedChangedPixelRatio = renderResult?.ChangedPixelRatio;
+            _lastRenderedChangedRegionCount = renderResult?.ChangedRegionCount ?? 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(
+                ex,
+                "Failed to render interactive image diff preview. Path {Path}. Mode {Mode}. Sensitivity {Sensitivity}",
+                _relativePath,
+                SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay,
+                ImageDiffSensitivity);
+            OverlayImagePreview?.Dispose();
+            OverlayImagePreview = null;
+            _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+            _lastRenderedChangedPixelCount = 0;
+            _lastRenderedChangedPixelRatio = null;
+            _lastRenderedChangedRegionCount = 0;
+            SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private Task<InteractiveImageDiffRenderResult?> TryRenderCurrentImageDiffAsync(CancellationToken ct)
+    {
+        if (_lastImagePreview is null)
+            return Task.FromResult<InteractiveImageDiffRenderResult?>(null);
+
+        return RunInBackgroundAsync(
+            token => InteractiveImageDiffRenderer.TryRenderAsync(
+                _lastImagePreview.BaselineImagePath,
+                _lastImagePreview.CurrentImagePath,
+                ImageDiffSensitivity,
+                SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay,
+                ComparisonSplitPercent,
+                ShowImageDiffRegionBoxes,
+                Loc.T("common.before"),
+                Loc.T("common.after"),
+                token),
+            ct);
+    }
+
+    private string BuildImageOverlayCaption()
+    {
+        var modeLabel = SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay");
+        return $"{Loc.T("compare.overlay")} - {modeLabel}";
+    }
+
+    private void RebuildPreviewMetrics()
+    {
+        PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
+
+        if (_lastBinarySummary is null)
+            return;
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            Loc.T("metric.size"),
+            $"{FormatBytes(_lastBinarySummary.BaselineSizeBytes)} -> {FormatBytes(_lastBinarySummary.CurrentSizeBytes)} ({FormatSignedBytes(_lastBinarySummary.SizeDeltaBytes)})"));
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            Loc.T("metric.blocks"),
+            $"{_lastBinarySummary.BaselineBlockCount} -> {_lastBinarySummary.CurrentBlockCount}, shared {_lastBinarySummary.SharedBlockCount}"));
+
+        var dedupRatio = _lastBinarySummary.DedupRatio ?? ComputeDedupRatio(_lastBinarySummary);
+        var changedRatio = _lastBinarySummary.ChangedBlockRatio ?? ComputeChangedBlockRatio(_lastBinarySummary, dedupRatio);
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            Loc.T("metric.dedup_changed"),
+            $"{FormatRatio(dedupRatio)} / {FormatRatio(changedRatio)}"));
+
+        if (_lastBinarySummary.ByteSimilarityRatio.HasValue)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.byte_similarity"),
+                $"{_lastBinarySummary.ByteSimilarityRatio.Value * 100:F1}%"));
+        }
+
+        if (_lastAudioPreview is not null)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.duration"),
+                $"{FormatAudioDuration(_lastAudioPreview.BaselineDurationSeconds)} -> {FormatAudioDuration(_lastAudioPreview.CurrentDurationSeconds)}"
+                + (_lastAudioPreview.HasDurationMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.sample_rate"),
+                $"{FormatSampleRate(_lastAudioPreview.BaselineSampleRate)} -> {FormatSampleRate(_lastAudioPreview.CurrentSampleRate)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.channels"),
+                $"{FormatChannels(_lastAudioPreview.BaselineChannels)} -> {FormatChannels(_lastAudioPreview.CurrentChannels)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.peak"),
+                $"{FormatAmplitude(_lastAudioPreview.BaselinePeakAmplitude)} -> {FormatAmplitude(_lastAudioPreview.CurrentPeakAmplitude)}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.rms"),
+                $"{FormatAmplitude(_lastAudioPreview.BaselineRmsAmplitude)} -> {FormatAmplitude(_lastAudioPreview.CurrentRmsAmplitude)}"));
+
+            if (_lastAudioPreview.SignalSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.audio_similarity"),
+                    $"{_lastAudioPreview.SignalSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.SpectralSimilarityRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_similarity"),
+                    $"{_lastAudioPreview.SpectralSimilarityRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.SpectralDeltaRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.spectral_delta"),
+                    $"{_lastAudioPreview.SpectralDeltaRatio.Value * 100:F1}%"));
+            }
+
+            if (_lastAudioPreview.BaselineStereoCorrelation.HasValue || _lastAudioPreview.CurrentStereoCorrelation.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.stereo_correlation"),
+                    $"{FormatSignedRatio(_lastAudioPreview.BaselineStereoCorrelation)} -> {FormatSignedRatio(_lastAudioPreview.CurrentStereoCorrelation)}"));
+            }
+
+            if (_lastAudioPreview.ChangedTimeRatio.HasValue)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.T("metric.changed_timeline"),
+                    $"{_lastAudioPreview.ChangedTimeRatio.Value * 100:F1}%"));
+            }
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_segments"),
+                $"{_lastAudioPreview.ChangedSegmentCount:N0}"));
+
+            foreach (var bandMetric in _lastAudioPreview.BandMetrics)
+            {
+                var bandName = LocalizeAudioBandName(bandMetric.BandDisplayName);
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_energy", bandName),
+                    $"{bandMetric.BaselineEnergyRatio * 100:F1}% -> {bandMetric.CurrentEnergyRatio * 100:F1}%"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.band_similarity", bandName),
+                    $"{bandMetric.SimilarityRatio * 100:F1}% ({Loc.T("metric.delta_short")} {bandMetric.DeltaRatio * 100:F1}%)"));
+            }
+
+            foreach (var channelMetric in _lastAudioPreview.ChannelMetrics)
+            {
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_peak", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselinePeakAmplitude)} -> {FormatAmplitude(channelMetric.CurrentPeakAmplitude)}"));
+
+                PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                    Loc.F("metric.channel_rms", channelMetric.ChannelDisplayName),
+                    $"{FormatAmplitude(channelMetric.BaselineRmsAmplitude)} -> {FormatAmplitude(channelMetric.CurrentRmsAmplitude)}"));
+
+                if (channelMetric.SimilarityRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_similarity", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.SimilarityRatio.Value * 100:F1}%"));
+                }
+
+                if (channelMetric.ChangedTimeRatio.HasValue)
+                {
+                    PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                        Loc.F("metric.channel_changed_timeline", channelMetric.ChannelDisplayName),
+                        $"{channelMetric.ChangedTimeRatio.Value * 100:F1}%"));
+                }
+            }
+
+            foreach (var segment in _lastAudioPreview.ChangedSegments)
+            {
+                AudioChangedSegments.Add(new AudioChangedSegmentItemViewModel(
+                    SegmentLabel: $"#{segment.SegmentIndex}",
+                    RangeLabel: $"{FormatPreciseAudioDuration(segment.StartSeconds)} - {FormatPreciseAudioDuration(segment.EndSeconds)}",
+                    DurationLabel: FormatPreciseAudioDuration(segment.DurationSeconds),
+                    IntensityLabel: $"{segment.AverageDifferenceRatio * 100:F1}% / {segment.PeakDifferenceRatio * 100:F1}%",
+                    StartSeconds: segment.StartSeconds,
+                    DurationSeconds: segment.DurationSeconds));
+            }
+
+            return;
+        }
+
+        if (_lastArchivePreview is not null)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.archive_entries"),
+                $"{_lastArchivePreview.BaselineEntryCount} -> {_lastArchivePreview.CurrentEntryCount}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.archive_changes"),
+                $"+{_lastArchivePreview.AddedEntryCount} / -{_lastArchivePreview.RemovedEntryCount} / ~{_lastArchivePreview.ChangedEntryCount} / = {_lastArchivePreview.UnchangedEntryCount}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("common.type"),
+                _lastArchivePreview.ArchiveFormat.ToUpperInvariant()));
+
+            return;
+        }
+
+        if (_lastImagePreview is null)
+            return;
+
+        var before = _lastImagePreview.BaselineWidth is null || _lastImagePreview.BaselineHeight is null
+            ? Loc.T("common.not_available_short")
+            : $"{_lastImagePreview.BaselineWidth} x {_lastImagePreview.BaselineHeight}";
+
+        var after = _lastImagePreview.CurrentWidth is null || _lastImagePreview.CurrentHeight is null
+            ? Loc.T("common.not_available_short")
+            : $"{_lastImagePreview.CurrentWidth} x {_lastImagePreview.CurrentHeight}";
+
+        PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+            Loc.T("metric.dimensions"),
+            $"{before} -> {after}" + (_lastImagePreview.HasDimensionMismatch ? $" {Loc.T("metric.changed_suffix")}" : string.Empty)));
+
+        if (_lastImagePreview.SimilarityRatio.HasValue)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.image_similarity"),
+                $"{_lastImagePreview.SimilarityRatio.Value * 100:F1}%"));
+        }
+
+        if (_lastRenderedChangedPixelRatio.HasValue || _lastRenderedChangedPixelCount > 0)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_area"),
+                _lastRenderedChangedPixelRatio.HasValue
+                    ? $"{_lastRenderedChangedPixelRatio.Value * 100:F1}% ({_lastRenderedChangedPixelCount:N0} px)"
+                    : $"{_lastRenderedChangedPixelCount:N0} px"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.changed_regions"),
+                $"{_lastRenderedChangedRegionCount:N0}"));
+        }
+
+        if (_lastImagePreview.IsVectorImage)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.svg_structure"),
+                $"+{_lastImagePreview.AddedElementCount:N0} / -{_lastImagePreview.RemovedElementCount:N0} / ~{_lastImagePreview.ModifiedElementCount:N0}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.svg_attributes"),
+                $"{_lastImagePreview.ChangedAttributeCount:N0}"));
+        }
+    }
+
+    private void SetArchiveFilter(ArchiveDiffFilterMode filter)
+    {
+        if (_archiveFilter == filter)
+            return;
+
+        _archiveFilter = filter;
+        RebuildArchiveEntries();
+    }
+
+    private void RebuildArchiveEntries()
+    {
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+
+        IEnumerable<ArchiveDiffEntryItemViewModel> query = _allArchiveEntries;
+        query = _archiveFilter switch
+        {
+            ArchiveDiffFilterMode.Added => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Added),
+            ArchiveDiffFilterMode.Removed => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Removed),
+            ArchiveDiffFilterMode.Changed => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Changed),
+            _ => query
+        };
+
+        var search = ArchiveSearchQuery.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(x => x.EntryPath.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+        var entries = query.ToList();
+        foreach (var entry in entries)
+            ArchiveEntries.Add(entry);
+
+        foreach (var root in BuildArchiveTree(entries))
+            ArchiveTreeRoots.Add(root);
+
+        SelectedArchiveEntry = ArchiveEntries.FirstOrDefault();
+        SelectedArchiveTreeNode = FindTreeNodeForEntry(ArchiveTreeRoots, SelectedArchiveEntry);
+        OnPropertyChanged(nameof(ArchiveAllFilterLabel));
+        OnPropertyChanged(nameof(ArchiveAddedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveRemovedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveChangedFilterLabel));
+    }
+
+    private static string BuildArchiveFilterLabel(string label, int count)
+        => $"{label} ({count})";
+
+    private static IReadOnlyList<ArchiveDiffTreeNodeViewModel> BuildArchiveTree(
+        IReadOnlyList<ArchiveDiffEntryItemViewModel> entries)
+    {
+        var roots = new List<ArchiveDiffTreeNodeViewModel>();
+        var directories = new Dictionary<string, ArchiveDiffTreeNodeViewModel>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entries.OrderBy(x => x.EntryPath, StringComparer.OrdinalIgnoreCase))
+        {
+            var parts = entry.EntryPath
+                .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (parts.Length == 0)
+                continue;
+
+            IList<ArchiveDiffTreeNodeViewModel> parentChildren = roots;
+            var path = string.Empty;
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var isLeaf = i == parts.Length - 1;
+                path = string.IsNullOrEmpty(path) ? parts[i] : $"{path}/{parts[i]}";
+
+                if (isLeaf)
+                {
+                    parentChildren.Add(new ArchiveDiffTreeNodeViewModel(parts[i], entry.EntryPath, entry.IsDirectory, entry));
+                    continue;
+                }
+
+                if (!directories.TryGetValue(path, out var directory))
+                {
+                    directory = new ArchiveDiffTreeNodeViewModel(parts[i], path, isDirectory: true);
+                    directories[path] = directory;
+                    parentChildren.Add(directory);
+                }
+
+                parentChildren = directory.Children;
+            }
+        }
+
+        SortArchiveTree(roots);
+        return roots;
+    }
+
+    private static void SortArchiveTree(IList<ArchiveDiffTreeNodeViewModel> nodes)
+    {
+        var sorted = nodes
+            .OrderByDescending(x => x.IsDirectory)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ToList();
+
+        nodes.Clear();
+        foreach (var node in sorted)
+        {
+            SortArchiveTree(node.Children);
+            nodes.Add(node);
+        }
+    }
+
+    private static ArchiveDiffTreeNodeViewModel? FindTreeNodeForEntry(
+        IEnumerable<ArchiveDiffTreeNodeViewModel> nodes,
+        ArchiveDiffEntryItemViewModel? entry)
+    {
+        if (entry is null)
+            return null;
+
+        foreach (var node in nodes)
+        {
+            if (ReferenceEquals(node.Entry, entry))
+                return node;
+
+            var child = FindTreeNodeForEntry(node.Children, entry);
+            if (child is not null)
+                return child;
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
+        IReadOnlyList<TextDiffLineDto> lines,
+        IReadOnlyList<TextDiffHunkDto> hunks)
+    {
+        if (lines.Count == 0)
+            return [];
+
+        var rows = new List<DiffPreviewRowViewModel>(lines.Count + (hunks.Count * 3));
+
+        if (hunks.Count > 0)
+        {
+            foreach (var hunk in hunks.OrderBy(h => h.Sequence))
+            {
+                var start = Math.Clamp(hunk.StartLineSequence, 0, lines.Count - 1);
+                var end = Math.Clamp(hunk.EndLineSequence, start, lines.Count - 1);
+
+                rows.Add(DiffPreviewRowViewModel.CreateHunkHeader(
+                    FormatHunkRange(hunk.OldStartLine, hunk.OldLineCount),
+                    FormatHunkRange(hunk.NewStartLine, hunk.NewLineCount),
+                    NormalizeChangeKindLabel(hunk.ChangeKind)));
+
+                AppendHunkRows(lines, start, end, rows);
+            }
+        }
+        else
+        {
+            rows.Add(DiffPreviewRowViewModel.CreateHunkHeader("(full)", "(full)", "context"));
+            AppendHunkRows(lines, 0, lines.Count - 1, rows);
+        }
+
+        return rows;
+    }
+
+    private static void AppendHunkRows(
+        IReadOnlyList<TextDiffLineDto> lines,
+        int startInclusive,
+        int endInclusive,
+        ICollection<DiffPreviewRowViewModel> rows)
+    {
+        if (startInclusive > endInclusive)
+            return;
+
+        var index = startInclusive;
+        while (index <= endInclusive)
+        {
+            var kind = NormalizeDiffKind(lines[index].Kind);
+
+            if (kind == "remove")
+            {
+                var removed = new List<TextDiffLineDto>();
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "remove")
+                {
+                    removed.Add(lines[index]);
+                    index++;
+                }
+
+                var added = new List<TextDiffLineDto>();
+                var addCursor = index;
+                while (addCursor <= endInclusive && NormalizeDiffKind(lines[addCursor].Kind) == "add")
+                {
+                    added.Add(lines[addCursor]);
+                    addCursor++;
+                }
+
+                if (added.Count > 0)
+                    index = addCursor;
+
+                var pairCount = Math.Max(removed.Count, added.Count);
+                for (var i = 0; i < pairCount; i++)
+                {
+                    var left = i < removed.Count ? removed[i] : null;
+                    var right = i < added.Count ? added[i] : null;
+                    rows.Add(CreatePairedDiffRow(left, right));
+                }
+
+                continue;
+            }
+
+            if (kind == "add")
+            {
+                while (index <= endInclusive && NormalizeDiffKind(lines[index].Kind) == "add")
+                {
+                    rows.Add(CreatePairedDiffRow(null, lines[index]));
+                    index++;
+                }
+
+                continue;
+            }
+
+            rows.Add(CreatePairedDiffRow(lines[index], lines[index]));
+            index++;
+        }
+    }
+
+    private static DiffPreviewRowViewModel CreatePairedDiffRow(TextDiffLineDto? left, TextDiffLineDto? right)
+    {
+        var leftKind = NormalizeDiffKind(left?.Kind);
+        var rightKind = NormalizeDiffKind(right?.Kind);
+        var (leftTokens, rightTokens) = BuildInlineDiffTokens(
+            left?.Text ?? string.Empty,
+            right?.Text ?? string.Empty,
+            leftKind,
+            rightKind);
+
+        var kindBadge = (leftKind, rightKind) switch
+        {
+            ("remove", "add") => "~",
+            ("remove", _) => "-",
+            (_, "add") => "+",
+            _ => "="
+        };
+
+        return new DiffPreviewRowViewModel
+        {
+            KindBadge = kindBadge,
+            LeftLineNumber = left is null ? string.Empty : FormatLineNumber(left.LeftLineNumber),
+            LeftMarker = leftKind switch
+            {
+                "remove" => "-",
+                "equal" => "|",
+                _ => " "
+            },
+            LeftText = left?.Text ?? string.Empty,
+            LeftBackground = leftKind switch
+            {
+                "remove" => "#45202B",
+                "equal" => "#173149",
+                _ => "#10233A"
+            },
+            LeftMarkerForeground = leftKind switch
+            {
+                "remove" => "#FF8FA3",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
+            },
+            LeftTokens = leftTokens,
+            RightLineNumber = right is null ? string.Empty : FormatLineNumber(right.RightLineNumber),
+            RightMarker = rightKind switch
+            {
+                "add" => "+",
+                "equal" => "|",
+                _ => " "
+            },
+            RightText = right?.Text ?? string.Empty,
+            RightBackground = rightKind switch
+            {
+                "add" => "#1E4A39",
+                "equal" => "#173149",
+                _ => "#10233A"
+            },
+            RightMarkerForeground = rightKind switch
+            {
+                "add" => "#89FFD0",
+                "equal" => "#9BB5D1",
+                _ => "#94AECB"
+            },
+            RightTokens = rightTokens
+        };
+    }
+
+    private static (IReadOnlyList<DiffPreviewTokenViewModel> Left, IReadOnlyList<DiffPreviewTokenViewModel> Right) BuildInlineDiffTokens(
+        string leftText,
+        string rightText,
+        string leftKind,
+        string rightKind)
+    {
+        if (leftKind != "remove" || rightKind != "add")
+            return ([], []);
+
+        if (string.IsNullOrEmpty(leftText) || string.IsNullOrEmpty(rightText))
+            return ([], []);
+
+        if (leftText.Length > 2048 || rightText.Length > 2048 || leftText.Contains('\n') || rightText.Contains('\n'))
+            return ([], []);
+
+        var operations = BuildCharacterOperations(leftText, rightText, out var equalCount);
+        if (operations.Count == 0)
+            return ([], []);
+
+        var similarity = equalCount / (double)Math.Max(leftText.Length, rightText.Length);
+        if (similarity < 0.35d)
+            return ([], []);
+
+        var leftTokens = BuildInlineTokensForSide(operations, isLeftSide: true);
+        var rightTokens = BuildInlineTokensForSide(operations, isLeftSide: false);
+        return leftTokens.Count == 0 && rightTokens.Count == 0
+            ? ([], [])
+            : (leftTokens, rightTokens);
+    }
+
+    private static IReadOnlyList<DiffPreviewTokenViewModel> BuildInlineTokensForSide(
+        IReadOnlyList<TokenOperation> operations,
+        bool isLeftSide)
+    {
+        if (operations.Count == 0)
+            return [];
+
+        var tokens = new List<DiffPreviewTokenViewModel>();
+        var currentKind = TokenOpKind.Equal;
+        var builder = new System.Text.StringBuilder();
+
+        void Flush()
+        {
+            if (builder.Length == 0)
+                return;
+
+            var text = builder.ToString();
+            builder.Clear();
+
+            var isChanged = currentKind != TokenOpKind.Equal;
+            tokens.Add(new DiffPreviewTokenViewModel
+            {
+                Text = text,
+                Background = currentKind switch
+                {
+                    TokenOpKind.Remove => "#7E2946",
+                    TokenOpKind.Add => "#226546",
+                    _ => "Transparent"
+                },
+                Foreground = isChanged ? "#FFF8FB" : "#F5F8FF",
+                FontWeight = isChanged ? FontWeight.SemiBold : FontWeight.Normal,
+                Padding = isChanged ? new Avalonia.Thickness(1, 0) : new Avalonia.Thickness(0),
+                Tooltip = currentKind switch
+                {
+                    TokenOpKind.Remove => "Removed fragment",
+                    TokenOpKind.Add => "Added fragment",
+                    _ => string.Empty
+                }
+            });
+        }
+
+        foreach (var operation in operations)
+        {
+            var includeForSide =
+                operation.Kind == TokenOpKind.Equal
+                || (isLeftSide && operation.Kind == TokenOpKind.Remove)
+                || (!isLeftSide && operation.Kind == TokenOpKind.Add);
+
+            if (!includeForSide)
+                continue;
+
+            if (builder.Length > 0 && currentKind != operation.Kind)
+                Flush();
+
+            currentKind = operation.Kind;
+            builder.Append(operation.Value);
+        }
+
+        Flush();
+        return tokens;
+    }
+
+    private static IReadOnlyList<TokenOperation> BuildCharacterOperations(string left, string right, out int equalCount)
+    {
+        var leftCount = left.Length;
+        var rightCount = right.Length;
+        var lcs = new int[leftCount + 1, rightCount + 1];
+
+        for (var i = leftCount - 1; i >= 0; i--)
+        {
+            for (var j = rightCount - 1; j >= 0; j--)
+            {
+                lcs[i, j] = left[i] == right[j]
+                    ? lcs[i + 1, j + 1] + 1
+                    : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+            }
+        }
+
+        var operations = new List<TokenOperation>(leftCount + rightCount);
+        var leftIndex = 0;
+        var rightIndex = 0;
+        equalCount = 0;
+
+        while (leftIndex < leftCount && rightIndex < rightCount)
+        {
+            if (left[leftIndex] == right[rightIndex])
+            {
+                operations.Add(new TokenOperation(TokenOpKind.Equal, left[leftIndex].ToString()));
+                equalCount++;
+                leftIndex++;
+                rightIndex++;
+                continue;
+            }
+
+            if (lcs[leftIndex + 1, rightIndex] >= lcs[leftIndex, rightIndex + 1])
+            {
+                operations.Add(new TokenOperation(TokenOpKind.Remove, left[leftIndex].ToString()));
+                leftIndex++;
+            }
+            else
+            {
+                operations.Add(new TokenOperation(TokenOpKind.Add, right[rightIndex].ToString()));
+                rightIndex++;
+            }
+        }
+
+        while (leftIndex < leftCount)
+        {
+            operations.Add(new TokenOperation(TokenOpKind.Remove, left[leftIndex].ToString()));
+            leftIndex++;
+        }
+
+        while (rightIndex < rightCount)
+        {
+            operations.Add(new TokenOperation(TokenOpKind.Add, right[rightIndex].ToString()));
+            rightIndex++;
+        }
+
+        return operations;
+    }
+
+    private void ResetPreview(string message)
+    {
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+        PreviewKind = PendingDiffPreviewKind.None;
+        IsPreviewLoading = false;
+        ClearLoadingState();
+        PreviewSummary = message;
+        PreviewRows.Clear();
+        WordPreviewRows.Clear();
+        PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+        SelectedArchiveEntry = null;
+        SelectedArchiveTreeNode = null;
+        _allArchiveEntries.Clear();
+        ArchiveSearchQuery = string.Empty;
+        _isWordSemanticPreview = false;
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
+        _lastAudioPreview = null;
+        _lastArchivePreview = null;
+        _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+        _lastRenderedChangedPixelCount = 0;
+        _lastRenderedChangedPixelRatio = null;
+        _lastRenderedChangedRegionCount = 0;
+        ResetFullPreviewState();
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+        SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ReleasePreviewResources()
+    {
+        _imageDiffRenderCts?.Cancel();
+        _audioPlayback.Stop();
+        ClearAudioPlaybackStatus();
+        ClearLoadingState();
+        PreviewRows.Clear();
+        WordPreviewRows.Clear();
+        PreviewMetrics.Clear();
+        AudioChangedSegments.Clear();
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+        SelectedArchiveEntry = null;
+        SelectedArchiveTreeNode = null;
+        _allArchiveEntries.Clear();
+        ArchiveSearchQuery = string.Empty;
+        PreviewKind = PendingDiffPreviewKind.None;
+        _isWordSemanticPreview = false;
+        _lastBinarySummary = null;
+        _lastImagePreview = null;
+        _lastAudioPreview = null;
+        _lastArchivePreview = null;
+        _lastRenderedOverlayPngBytes = Array.Empty<byte>();
+        _lastRenderedChangedPixelCount = 0;
+        _lastRenderedChangedPixelRatio = null;
+        _lastRenderedChangedRegionCount = 0;
+        ResetFullPreviewState();
+
+        var leftImage = LeftImagePreview;
+        var rightImage = RightImagePreview;
+        var overlayImage = OverlayImagePreview;
+        var audioWaveform = AudioWaveformPreview;
+        var audioSpectrogram = AudioSpectrogramPreview;
+        var audioSpectralDelta = AudioSpectralDeltaPreview;
+
+        LeftImagePreview = null;
+        RightImagePreview = null;
+        OverlayImagePreview = null;
+        AudioWaveformPreview = null;
+        AudioSpectrogramPreview = null;
+        AudioSpectralDeltaPreview = null;
+
+        leftImage?.Dispose();
+        rightImage?.Dispose();
+        overlayImage?.Dispose();
+        audioWaveform?.Dispose();
+        audioSpectrogram?.Dispose();
+        audioSpectralDelta?.Dispose();
+
+        LeftImageCaption = Loc.T("common.before");
+        RightImageCaption = Loc.T("common.after");
+        OverlayImageCaption = Loc.T("compare.overlay");
+
+        foreach (var path in _tempPreviewFiles)
+            TryDelete(path);
+
+        _tempPreviewFiles.Clear();
+        SaveImageDiffPreviewCommand.NotifyCanExecuteChanged();
+    }
+
+    private void TrackTempFile(string? path, bool isTemp)
+    {
+        if (isTemp && !string.IsNullOrWhiteSpace(path))
+            _tempPreviewFiles.Add(path);
+    }
+
+    private static Task<Bitmap?> LoadBitmapAsync(string? imagePath, CancellationToken ct)
+        => PreviewBitmapLoader.LoadBitmapAsync(imagePath, ct);
+
+    private void ResetFullPreviewState()
+    {
+        IsFullFilePreviewMode = false;
+        IsFullFilePreviewLoading = false;
+        FullPreviewBeforeText = string.Empty;
+        FullPreviewAfterText = string.Empty;
+        FullPreviewRows.Clear();
+        FullPreviewSummary = string.Empty;
+    }
+
+    private async Task<IReadOnlyList<DiffPreviewRowViewModel>> BuildFullPreviewRowsAsync(
+        string beforeText,
+        string afterText,
+        CancellationToken ct)
+    {
+        var beforeLines = SplitTextIntoLines(beforeText);
+        var afterLines = SplitTextIntoLines(afterText);
+        var maxLineCount = Math.Max(beforeLines.Count, afterLines.Count);
+
+        if (maxLineCount > 0 && maxLineCount <= EngineBackedTextDiffMaxLines)
+        {
+            var diff = await BuildEngineBackedTextDiffAsync(beforeText, afterText, ct);
+            return BuildFullPreviewRows(diff.Lines);
+        }
+
+        return BuildFullPreviewRows(BuildTextDiffLines(beforeLines, afterLines));
+    }
+
+    private async Task<TextDiffComputationDto> BuildEngineBackedTextDiffAsync(
+        string beforeText,
+        string afterText,
+        CancellationToken ct)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "compare-text-diff");
+        Directory.CreateDirectory(tempDir);
+
+        var leftTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.left.tmp");
+        var rightTemp = Path.Combine(tempDir, $"{Guid.NewGuid():N}.right.tmp");
+
+        try
+        {
+            await File.WriteAllTextAsync(leftTemp, beforeText ?? string.Empty, ct);
+            await File.WriteAllTextAsync(rightTemp, afterText ?? string.Empty, ct);
+            return await _textDiffEngine.BuildDiffAsync(leftTemp, rightTemp, EngineBackedTextDiffMaxLines, ct);
+        }
+        finally
+        {
+            TryDelete(leftTemp);
+            TryDelete(rightTemp);
+        }
+    }
+
+    private static IReadOnlyList<DiffPreviewRowViewModel> BuildFullPreviewRows(string beforeText, string afterText)
+    {
+        var lines = BuildTextDiffLines(SplitTextIntoLines(beforeText), SplitTextIntoLines(afterText));
+        return BuildFullPreviewRows(lines);
+    }
+
+    private static IReadOnlyList<DiffPreviewRowViewModel> BuildFullPreviewRows(IReadOnlyList<TextDiffLineDto> lines)
+    {
+        if (lines.Count == 0)
+            return [];
+
+        var rows = new List<DiffPreviewRowViewModel>(lines.Count);
+        AppendHunkRows(lines, 0, lines.Count - 1, rows);
+        return rows;
+    }
+
+    private static IReadOnlyList<string> SplitTextIntoLines(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return [];
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        return normalized.Split('\n');
+    }
+
+    private static IReadOnlyList<TextDiffLineDto> BuildTextDiffLines(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        var leftCount = left.Count;
+        var rightCount = right.Count;
+        var lcs = new int[leftCount + 1, rightCount + 1];
+
+        for (var i = leftCount - 1; i >= 0; i--)
+        {
+            for (var j = rightCount - 1; j >= 0; j--)
+            {
+                lcs[i, j] = string.Equals(left[i], right[j], StringComparison.Ordinal)
+                    ? lcs[i + 1, j + 1] + 1
+                    : Math.Max(lcs[i + 1, j], lcs[i, j + 1]);
+            }
+        }
+
+        var lines = new List<TextDiffLineDto>(Math.Max(leftCount, rightCount));
+        var leftIndex = 0;
+        var rightIndex = 0;
+        var leftLineNumber = 1;
+        var rightLineNumber = 1;
+
+        while (leftIndex < leftCount && rightIndex < rightCount)
+        {
+            if (string.Equals(left[leftIndex], right[rightIndex], StringComparison.Ordinal))
+            {
+                lines.Add(new TextDiffLineDto("equal", leftLineNumber, rightLineNumber, left[leftIndex]));
+                leftIndex++;
+                rightIndex++;
+                leftLineNumber++;
+                rightLineNumber++;
+                continue;
+            }
+
+            if (lcs[leftIndex + 1, rightIndex] >= lcs[leftIndex, rightIndex + 1])
+            {
+                lines.Add(new TextDiffLineDto("remove", leftLineNumber, null, left[leftIndex]));
+                leftIndex++;
+                leftLineNumber++;
+            }
+            else
+            {
+                lines.Add(new TextDiffLineDto("add", null, rightLineNumber, right[rightIndex]));
+                rightIndex++;
+                rightLineNumber++;
+            }
+        }
+
+        while (leftIndex < leftCount)
+        {
+            lines.Add(new TextDiffLineDto("remove", leftLineNumber, null, left[leftIndex]));
+            leftIndex++;
+            leftLineNumber++;
+        }
+
+        while (rightIndex < rightCount)
+        {
+            lines.Add(new TextDiffLineDto("add", null, rightLineNumber, right[rightIndex]));
+            rightIndex++;
+            rightLineNumber++;
+        }
+
+        return lines;
+    }
+
+    private string? GetSourceFilePath()
+    {
+        if (string.IsNullOrWhiteSpace(_repositoryPath) || string.IsNullOrWhiteSpace(_relativePath))
+            return null;
+
+        var root = Path.GetFullPath(_repositoryPath);
+        var rel = _relativePath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullPath = Path.GetFullPath(Path.Combine(root, rel));
+        var rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+
+        if (!fullPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return fullPath;
+    }
+
+    private static void CleanupStaleNativeWordCompareFiles(string directoryPath)
+    {
+        try
+        {
+            var threshold = DateTime.UtcNow.AddDays(-2);
+            foreach (var file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly))
+            {
+                var createdAtUtc = File.GetCreationTimeUtc(file);
+                if (createdAtUtc < threshold)
+                    TryDelete(file);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static string NormalizeRelativePath(string value)
+        => value.Replace('\\', '/').Trim();
+
+    private void SetLoadingState(
+        string title,
+        string detail,
+        double progress,
+        bool indeterminate = false,
+        bool restartElapsed = false)
+    {
+        LoadingTitle = title;
+        LoadingDetail = detail;
+        LoadingProgressValue = Math.Clamp(progress, 0, 100);
+        IsLoadingProgressIndeterminate = indeterminate;
+
+        if (restartElapsed || !_loadingStopwatch.IsRunning)
+        {
+            _loadingStopwatch.Restart();
+            RefreshLoadingElapsedLabel();
+            _loadingStatusTimer.Start();
+            return;
+        }
+
+        RefreshLoadingElapsedLabel();
+    }
+
+    private void ClearLoadingState()
+    {
+        _loadingStatusTimer.Stop();
+        _loadingStopwatch.Reset();
+        LoadingTitle = string.Empty;
+        LoadingDetail = string.Empty;
+        LoadingProgressValue = 0;
+        IsLoadingProgressIndeterminate = false;
+        LoadingElapsedLabel = string.Empty;
+    }
+
+    private void OnLoadingStatusTimerTick(object? sender, EventArgs e)
+        => RefreshLoadingElapsedLabel();
+
+    private void RefreshLoadingElapsedLabel()
+        => LoadingElapsedLabel = FormatElapsedShort(_loadingStopwatch.Elapsed);
+
+    private static string FormatElapsedShort(TimeSpan elapsed)
+    {
+        if (elapsed.TotalHours >= 1d)
+            return $"{(int)elapsed.TotalHours}h {elapsed.Minutes:00}m";
+
+        if (elapsed.TotalMinutes >= 1d)
+            return $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s";
+
+        return $"{Math.Max(0, (int)elapsed.TotalSeconds)}s";
+    }
+
+    private static Task<T> RunInBackgroundAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
+        => Task.Run(async () => await work(ct).ConfigureAwait(false), ct);
+
+    private Task<TResponse> SendScopedAsync<TResponse>(IRequest<TResponse> request, CancellationToken ct)
+        => _scopeExecutor.ExecuteAsync<IMediator, TResponse>(
+            (mediator, token) => mediator.Send(request, token),
+            ct);
+
+    private static string BuildImageCaption(string title, int? width, int? height)
+        => width is null || height is null ? title : $"{title} - {width} x {height}";
+
+    private static string NormalizeDiffKind(string? kind)
+    {
+        if (string.Equals(kind, "add", StringComparison.OrdinalIgnoreCase))
+            return "add";
+        if (string.Equals(kind, "remove", StringComparison.OrdinalIgnoreCase))
+            return "remove";
+        return "equal";
+    }
+
+    private static string NormalizeChangeKindLabel(string? kind)
+    {
+        if (string.Equals(kind, "added", StringComparison.OrdinalIgnoreCase))
+            return "added";
+        if (string.Equals(kind, "removed", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(kind, "deleted", StringComparison.OrdinalIgnoreCase))
+            return "removed";
+        return "modified";
+    }
+
+    private static string FormatLineNumber(int? lineNumber)
+        => lineNumber is int value ? value.ToString("D4") : string.Empty;
+
+    private static string FormatHunkRange(int startLine, int count)
+        => count <= 0 ? $"{Math.Max(0, startLine)}" : $"{Math.Max(0, startLine)},{count}";
+
+    private static string FormatRatio(double? value)
+        => value.HasValue ? $"{value.Value * 100:F1}%" : Loc.T("common.not_available_short");
+
+    private static double? ComputeDedupRatio(PendingBinaryDiffSummaryDto summary)
+    {
+        var denominator = summary.CurrentBlockCount > 0
+            ? summary.CurrentBlockCount
+            : summary.BaselineBlockCount;
+
+        if (denominator <= 0)
+            return null;
+
+        var shared = System.Math.Clamp(summary.SharedBlockCount, 0, denominator);
+        return (double)shared / denominator;
+    }
+
+    private static double? ComputeChangedBlockRatio(PendingBinaryDiffSummaryDto summary, double? dedupRatio)
+    {
+        if (summary.CurrentBlockCount <= 0)
+            return null;
+
+        if (dedupRatio.HasValue)
+            return System.Math.Clamp(1d - dedupRatio.Value, 0d, 1d);
+
+        var unchanged = System.Math.Clamp(summary.SharedBlockCount, 0, summary.CurrentBlockCount);
+        return (double)(summary.CurrentBlockCount - unchanged) / summary.CurrentBlockCount;
+    }
+
+    private static string FormatSignedBytes(long value)
+    {
+        if (value == 0)
+            return "0 B";
+
+        var sign = value > 0 ? "+" : "-";
+        var abs = value == long.MinValue ? long.MaxValue : Math.Abs(value);
+        return $"{sign}{FormatBytes(abs)}";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F1} GB";
+    }
+
+    private static string FormatAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return Loc.T("common.not_available_short");
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss")
+            : duration.ToString(@"m\:ss");
+    }
+
+    private static string FormatSampleRate(int? sampleRate)
+    {
+        if (!sampleRate.HasValue || sampleRate.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return sampleRate.Value >= 1000
+            ? $"{sampleRate.Value / 1000d:F1} kHz"
+            : $"{sampleRate.Value} Hz";
+    }
+
+    private static string FormatChannels(int? channels)
+    {
+        if (!channels.HasValue || channels.Value <= 0)
+            return Loc.T("common.not_available_short");
+
+        return channels.Value switch
+        {
+            1 => "mono",
+            2 => "stereo",
+            _ => $"{channels.Value}"
+        };
+    }
+
+    private static string FormatAmplitude(double? amplitude)
+    {
+        if (!amplitude.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(amplitude.Value, 0d, 1d):F3}";
+    }
+
+    private static string FormatSignedRatio(double? value)
+    {
+        if (!value.HasValue)
+            return Loc.T("common.not_available_short");
+
+        return $"{Math.Clamp(value.Value, -1d, 1d):+0.00;-0.00;0.00}";
+    }
+
+    private static string FormatPreciseAudioDuration(double? seconds)
+    {
+        if (!seconds.HasValue || seconds.Value <= 0d)
+            return "0:00.000";
+
+        var duration = TimeSpan.FromSeconds(seconds.Value);
+        return duration.TotalHours >= 1d
+            ? duration.ToString(@"h\:mm\:ss\.fff")
+            : duration.ToString(@"m\:ss\.fff");
+    }
+
+    private static string LocalizeAudioBandName(string? bandName)
+        => bandName switch
+        {
+            "Low" => Loc.T("audio.band.low"),
+            "Mids" => Loc.T("audio.band.mids"),
+            "Highs" => Loc.T("audio.band.highs"),
+            _ => bandName ?? Loc.T("common.not_available_short")
+        };
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnVersionsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasVersions));
+        OnPropertyChanged(nameof(HasNoVersions));
+    }
+
+    private void OnPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasPreviewRows));
+        OnPropertyChanged(nameof(IsTextPreview));
+        OnPropertyChanged(nameof(IsWordRichPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+        OnPropertyChanged(nameof(ShowDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowWordDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowNoDiffPreviewMessage));
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+    }
+
+    private void OnFullPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasFullPreviewRows));
+        OnPropertyChanged(nameof(HasFullFilePreviewContent));
+        OnPropertyChanged(nameof(ShowFullPreviewTextFallback));
+        OnPropertyChanged(nameof(ShowNoFullFilePreviewMessage));
+    }
+
+    private void OnWordPreviewRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasWordPreviewRows));
+        OnPropertyChanged(nameof(IsTextPreview));
+        OnPropertyChanged(nameof(IsWordRichPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+        OnPropertyChanged(nameof(ShowDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowWordDiffRowsPanel));
+        OnPropertyChanged(nameof(ShowNoDiffPreviewMessage));
+        OnPropertyChanged(nameof(CanToggleFullFilePreview));
+    }
+
+    private void OnPreviewMetricsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasPreviewMetrics));
+        OnPropertyChanged(nameof(IsBinaryPreview));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnAudioChangedSegmentsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasAudioChangedSegments));
+    }
+
+    private void OnArchiveEntriesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasArchiveEntries));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnArchiveTreeRootsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasArchiveTreeRoots));
+    }
+}

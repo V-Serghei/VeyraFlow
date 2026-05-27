@@ -1,4 +1,4 @@
-﻿using MediatR;
+using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
@@ -13,15 +13,15 @@ public sealed class CreateRepositoryWithFormatsHandler(
     IRepositoryScanner scanner,
     INativeSetupApplier native,
     ILogger<CreateRepositoryWithFormatsHandler> log)
-    : IRequestHandler<CreateRepositoryWithFormatsCommand, OperationResult<int>>
+    : IRequestHandler<CreateRepositoryWithFormatsCommand, OperationResult<RepositoryCreationOutcomeDto>>
 {
-    public async Task<OperationResult<int>> Handle(CreateRepositoryWithFormatsCommand request, CancellationToken ct)
+    public async Task<OperationResult<RepositoryCreationOutcomeDto>> Handle(CreateRepositoryWithFormatsCommand request, CancellationToken ct)
     {
         try
         {
             var path = NormalizeDirectoryPath(request.DirectoryPath);
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                return OperationResult<int>.Fail("Невалидная директория репозитория.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("Specified directory does not exist.");
 
             var name = string.IsNullOrWhiteSpace(request.Name)
                 ? Path.GetFileName(path.TrimEnd('\\', '/'))
@@ -29,14 +29,20 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             var formats = NormalizeFormats(request.Formats);
             if (formats.Count == 0)
-                return OperationResult<int>.Fail("Выберите хотя бы один формат.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("No tracking formats were selected.");
+
+            log.LogInformation(
+                "Creating repository. Name {Name}. Path {Path}. Formats {FormatCount}",
+                name,
+                path,
+                formats.Count);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "prepare",
                 5,
                 0,
                 0,
-                "Подготовка репозитория"));
+                "Preparing repository"));
 
             await setup.AddWatchedDirectoryAsync(path, ct);
             await repositories.EnsureRepositoriesForAllDirectoriesAsync(ct);
@@ -45,16 +51,16 @@ public sealed class CreateRepositoryWithFormatsHandler(
             var repo = allRepos.FirstOrDefault(r => PathEquals(r.DirectoryPath, path));
 
             if (repo is null)
-                return OperationResult<int>.Fail("Не удалось создать репозиторий для директории.");
+                return OperationResult<RepositoryCreationOutcomeDto>.Fail("Failed to create repository for the selected directory.");
 
             await repositories.UpdateRepositoryAsync(repo.Id, name, request.Description, ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "formats",
-                20,
+                10,
                 0,
                 0,
-                "Применение форматов"));
+                "Applying tracking formats"));
 
             var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
             var missingGlobal = formats
@@ -82,45 +88,92 @@ public sealed class CreateRepositoryWithFormatsHandler(
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "scan",
-                40,
+                12,
                 0,
                 0,
-                "Сканирование файлов"));
+                "Scanning directory"));
+
+            var reportedPercent = 12;
+            var lastFilesProcessed = 0;
+            var lastFilesTotal = 0;
 
             var scanProgress = new Progress<RepositoryScanProgressDto>(p =>
             {
+                var mapped = Math.Clamp(p.Percent, 0, 100);
+                if (mapped < reportedPercent)
+                    mapped = reportedPercent;
+
+                reportedPercent = mapped;
+                lastFilesProcessed = Math.Max(lastFilesProcessed, p.FilesProcessed);
+                lastFilesTotal = Math.Max(lastFilesTotal, p.FilesTotal);
+
                 request.Progress?.Report(new RepositoryCreationProgressDto(
                     p.Stage,
-                    Math.Max(40, p.Percent),
-                    p.FilesProcessed,
-                    p.FilesTotal,
+                    mapped,
+                    lastFilesProcessed,
+                    lastFilesTotal,
                     p.Message));
             });
 
-            await scanner.ScanRepositoryAsync(repo.Id, scanProgress, ct);
+            var scanResult = await InitialSnapshotCreation.RunWithBoundedRetryAsync(
+                scanner,
+                repo.Id,
+                scanProgress,
+                log,
+                ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "sync",
-                95,
-                0,
-                0,
-                "Синхронизация локальной конфигурации"));
+                Math.Clamp(reportedPercent, 1, 99),
+                lastFilesProcessed,
+                lastFilesTotal,
+                "Applying system configuration"));
 
             await native.ApplySetupAsync(ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
                 "done",
                 100,
-                0,
-                0,
-                "Репозиторий создан"));
+                lastFilesProcessed,
+                lastFilesTotal,
+                "Repository created"));
 
-            return OperationResult<int>.Ok(repo.Id);
+            var snapshotStatus = InitialSnapshotCreation.ResolveSnapshotStatus(scanResult);
+            if (InitialSnapshotCreation.RequiresUserRetry(scanResult))
+            {
+                log.LogWarning(
+                    "Repository created but initial snapshot requires retry. RepositoryId {RepositoryId}. Path {Path}. Files {Files}. NoChanges {NoChanges}. ScanInProgress {ScanInProgress}. BusyFiles {BusyFiles}",
+                    repo.Id,
+                    path,
+                    scanResult.FileEntries,
+                    scanResult.NoChangesDetected,
+                    scanResult.SkippedBecauseScanInProgress,
+                    scanResult.BusyFilesCount);
+            }
+            else if (scanResult.HasBusyFiles)
+            {
+                log.LogWarning(
+                    "Repository created with busy-file warnings. RepositoryId {RepositoryId}. BusyFiles {BusyFiles}",
+                    repo.Id,
+                    scanResult.BusyFilesCount);
+            }
+            else
+            {
+                log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
+            }
+
+            var summary = $"Repository created. Directory scan matched {scanResult.FileEntries} file(s) and {scanResult.DirectoryEntries} folder(s) using {formats.Count} selected format(s). Initial versioned snapshot {snapshotStatus}. Busy files: {scanResult.BusyFilesCount}.";
+
+            return OperationResult<RepositoryCreationOutcomeDto>.Ok(
+                new RepositoryCreationOutcomeDto(
+                    repo.Id,
+                    scanResult.BusyFilesSafe),
+                summary);
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Failed to create repository with formats for {Path}", request.DirectoryPath);
-            return OperationResult<int>.Fail(ex.Message);
+            return OperationResult<RepositoryCreationOutcomeDto>.Fail(ex.Message);
         }
     }
 

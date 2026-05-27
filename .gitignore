@@ -40,6 +40,8 @@ ScaffoldingReadMe.txt
 ~$*
 *~
 CodeCoverage/
+.codex-temp/
+docs/defense/
 
 # MSBuild Binary and Structured Log
 *.binlog
@@ -108,3 +110,5 @@ src/Veyra.Desktop/runtimes/*/native/*.dylib
 *.user
 *.suo
 *.userprefs
+
+*.log

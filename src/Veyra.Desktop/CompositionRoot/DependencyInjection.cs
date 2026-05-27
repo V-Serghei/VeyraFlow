@@ -1,18 +1,12 @@
-﻿using System;
+using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application;
-using Veyra.Desktop.Services.Navigation;
-using Veyra.Desktop.ViewModels.Pages.AuthWindow;
-using Veyra.Desktop.ViewModels.Pages.Dashboard;
-using Veyra.Desktop.ViewModels.Pages.Explorer;
-using Veyra.Desktop.ViewModels.Pages.RepositorySettings;
-using Veyra.Desktop.ViewModels.Pages.SetupWizard;
-using Veyra.Desktop.ViewModels.Pages.WelcomeWindow;
-using Veyra.Desktop.ViewModels.Windows;
-using Veyra.Desktop.Views;
-using Veyra.Desktop.Views.Pages.SetupWizard;
-using Veyra.Desktop.Views.Windows;
+using Veyra.Application.Abstractions.Sync;
+using Veyra.Desktop.Services.Observability;
+using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Services.Sync;
+using Veyra.Domain.Observability;
 using Veyra.Infrastructure.Data;
 using Veyra.Infrastructure.Native;
 using Veyra.Infrastructure.Sync;
@@ -20,7 +14,7 @@ using Veyra.Shared.Logging;
 
 namespace Veyra.Desktop.CompositionRoot;
 
-public static class DependencyInjection
+public static partial class DependencyInjection
 {
     public static ServiceProvider BuildServiceProvider(string connectionString)
     {
@@ -33,47 +27,53 @@ public static class DependencyInjection
 
         var services = new ServiceCollection();
 
-        services.AddVeyraLogging();
+        var schedulerSettingsStore = new SnapshotSchedulerSettingsStore();
+        var schedulerOverrides = schedulerSettingsStore.Load();
+        var runtimeObservabilitySettingsStore = new RuntimeObservabilitySettingsStore();
+        var runtimeObservability = new RuntimeObservabilityControlService(runtimeObservabilitySettingsStore);
+
+        services.AddSingleton<IConfiguration>(cfg);
+        services.AddVeyraLogging(cfg, runtimeObservability: runtimeObservability);
 
         services.AddApplication();
-        services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
+        services.AddInfrastructureData(connectionString);
         services.AddInfrastructureNative(cfg);
+        services.AddDesktopInfrastructureOverrides();
 
-        services.AddSingleton<IWindowService, WindowService>();
-        services.AddSingleton<INavigationService, NavigationService>();
+        var schedulerOptions = new SnapshotSchedulerOptions
+        {
+            Enabled = schedulerOverrides?.Enabled ?? (cfg.GetValue<bool?>("SnapshotScheduler:Enabled") ?? true),
+            PollSeconds = schedulerOverrides?.PollSeconds
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:PollSeconds") ?? SnapshotSchedulerOptions.RecommendedPollSeconds),
+            IntervalMinutes = schedulerOverrides?.IntervalMinutes
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? SnapshotSchedulerOptions.RecommendedIntervalMinutes),
+            QuietHoursStartHour = schedulerOverrides?.QuietHoursStartHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0),
+            QuietHoursEndHour = schedulerOverrides?.QuietHoursEndHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0),
+            MaxConcurrentScans = Math.Clamp(cfg.GetValue<int?>("SnapshotScheduler:MaxConcurrentScans") ?? 2, 1, 8),
+            MaxReadBytesPerSecond = schedulerOverrides?.MaxReadBytesPerSecond
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? SnapshotSchedulerOptions.RecommendedMaxReadBytesPerSecond),
+            MaxIoOperationsPerSecond = schedulerOverrides?.MaxIoOperationsPerSecond
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? SnapshotSchedulerOptions.RecommendedMaxIoOperationsPerSecond),
+            RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,
+            RetryDelaySeconds = cfg.GetValue<int?>("SnapshotScheduler:RetryDelaySeconds") ?? 10,
+            IntegrityEnabled = schedulerOverrides?.IntegrityEnabled
+                ?? (cfg.GetValue<bool?>("SnapshotScheduler:IntegrityEnabled") ?? true),
+            IntegrityIntervalMinutes = schedulerOverrides?.IntegrityIntervalMinutes
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:IntegrityIntervalMinutes") ?? SnapshotSchedulerOptions.RecommendedIntegrityIntervalMinutes),
+            IntegrityRepairFromCloud = cfg.GetValue<bool?>("SnapshotScheduler:IntegrityRepairFromCloud") ?? false,
+            IntegrityIssueSampleLimit = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIssueSampleLimit") ?? 200
+        };
 
-        services.AddTransient<WelcomeWindowViewModel>();
-        services.AddTransient<WelcomeIntroViewModel>();
-        services.AddTransient<WelcomeTipsOptInViewModel>();
-        services.AddTransient<LoginViewModel>();
-
-        services.AddTransient<SetupWizardViewModel>();
-        services.AddTransient<SelectDirectoriesViewModel>();
-        services.AddTransient<SelectFormatsViewModel>();
-
-        services.AddTransient<RepositoryDashboardViewModel>();
-        services.AddTransient<RepositoryExplorerViewModel>();
-        services.AddTransient<RepositorySettingsViewModel>();
-
-        services.AddTransient<CreateRepositoryWindowViewModel>();
-
-        services.AddTransient<MainWindowViewModel>();
-        services.AddTransient<InfoWindowViewModel>();
-
-        services.AddTransient<WelcomeWindow>(sp =>
-            new WelcomeWindow { DataContext = sp.GetRequiredService<WelcomeWindowViewModel>() });
-
-        services.AddTransient<MainWindow>(sp =>
-            new MainWindow { DataContext = sp.GetRequiredService<MainWindowViewModel>() });
-
-        services.AddTransient<InfoWindow>(sp =>
-            new InfoWindow { DataContext = sp.GetRequiredService<InfoWindowViewModel>() });
-
-        services.AddTransient<CreateRepositoryWindow>(sp =>
-            new CreateRepositoryWindow { DataContext = sp.GetRequiredService<CreateRepositoryWindowViewModel>() });
-
-        services.AddTransient<SetupWizardWindow>();
+        services.AddDesktopRuntimeServices(
+            schedulerSettingsStore,
+            runtimeObservabilitySettingsStore,
+            runtimeObservability,
+            schedulerOptions);
+        services.AddDesktopPlatformServices();
+        services.AddDesktopPageViewModels();
+        services.AddDesktopWindowViewModels();
+        services.AddDesktopViews();
 
         return services.BuildServiceProvider();
     }

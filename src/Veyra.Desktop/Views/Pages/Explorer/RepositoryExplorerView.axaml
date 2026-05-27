@@ -1,103 +1,1414 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
              xmlns:explorer="clr-namespace:Veyra.Desktop.ViewModels.Pages.Explorer"
              x:Class="Veyra.Desktop.Views.Pages.Explorer.RepositoryExplorerView"
              x:Name="Root"
              x:DataType="explorer:RepositoryExplorerViewModel"
-             Background="#0D0D0D">
+             KeyDown="OnRootKeyDown"
+             Background="{DynamicResource VeyraCanvasBrush}">
 
-    <DockPanel Margin="20,16">
-        <Border DockPanel.Dock="Top" Background="#121212" CornerRadius="10" Padding="14" Margin="0,0,0,12">
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
-                <Button Grid.Column="0" Content="← Назад" Command="{Binding BackCommand}" Padding="12,8"/>
-
-                <StackPanel Grid.Column="1" Spacing="4">
-                    <TextBlock Text="{Binding RepositoryName}" FontSize="20" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding RepositoryPath}" Opacity="0.7" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
-                    <Button Content="Синхронизировать" Command="{Binding RescanCommand}"/>
-                    <Button Content="Настройки" Command="{Binding OpenSettingsCommand}"/>
-                </StackPanel>
+    <Grid x:Name="ExplorerRootGrid" RowDefinitions="Auto,Auto,*" Margin="12,8,12,12" RowSpacing="8">
+        <Border Grid.Row="0" Classes="toolbar" Padding="10,8">
+            <Grid x:Name="ExplorerHeroGrid" ColumnDefinitions="*,Auto" ColumnSpacing="12" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding RepositoryPath}"
+                           Classes="muted hide-on-narrow"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           ToolTip.Tip="{Binding RepositoryPath}"/>
+                <WrapPanel x:Name="ExplorerHeroActionsPanel"
+                           Grid.Column="1"
+                           Orientation="Horizontal"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Margin="0,0,0,-8">
+                        <CheckBox Content="{loc:Tr explorer.show_all_repository_files}"
+                                  IsChecked="{Binding ShowAllRepositoryFiles, Mode=TwoWay}"
+                                  Margin="0,0,12,8"
+                                  VerticalAlignment="Center"/>
+                        <Button Command="{Binding RescanCommand}"
+                                Classes="subtle compact responsive-icon"
+                                Margin="0,0,8,8"
+                                IsEnabled="{Binding CanRescanRepository}">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.rescan_files}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button
+                                Command="{Binding CreateSnapshotCommand}"
+                                Classes="primary compact responsive-icon"
+                                Margin="0,0,8,8"
+                                IsEnabled="{Binding CanCreateSnapshot}">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE710;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.create_snapshot}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button x:Name="ExplorerSnapshotHistoryButton"
+                                Command="{Binding ShowSnapshotHistoryCommand}"
+                                Classes="subtle compact responsive-icon"
+                                Margin="0,0,8,8"
+                                IsEnabled="{Binding CanOpenSnapshotHistory}">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE81C;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.snapshot_history}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                        <Button x:Name="ExplorerOpenSettingsButton"
+                                Command="{Binding OpenSettingsCommand}"
+                                Classes="subtle compact responsive-icon"
+                                Margin="0,0,0,8">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE713;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr common.settings}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+                </WrapPanel>
             </Grid>
         </Border>
 
-        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,8"
-                   Text="{Binding ErrorMessage}" Foreground="#F87171"
-                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-
-        <Grid ColumnDefinitions="260,*,300" ColumnSpacing="12">
-            <Border Grid.Column="0" Background="#121212" CornerRadius="10" Padding="12">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Структура папок" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                    <TreeView ItemsSource="{Binding TreeNodes}"
-                              SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
-                        <TreeView.DataTemplates>
-                            <TreeDataTemplate DataType="explorer:ExplorerTreeNodeViewModel" ItemsSource="{Binding Children}">
-                                <TextBlock Text="{Binding Name}"/>
-                            </TreeDataTemplate>
-                        </TreeView.DataTemplates>
-                    </TreeView>
-                </DockPanel>
-            </Border>
-
-            <Border Grid.Column="1" Background="#121212" CornerRadius="10" Padding="12">
-                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
-                    <TextBox Grid.Row="0" Text="{Binding SearchQuery, Mode=TwoWay}" Watermark="Поиск по текущей папке"/>
-
-                    <Grid Grid.Row="1" ColumnDefinitions="40,*,120,100,120,100" Margin="0,6,0,2">
-                        <TextBlock Grid.Column="1" Text="Имя" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="2" Text="Тип" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="3" Text="Размер" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="4" Text="Изменено" FontWeight="SemiBold" Opacity="0.8"/>
-                        <TextBlock Grid.Column="5" Text="Действие" FontWeight="SemiBold" Opacity="0.8"/>
-                    </Grid>
-
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Items}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="explorer:ExplorerItemViewModel">
-                                    <Border Background="#161616" CornerRadius="8" Padding="8" Margin="0,0,0,6">
-                                        <Grid ColumnDefinitions="40,*,120,100,120,100" ColumnSpacing="6">
-                                            <Button Grid.Column="0" Content="{Binding Icon}" FontSize="14"
-                                                    Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).SelectItemCommand}"
-                                                    CommandParameter="{Binding .}"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"/>
-                                            <TextBlock Grid.Column="2" Text="{Binding Type}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.8"/>
-                                            <Button Grid.Column="5" Content="Открыть" IsVisible="{Binding CanOpenDirectory}"
-                                                    Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemCommand}"
-                                                    CommandParameter="{Binding .}"/>
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+        <StackPanel Grid.Row="1" Spacing="6">
+            <Border Classes="panel" IsVisible="{Binding IsScanRunning}" Padding="10">
+                <Grid ColumnDefinitions="*,120" ColumnSpacing="10" VerticalAlignment="Center">
+                    <StackPanel Grid.Column="0" Spacing="4">
+                        <TextBlock Text="{Binding ScanMessage}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding ScanProgressDetail}"
+                                   Classes="muted"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"/>
+                        <ProgressBar Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding ScanPercent}"
+                                     Height="8"
+                                     IsIndeterminate="{Binding ScanIsIndeterminate}"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding ScanPercent, StringFormat='{}{0}%'}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"/>
                 </Grid>
             </Border>
 
-            <Border Grid.Column="2" Background="#121212" CornerRadius="10" Padding="12">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Детали" FontSize="13" FontWeight="SemiBold"/>
-
-                    <StackPanel IsVisible="{Binding HasSelectedItem}" Spacing="8">
-                        <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding SelectedItem.RelativePath}" Opacity="0.75" TextWrapping="Wrap"/>
-                        <TextBlock Text="{Binding SelectedItem.Type}"/>
-                        <TextBlock Text="{Binding SelectedItem.SizeDisplay}"/>
-                        <TextBlock Text="{Binding SelectedItem.ModifiedDisplay}"/>
-                        <TextBlock Text="{Binding SelectedItem.HashSha256}" TextWrapping="Wrap" Opacity="0.7"/>
+            <Border Classes="panel"
+                    IsVisible="{Binding ShowRepositoryUnavailableCard}"
+                    Padding="12"
+                    BorderBrush="{DynamicResource VeyraWarningBrush}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{loc:Tr repo_relink.unavailable_title}" FontWeight="SemiBold"/>
+                        <TextBlock Text="{loc:Tr repo_relink.unavailable_detail}"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding RepositoryPath}"
+                                   Classes="muted"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding RepositoryRelinkStatusMessage}"
+                                   Foreground="{DynamicResource VeyraDangerBrush}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding HasRepositoryRelinkStatusMessage}"/>
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding !HasSelectedItem}" Spacing="6">
-                        <TextBlock Text="Выберите файл или папку" Opacity="0.75"/>
+                    <StackPanel Grid.Column="1"
+                                Spacing="8"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top">
+                        <Button Content="{loc:Tr repo_relink.auto_button}"
+                                Command="{Binding AutoRelinkRepositoryCommand}"
+                                IsEnabled="{Binding CanRelinkRepository}"
+                                Classes="primary compact"
+                                HorizontalAlignment="Stretch"/>
+                        <Button Content="{loc:Tr repo_relink.browse_button}"
+                                Command="{Binding BrowseRepositoryFolderCommand}"
+                                IsEnabled="{Binding CanRelinkRepository}"
+                                Classes="subtle compact"
+                                HorizontalAlignment="Stretch"/>
+                        <Button Content="{loc:Tr common.settings}"
+                                Command="{Binding OpenSettingsCommand}"
+                                Classes="subtle compact"
+                                HorizontalAlignment="Stretch"/>
                     </StackPanel>
-                </StackPanel>
+                </Grid>
+            </Border>
+            <Border Classes="panel" IsVisible="{Binding HasErrorMessage}" Padding="10" BorderBrush="{DynamicResource VeyraDangerBrush}">
+                <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource VeyraDangerBrush}" TextWrapping="Wrap"/>
+            </Border>
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <Grid x:Name="ExplorerLayoutGrid" ColumnDefinitions="0.82*,4,1.72*,4,1.02*" ColumnSpacing="0">
+                <Border x:Name="ExplorerTreePanel" Grid.Column="0" Classes="sidebar" MinWidth="150">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{loc:Tr explorer.folders}" Classes="section-title" Margin="0,0,0,8"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <TreeView x:Name="ExplorerTreeView"
+                                      ItemsSource="{Binding TreeNodes}"
+                                      SelectedItem="{Binding SelectedTreeNode, Mode=TwoWay}">
+                                <TreeView.DataTemplates>
+                                    <TreeDataTemplate DataType="explorer:ExplorerTreeNodeViewModel" ItemsSource="{Binding Children}">
+                                        <Border Padding="0"
+                                                PointerPressed="OnTreeNodePointerPressed">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="{loc:Tr explorer.context.open_folder}"
+                                                              Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenTreeFolderCommand}"
+                                                              CommandParameter="{Binding}"/>
+                                                    <MenuItem Header="{loc:Tr explorer.context.open_in_explorer}"
+                                                              Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenTreeFolderInExplorerCommand}"
+                                                              CommandParameter="{Binding}"/>
+                                                    <MenuItem Header="{loc:Tr explorer.context.create_folder}"
+                                                              Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).CreateFolderInTreeNodeCommand}"
+                                                              CommandParameter="{Binding}"/>
+                                                    <MenuItem Header="{loc:Tr explorer.context.refresh_folder}"
+                                                              Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).RefreshTreeFolderCommand}"
+                                                              CommandParameter="{Binding}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="&#xE8B7;"
+                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                           Foreground="{DynamicResource VeyraAccentBrush}"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </TreeDataTemplate>
+                                </TreeView.DataTemplates>
+                            </TreeView>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <GridSplitter x:Name="ExplorerLeftSplitter" Grid.Column="1"
+                              Width="4"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              ResizeDirection="Columns"
+                              ResizeBehavior="PreviousAndNext"/>
+
+                <Border x:Name="ExplorerCenterPanel" Grid.Column="2" Classes="panel" Margin="10,0" MinWidth="280">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                        <Border Grid.Row="0" Classes="filter-sheet">
+                            <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
+                                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                                    <Grid Grid.Column="0">
+                                        <TextBox Text="{Binding SearchQuery, Mode=TwoWay}"
+                                                 Classes="compact"
+                                                 Padding="12,7,38,7"
+                                                 Watermark="{loc:Tr explorer.search_current_folder}"/>
+                                        <Button Command="{Binding ClearSearchQueryCommand}"
+                                                Classes="subtle compact"
+                                                Width="28"
+                                                Height="28"
+                                                Padding="0"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Center"
+                                                Margin="0,0,6,0"
+                                                IsVisible="{Binding HasSearchQuery}">
+                                            <TextBlock Text="&#xE711;"
+                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                       FontSize="12"/>
+                                        </Button>
+                                    </Grid>
+
+                                    <Button x:Name="ExplorerFiltersButton"
+                                            Grid.Column="1"
+                                            Classes="subtle icon compact"
+                                            Width="40"
+                                            Height="40"
+                                            Padding="0"
+                                            Command="{Binding ToggleExplorerFiltersCommand}"
+                                            ToolTip.Tip="{Binding ExplorerFilterButtonLabel}">
+                                        <TextBlock Text="&#xE71C;"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   FontSize="16"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                    </Button>
+
+                                    <Button Grid.Column="2"
+                                            Command="{Binding RefreshRepositoryTreeCommand}"
+                                            Classes="subtle icon compact"
+                                            Width="40"
+                                            Height="40"
+                                            Padding="0"
+                                            ToolTip.Tip="{loc:Tr common.refresh}">
+                                        <TextBlock Text="&#xE72C;"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   FontSize="16"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                    </Button>
+
+                                    <Button Grid.Column="3"
+                                            Classes="subtle icon compact"
+                                            Width="40"
+                                            Height="40"
+                                            Padding="0"
+                                            ToolTip.Tip="{loc:Tr explorer.view_mode}">
+                                        <TextBlock Text="{Binding ExplorerViewModeIcon}"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   FontSize="16"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                                        <Button.Flyout>
+                                            <MenuFlyout>
+                                                <MenuItem Command="{Binding UseExplorerListViewCommand}">
+                                                    <MenuItem.Header>
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Text="&#xE8FD;"
+                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                       FontSize="16"
+                                                                       VerticalAlignment="Center"/>
+                                                            <TextBlock Text="{loc:Tr explorer.view_list}" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </MenuItem.Header>
+                                                </MenuItem>
+                                                <MenuItem Command="{Binding UseExplorerGridViewCommand}">
+                                                    <MenuItem.Header>
+                                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <TextBlock Text="&#xECA5;"
+                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                       FontSize="16"
+                                                                       VerticalAlignment="Center"/>
+                                                            <TextBlock Text="{loc:Tr explorer.view_grid}" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </MenuItem.Header>
+                                                </MenuItem>
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding ExplorerResultsSummary}"
+                                           Classes="muted"
+                                           FontSize="12"/>
+                                <TextBlock Grid.Row="1"
+                                           Margin="0,20,0,0"
+                                           HorizontalAlignment="Right"
+                                           Text="{Binding ExplorerWindowHintText}"
+                                           Classes="muted"
+                                           FontSize="11"
+                                           IsVisible="{Binding HasMoreExplorerItems}"/>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1" RowDefinitions="Auto,*,Auto" RowSpacing="6">
+                            <Grid x:Name="ExplorerItemsHeaderGrid"
+                                  Grid.Row="0"
+                                  ColumnDefinitions="36,2.7*,0.9*,0.8*,0.95*,44"
+                                  Margin="0,2,0,2"
+                                  ColumnSpacing="8"
+                                  Classes="explorer-file-grid"
+                                  IsVisible="{Binding IsExplorerListView}">
+                                    <TextBlock Grid.Column="1" Text="{loc:Tr common.name}" Classes="label"/>
+                                    <TextBlock Grid.Column="2" Text="{loc:Tr common.type}" Classes="label"/>
+                                    <TextBlock Grid.Column="3" Text="{loc:Tr common.size}" Classes="label"/>
+                                    <TextBlock Grid.Column="4" Text="{loc:Tr common.modified}" Classes="label"/>
+                                    <TextBlock Grid.Column="5"
+                                               Text="&#xE73E;"
+                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               Classes="label"
+                                               HorizontalAlignment="Center"
+                                               ToolTip.Tip="{loc:Tr explorer.file_status_header}"/>
+                                </Grid>
+
+                                <ListBox x:Name="ExplorerItemsListBox" Grid.Row="1"
+                                         Classes="clean-list"
+                                         ItemsSource="{Binding Items}"
+                                         SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                         IsVisible="{Binding IsExplorerListView}">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="explorer:ExplorerItemViewModel">
+                                            <Border Padding="10"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Opacity="{Binding RowOpacity}"
+                                                    ToolTip.Tip="{Binding TooltipText}"
+                                                    PointerPressed="OnExplorerItemPointerPressed">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="{loc:Tr explorer.context.open}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).ActivateItemCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.open_in_explorer}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemInExplorerCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.copy_to_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).CopyItemToFolderCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.move_to_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).MoveItemToFolderCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.refresh_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).RefreshRepositoryTreeCommand}"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <Grid ColumnDefinitions="36,2.7*,0.9*,0.8*,0.95*,44" ColumnSpacing="8" Classes="explorer-file-grid">
+                                                    <Border Grid.Column="0"
+                                                            Width="32"
+                                                            Height="32"
+                                                            CornerRadius="10"
+                                                            Background="{Binding IconBackground}"
+                                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                            BorderThickness="1"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center">
+                                                        <Grid>
+                                                            <TextBlock Text="{Binding IconGlyph}"
+                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                       FontSize="16"
+                                                                       Foreground="{Binding IconForeground}"
+                                                                       VerticalAlignment="Center"
+                                                                       HorizontalAlignment="Center"/>
+                                                            <Border Background="{DynamicResource VeyraSurfaceBrush}"
+                                                                    BorderBrush="{Binding IconForeground}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="4"
+                                                                    Padding="3,0"
+                                                                    HorizontalAlignment="Center"
+                                                                    VerticalAlignment="Bottom"
+                                                                    Margin="0,0,0,-3"
+                                                                    IsVisible="{Binding HasIconLabel}">
+                                                                <TextBlock Text="{Binding IconLabel}"
+                                                                           Foreground="{Binding IconForeground}"
+                                                                           FontSize="7"
+                                                                           FontWeight="Bold"
+                                                                           MaxWidth="24"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+
+                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Type}" VerticalAlignment="Center" Opacity="0.85" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" VerticalAlignment="Center" Opacity="0.85" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Grid.Column="4" Text="{Binding ModifiedDisplay}" VerticalAlignment="Center" Opacity="0.85" TextTrimming="CharacterEllipsis"/>
+                                                    <Border Grid.Column="5"
+                                                            Width="26"
+                                                            Height="26"
+                                                            CornerRadius="13"
+                                                            Background="{Binding StatusBackground}"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            ToolTip.Tip="{Binding StatusText}"
+                                                            IsVisible="{Binding HasStatusText}">
+                                                        <Grid ClipToBounds="False">
+                                                            <TextBlock Text="&#x2713;"
+                                                                       Foreground="{Binding StatusForeground}"
+                                                                       FontSize="13"
+                                                                       FontWeight="Bold"
+                                                                       LineHeight="16"
+                                                                       HorizontalAlignment="Center"
+                                                                       VerticalAlignment="Center"
+                                                                       IsVisible="{Binding IsStatusCheck}"/>
+                                                            <Border Width="18"
+                                                                    Height="2"
+                                                                    CornerRadius="1"
+                                                                    Background="{Binding StatusForeground}"
+                                                                    HorizontalAlignment="Center"
+                                                                    VerticalAlignment="Center"
+                                                                    IsVisible="{Binding IsStatusSlash}">
+                                                                <Border.RenderTransform>
+                                                                    <RotateTransform Angle="-45"/>
+                                                                </Border.RenderTransform>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Border>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <ListBox x:Name="ExplorerItemsGridBox"
+                                         Grid.Row="1"
+                                         Classes="clean-list"
+                                         ItemsSource="{Binding Items}"
+                                         SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                         IsVisible="{Binding IsExplorerGridView}">
+                                    <ListBox.Styles>
+                                        <Style Selector="ListBoxItem">
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="Margin" Value="4"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                                            <Setter Property="VerticalContentAlignment" Value="Top"/>
+                                        </Style>
+                                    </ListBox.Styles>
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="explorer:ExplorerItemViewModel">
+                                            <Border Width="152"
+                                                    MinHeight="128"
+                                                    Padding="12"
+                                                    Classes="metric-card"
+                                                    Opacity="{Binding RowOpacity}"
+                                                    ToolTip.Tip="{Binding TooltipText}"
+                                                    PointerPressed="OnExplorerItemPointerPressed">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="{loc:Tr explorer.context.open}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).ActivateItemCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.open_in_explorer}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).OpenItemInExplorerCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.copy_to_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).CopyItemToFolderCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.move_to_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).MoveItemToFolderCommand}"
+                                                                  CommandParameter="{Binding}"/>
+                                                        <MenuItem Header="{loc:Tr explorer.context.refresh_folder}"
+                                                                  Command="{Binding #Root.((explorer:RepositoryExplorerViewModel)DataContext).RefreshRepositoryTreeCommand}"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <StackPanel Spacing="7">
+                                                    <Grid Width="52" Height="50" HorizontalAlignment="Left">
+                                                        <Border Width="46"
+                                                                Height="46"
+                                                                CornerRadius="14"
+                                                                Background="{Binding IconBackground}"
+                                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                                BorderThickness="1"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Top">
+                                                            <Grid>
+                                                                <TextBlock Text="{Binding IconGlyph}"
+                                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                           FontSize="22"
+                                                                           Foreground="{Binding IconForeground}"
+                                                                           VerticalAlignment="Center"
+                                                                           HorizontalAlignment="Center"/>
+                                                                <Border Background="{DynamicResource VeyraSurfaceBrush}"
+                                                                        BorderBrush="{Binding IconForeground}"
+                                                                        BorderThickness="1"
+                                                                        CornerRadius="4"
+                                                                        Padding="3,0"
+                                                                        HorizontalAlignment="Center"
+                                                                        VerticalAlignment="Bottom"
+                                                                        Margin="0,0,0,-3"
+                                                                        IsVisible="{Binding HasIconLabel}">
+                                                                    <TextBlock Text="{Binding IconLabel}"
+                                                                               Foreground="{Binding IconForeground}"
+                                                                               FontSize="7"
+                                                                               FontWeight="Bold"
+                                                                               MaxWidth="28"
+                                                                               TextTrimming="CharacterEllipsis"/>
+                                                                </Border>
+                                                            </Grid>
+                                                        </Border>
+                                                        <Border Width="22"
+                                                                Height="22"
+                                                                CornerRadius="11"
+                                                                Background="{Binding StatusBackground}"
+                                                                HorizontalAlignment="Right"
+                                                                VerticalAlignment="Top"
+                                                                ToolTip.Tip="{Binding StatusText}"
+                                                                IsVisible="{Binding HasStatusText}">
+                                                            <Grid ClipToBounds="False">
+                                                                <TextBlock Text="&#x2713;"
+                                                                           Foreground="{Binding StatusForeground}"
+                                                                           FontSize="11"
+                                                                           FontWeight="Bold"
+                                                                           LineHeight="14"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center"
+                                                                           IsVisible="{Binding IsStatusCheck}"/>
+                                                                <Border Width="15"
+                                                                        Height="2"
+                                                                        CornerRadius="1"
+                                                                        Background="{Binding StatusForeground}"
+                                                                        HorizontalAlignment="Center"
+                                                                        VerticalAlignment="Center"
+                                                                        IsVisible="{Binding IsStatusSlash}">
+                                                                    <Border.RenderTransform>
+                                                                        <RotateTransform Angle="-45"/>
+                                                                    </Border.RenderTransform>
+                                                                </Border>
+                                                            </Grid>
+                                                        </Border>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Name}"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="Wrap"
+                                                               MaxHeight="42"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Type}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SizeDisplay}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <Border Grid.Row="2"
+                                        Classes="metric-card"
+                                        Padding="10"
+                                        IsVisible="{Binding HasMoreExplorerItems}">
+                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding ExplorerWindowHintText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1"
+                                                Content="{Binding ExplorerLoadMoreLabel}"
+                                                Command="{Binding LoadMoreExplorerItemsCommand}"
+                                                Classes="subtle compact"
+                                                HorizontalAlignment="Right"/>
+                                        <Button Grid.Column="2"
+                                                Content="{loc:Tr explorer.show_all_items}"
+                                                Command="{Binding ShowAllExplorerItemsCommand}"
+                                                Classes="subtle compact"
+                                                HorizontalAlignment="Right"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+
+                            <Border Classes="overlay-backdrop"
+                                    Grid.RowSpan="2"
+                                    IsVisible="{Binding IsExplorerFiltersVisible}"
+                                    PointerPressed="OnExplorerFiltersBackdropPressed"/>
+
+                            <Border Classes="popover-panel"
+                                    Grid.RowSpan="2"
+                                    Width="430"
+                                    MaxWidth="430"
+                                    Margin="0,0,0,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    KeyDown="OnRootKeyDown"
+                                    IsVisible="{Binding IsExplorerFiltersVisible}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              MaxHeight="620">
+                                    <StackPanel Spacing="14">
+                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{loc:Tr explorer.advanced_filters}" Classes="section-title"/>
+                                                <TextBlock Text="{loc:Tr explorer.filters_hint}" Classes="muted" FontSize="12"/>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Content="{loc:Tr explorer.clear_filters}"
+                                                    Command="{Binding ClearAdvancedFiltersCommand}"
+                                                    Classes="subtle"
+                                                    VerticalAlignment="Top"/>
+                                            <Button Grid.Column="2"
+                                                    Classes="subtle icon compact"
+                                                    Click="OnExplorerFiltersCloseClicked"
+                                                    ToolTip.Tip="{loc:Tr common.close}"
+                                                    VerticalAlignment="Top">
+                                                <TextBlock Text="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+                                            </Button>
+                                        </Grid>
+
+                                        <WrapPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_type}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding EntryTypeFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedEntryTypeFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.entry_type}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_extension}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding ExtensionFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedExtensionFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding .}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding .}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="148" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_modified}" Classes="label"/>
+                                                <ComboBox ItemsSource="{Binding ModifiedWindowFilters}"
+                                                          Classes="compact"
+                                                          SelectedItem="{Binding SelectedModifiedWindowFilter, Mode=TwoWay}">
+                                                    <ComboBox.SelectionBoxItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.SelectionBoxItemTemplate>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <TextBlock Text="{Binding ., Converter={x:Static conv:LocalizedOptionTextConverter.Instance}, ConverterParameter=explorer.modified_window}"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_min_size_mb}" Classes="label"/>
+                                                <TextBox Text="{Binding MinSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
+                                            </StackPanel>
+
+                                            <StackPanel Width="132" Spacing="4" Margin="0,0,12,12">
+                                                <TextBlock Text="{loc:Tr explorer.filter_max_size_mb}" Classes="label"/>
+                                                <TextBox Text="{Binding MaxSizeMb, Mode=TwoWay}" Watermark="0" Classes="compact"/>
+                                            </StackPanel>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card">
+                                            <StackPanel Spacing="12">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{loc:Tr explorer.saved_filters}" Classes="section-title"/>
+                                                    <TextBlock Text="{loc:Tr explorer.saved_filters_hint}" Classes="muted" FontSize="12"/>
+                                                </StackPanel>
+
+                                                <StackPanel Spacing="10">
+                                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                        <TextBox Grid.Column="0"
+                                                                 Text="{Binding SavedExplorerFilterName, Mode=TwoWay}"
+                                                                 Classes="compact"
+                                                                 Watermark="{loc:Tr explorer.saved_filter_name}"/>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr explorer.save_filter}"
+                                                                Command="{Binding SaveCurrentExplorerFilterCommand}"
+                                                                Classes="compact"/>
+                                                    </Grid>
+
+                                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                                                        <ComboBox Grid.Column="0"
+                                                                  Classes="compact"
+                                                                  ItemsSource="{Binding SavedExplorerFilters}"
+                                                                  SelectedItem="{Binding SelectedExplorerSavedFilter, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:RepositoryExplorerSavedFilterViewModel">
+                                                                    <TextBlock Text="{Binding Name}"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                        <Button Grid.Column="1"
+                                                                Content="{loc:Tr common.apply}"
+                                                                Classes="compact"
+                                                                Command="{Binding ApplyExplorerSavedFilterCommand}"
+                                                                CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                                        <Button Grid.Column="2"
+                                                                Content="{loc:Tr common.delete}"
+                                                                Classes="danger compact"
+                                                                Command="{Binding DeleteExplorerSavedFilterCommand}"
+                                                                CommandParameter="{Binding SelectedExplorerSavedFilter}"/>
+                                                    </Grid>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                    </Grid>
+                </Border>
+
+                <GridSplitter x:Name="ExplorerRightSplitter" Grid.Column="3"
+                              Width="4"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              ResizeDirection="Columns"
+                              ResizeBehavior="PreviousAndNext"/>
+
+                <Border x:Name="ExplorerDetailsPanel" Grid.Column="4" Classes="panel" Margin="10,0,0,0" MinWidth="280">
+                    <Grid RowDefinitions="Auto,12,*" RowSpacing="0">
+                        <Border Grid.Row="0" Classes="card" Padding="12">
+                            <Button Command="{Binding OpenSelectedFileHistoryCommand}"
+                                    IsEnabled="{Binding CanOpenSelectedFileHistory}"
+                                    Classes="subtle compact responsive-icon"
+                                    HorizontalAlignment="Stretch"
+                                    Padding="12,10"
+                                    ToolTip.ShowDelay="400">
+                                <ToolTip.Tip>
+                                    <Border Padding="12" MaxWidth="280">
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Text="{Binding LastSnapshotLabel}" FontSize="12" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding PendingChangesSummary}" FontSize="11" Opacity="0.88" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </ToolTip.Tip>
+                                <Button.Content>
+                                    <StackPanel Classes="button-content">
+                                        <TextBlock Classes="button-icon" Text="&#xE81C;"/>
+                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.open_snapshot_history}"/>
+                                    </StackPanel>
+                                </Button.Content>
+                            </Button>
+                        </Border>
+
+                        <ScrollViewer Grid.Row="2"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Spacing="12">
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasSelectedItem}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
+                                            <TextBlock Text="{Binding SelectedItem.Name}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock Classes="muted" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <Grid ColumnDefinitions="84,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.type}" Classes="label"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.Type}" Opacity="0.84" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedItem.SizeDisplay}" Opacity="0.84" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.modified}" Classes="label"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedItem.ModifiedDisplay}" Opacity="0.84" TextWrapping="Wrap"/>
+                                        </Grid>
+
+                                        <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}" Margin="0,2"/>
+
+                                        <Border Classes="metric-card">
+                                            <StackPanel Spacing="10">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{loc:Tr explorer.compare_in_window}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding ComparePairSummary}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                                </StackPanel>
+
+                                                <Button Command="{Binding CompareSelectedVersionsCommand}"
+                                                        IsEnabled="{Binding CanCompareSelectedVersionPair}"
+                                                        Classes="primary responsive-icon"
+                                                        HorizontalAlignment="Stretch">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE8AB;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr explorer.compare_in_window}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+
+                                                <StackPanel Spacing="8">
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{loc:Tr explorer.left_version}" Classes="label"/>
+                                                        <ComboBox ItemsSource="{Binding FileVersions}"
+                                                                  SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                    </StackPanel>
+
+                                                    <Button Content="&#xE8AB;"
+                                                            Classes="subtle icon"
+                                                            HorizontalAlignment="Center"
+                                                            Command="{Binding SwapCompareVersionsCommand}"
+                                                            IsEnabled="{Binding CanSwapCompareVersions}"/>
+
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{loc:Tr explorer.right_version}" Classes="label"/>
+                                                        <ComboBox ItemsSource="{Binding FileVersions}"
+                                                                  SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                                </DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasSelectedItem}">
+                                    <StackPanel Spacing="10">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <TextBlock Text="{loc:Tr explorer.file_versions}"
+                                                       Classes="section-title"
+                                                       VerticalAlignment="Center"/>
+                                            <Button Grid.Column="1"
+                                                    Content="{Binding FileVersionsToggleLabel}"
+                                                    Command="{Binding ToggleFileVersionsViewCommand}"
+                                                    Classes="subtle compact"
+                                                    IsVisible="{Binding CanToggleFileVersionsView}"
+                                                    VerticalAlignment="Center"/>
+                                        </Grid>
+
+                                        <StackPanel Spacing="6" IsVisible="{Binding IsVersionLoading}">
+                                            <TextBlock Text="{loc:Tr explorer.loading_versions}" Opacity="0.72"/>
+                                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                        </StackPanel>
+
+                                        <TextBlock Text="{Binding VersionPanelError}"
+                                                   Foreground="{DynamicResource VeyraDangerBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasVersionPanelError}"/>
+                                        <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}"
+                                                   Opacity="0.72"
+                                                   IsVisible="{Binding HasNoFileVersions}"/>
+
+                                        <ListBox Classes="clean-list"
+                                                 ItemsSource="{Binding VisibleFileVersions}"
+                                                 SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                                 MaxHeight="260">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                    <Border Classes="card" Padding="8">
+                                                        <Grid RowDefinitions="Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="2" ColumnSpacing="8">
+                                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Opacity="0.82"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+
+                                        <Border Classes="card" Padding="10" IsVisible="{Binding HasSelectedVersion}">
+                                            <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="84,*" RowSpacing="4" ColumnSpacing="8">
+                                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.path}" Classes="label"/>
+                                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedItem.RelativePath}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.version}" Classes="label"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
+                                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}" TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr common.date}" Classes="label"/>
+                                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}" TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </Border>
+
+                                        <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
+                                                   Foreground="{DynamicResource VeyraWarningBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
+                                        <WrapPanel x:Name="ExplorerRestoreActionsPanel" Orientation="Horizontal">
+                                            <Button Command="{Binding RestoreVersionAsCopyCommand}"
+                                                    IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                    Classes="subtle responsive-icon"
+                                                    Margin="0,0,8,8">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8C8;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_as_copy}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding RestoreVersionOverwriteCommand}"
+                                                    IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                    Classes="responsive-icon"
+                                                    Margin="0,0,0,8">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_overwrite}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding VersionActionProgressDetail}"
+                                                           Classes="muted"
+                                                           TextWrapping="Wrap"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="{Binding VersionActionMessage}"
+                                                   TextWrapping="Wrap"
+                                                   Opacity="0.9"
+                                                   IsVisible="{Binding HasVersionActionMessage}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Classes="card" Padding="12" IsVisible="{Binding HasNoSelectedItem}">
+                                    <TextBlock Text="{loc:Tr explorer.select_file_from_index}"
+                                               Opacity="0.72"
+                                               TextWrapping="Wrap"/>
+                                </Border>
+
+                                <Border Classes="card" Padding="12" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel Spacing="4">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                <TextBlock Text="{loc:Tr explorer.repository_tools}" FontWeight="SemiBold"/>
+                                                <Border Background="{DynamicResource VeyraWarningBrush}"
+                                                        CornerRadius="999"
+                                                        Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip.Tip="{loc:Tr explorer.repository_tools_tooltip}">
+                                                    <TextBlock Text="!"
+                                                               FontWeight="Bold"
+                                                               Foreground="{DynamicResource VeyraPanelStrongBrush}"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Classes="muted"
+                                                       Text="{loc:Tr explorer.repository_tools_hint}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <Button Content="{loc:Tr explorer.fix_missing_data}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_repair_data}"
+                                                Command="{Binding RepairRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_repair_data}"
+                                                HorizontalAlignment="Stretch"/>
+                                        <Button Content="{loc:Tr explorer.rebuild_index}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_reindex_data}"
+                                                Command="{Binding ReindexRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_reindex_data}"
+                                                HorizontalAlignment="Stretch"/>
+                                        <Button Content="{loc:Tr explorer.repair_links}"
+                                                AutomationProperties.Name="{loc:Tr explorer.automation_relink_graph}"
+                                                Command="{Binding RelinkRepositoryDataCommand}"
+                                                IsEnabled="{Binding CanRunMaintenanceActions}"
+                                                Classes="subtle compact"
+                                                ToolTip.Tip="{loc:Tr explorer.tooltip_relink_graph}"
+                                                HorizontalAlignment="Stretch"/>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsMaintenanceRunning}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{Binding MaintenanceProgressTitle}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding MaintenanceProgressDetail}"
+                                                           Classes="muted"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <GridSplitter x:Name="ExplorerBottomSplitter"
+                              Grid.Column="0"
+                              Grid.ColumnSpan="5"
+                              Height="6"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              IsVisible="False"/>
+
+            </Grid>
+
+            <Border IsVisible="{Binding IsFileHistoryMenuOpen}"
+                    Classes="overlay-backdrop"
+                    Padding="24"
+                    PointerPressed="OnFileHistoryBackdropPressed">
+                <Border Classes="dialog-shell floating-panel"
+                        MaxWidth="980"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Padding="18"
+                        CornerRadius="16">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="14">
+                        <Border Grid.Row="0" Classes="hero">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr explorer.file_history_title}" Classes="h2"/>
+                                    <TextBlock Text="{Binding SelectedItem.RelativePath}"
+                                               Classes="muted"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{loc:Tr explorer.file_history_hint}"
+                                               Classes="muted"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <Button Grid.Column="1"
+                                        Content="{loc:Tr common.close}"
+                                        Command="{Binding CloseFileHistoryMenuCommand}"
+                                        Classes="subtle"
+                                        VerticalAlignment="Top"/>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="1.15*,12,1*" ColumnSpacing="0" MinHeight="420">
+                            <Border Grid.Column="0" Classes="card" Padding="12">
+                                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <TextBlock Text="{loc:Tr explorer.file_versions}"
+                                                   Classes="section-title"
+                                                   VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1"
+                                                Content="{Binding FileVersionsToggleLabel}"
+                                                Command="{Binding ToggleFileVersionsViewCommand}"
+                                                Classes="subtle compact"
+                                                IsVisible="{Binding CanToggleFileVersionsView}"
+                                                VerticalAlignment="Center"/>
+                                    </Grid>
+
+                                    <StackPanel Grid.Row="1" Spacing="6" IsVisible="{Binding IsVersionLoading}">
+                                        <TextBlock Text="{loc:Tr explorer.loading_versions}" Classes="muted"/>
+                                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                    </StackPanel>
+
+                                    <Grid Grid.Row="2">
+                                        <TextBlock Text="{Binding VersionPanelError}"
+                                                   Foreground="{DynamicResource VeyraDangerBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasVersionPanelError}"/>
+                                        <TextBlock Text="{loc:Tr explorer.no_versions_for_selected_file}"
+                                                   Classes="muted"
+                                                   IsVisible="{Binding HasNoFileVersions}"/>
+
+                                        <ListBox Classes="clean-list"
+                                                 ItemsSource="{Binding VisibleFileVersions}"
+                                                 SelectedItem="{Binding SelectedVersion, Mode=TwoWay}"
+                                                 IsVisible="{Binding HasNoFileVersions, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                    <Border Classes="card" Padding="10" Margin="0,0,0,6">
+                                                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto" RowSpacing="3" ColumnSpacing="8">
+                                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding VersionName}" FontWeight="SemiBold"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CreatedAtDisplay}" Classes="muted"/>
+                                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding SizeDisplay}" Opacity="0.78"/>
+                                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                                                       Text="{Binding Title}"
+                                                                       Classes="muted"
+                                                                       FontSize="11"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <GridSplitter Grid.Column="1"
+                                          Width="6"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch"
+                                          ResizeDirection="Columns"
+                                          ResizeBehavior="PreviousAndNext"/>
+
+                            <Border Grid.Column="2" Classes="card" Padding="12">
+                                <StackPanel Spacing="12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{loc:Tr explorer.selected_file}" Classes="section-title"/>
+                                        <TextBlock Text="{Binding SelectedItem.Name}" FontWeight="SemiBold" FontSize="16" TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding SelectedItem.RelativePath}" Classes="muted" TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <Border Classes="metric-card" IsVisible="{Binding HasSelectedVersion}">
+                                        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="84,*" RowSpacing="4" ColumnSpacing="8">
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.version}" Classes="label"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedVersion.VersionName}" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr common.size}" Classes="label"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedVersion.SizeDisplay}" TextWrapping="Wrap"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr common.date}" Classes="label"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedVersion.CreatedAtDisplay}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Text="{loc:Tr explorer.no_content_blocks_for_version}"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding SelectedVersionHasNoContentBlocks}"/>
+
+                                    <Button Command="{Binding CompareSelectedVersionsCommand}"
+                                            IsEnabled="{Binding CanCompareSelectedVersionPair}"
+                                            Classes="primary responsive-icon"
+                                            HorizontalAlignment="Stretch">
+                                        <Button.Content>
+                                            <StackPanel Classes="button-content">
+                                                <TextBlock Classes="button-icon" Text="&#xE8AB;"/>
+                                                <TextBlock Classes="button-label" Text="{loc:Tr explorer.compare_in_window}"/>
+                                            </StackPanel>
+                                        </Button.Content>
+                                    </Button>
+
+                                    <Grid ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+                                        <ComboBox Grid.Column="0"
+                                                  ItemsSource="{Binding FileVersions}"
+                                                  SelectedItem="{Binding CompareLeftVersion, Mode=TwoWay}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <Button Grid.Column="1"
+                                                Content="&#xE8AB;"
+                                                Classes="subtle icon"
+                                                Command="{Binding SwapCompareVersionsCommand}"
+                                                IsEnabled="{Binding CanSwapCompareVersions}"/>
+                                        <ComboBox Grid.Column="2"
+                                                  ItemsSource="{Binding FileVersions}"
+                                                  SelectedItem="{Binding CompareRightVersion, Mode=TwoWay}">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:ExplorerFileVersionViewModel">
+                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"/>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </Grid>
+
+                                    <WrapPanel Orientation="Horizontal">
+                                        <Button Command="{Binding RestoreVersionAsCopyCommand}"
+                                                IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                Classes="subtle responsive-icon"
+                                                Margin="0,0,8,8">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE8C8;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_as_copy}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                        <Button Command="{Binding RestoreVersionOverwriteCommand}"
+                                                IsEnabled="{Binding CanRestoreSelectedVersion}"
+                                                Classes="responsive-icon"
+                                                Margin="0,0,0,8">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE7C3;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr explorer.restore_overwrite}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                    </WrapPanel>
+
+                                    <Border Classes="metric-card" IsVisible="{Binding IsVersionActionRunning}">
+                                        <StackPanel Classes="loading-state">
+                                            <TextBlock Text="{Binding VersionActionProgressTitle}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding VersionActionProgressDetail}" Classes="muted" TextWrapping="Wrap"/>
+                                            <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="{Binding VersionActionMessage}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.9"
+                                               IsVisible="{Binding HasVersionActionMessage}"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Border>
+
+            <Border IsVisible="{Binding IsDiffPreviewMenuOpen}"
+                    Classes="overlay-backdrop"
+                    Padding="24"
+                    PointerPressed="OnDiffPreviewBackdropPressed">
+                <Border Classes="dialog-shell floating-panel"
+                        MaxWidth="1440"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Padding="18"
+                        CornerRadius="16">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="14">
+                        <Border Grid.Row="0" Classes="hero">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr explorer.diff_preview}" Classes="h2"/>
+                                    <TextBlock Classes="muted"
+                                               Text="{Binding DiffPreviewTitle}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+
+                                <Button Grid.Column="1"
+                                        Content="{loc:Tr common.close}"
+                                        Command="{Binding CloseDiffPreviewMenuCommand}"
+                                        Classes="subtle"
+                                        VerticalAlignment="Top"/>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding DiffPreviewSummary}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center"/>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                                <Border Classes="badge success">
+                                    <TextBlock Text="{loc:Tr diff.added}" Foreground="{DynamicResource VeyraDiffAddFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                                </Border>
+                                <Border Classes="badge danger">
+                                    <TextBlock Text="{loc:Tr diff.removed}" Foreground="{DynamicResource VeyraDiffRemoveFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                                </Border>
+                                <Border Classes="badge warning">
+                                    <TextBlock Text="{loc:Tr diff.context}" Foreground="{DynamicResource VeyraDiffContextFgBrush}" FontWeight="SemiBold" FontSize="11"/>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="2" RowDefinitions="Auto,*" RowSpacing="10">
+                            <StackPanel Grid.Row="0"
+                                        Spacing="6"
+                                        IsVisible="{Binding IsDiffPreviewLoading}">
+                                <TextBlock Text="{loc:Tr compare.building_preview}"
+                                           Classes="muted"/>
+                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                            </StackPanel>
+
+                            <Border Grid.Row="1"
+                                    Classes="diff-surface"
+                                    Padding="12"
+                                    MinHeight="420"
+                                    IsVisible="{Binding HasDiffPreviewRows}">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                        <Border Grid.Column="0" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="10,6">
+                                            <TextBlock Text="{loc:Tr common.before}" FontWeight="SemiBold"/>
+                                        </Border>
+                                        <Border Grid.Column="1" Background="{DynamicResource VeyraDiffHeaderBgBrush}" CornerRadius="8" Padding="10,6">
+                                            <TextBlock Text="{loc:Tr common.after}" FontWeight="SemiBold"/>
+                                        </Border>
+                                    </Grid>
+
+                                    <ScrollViewer Grid.Row="1"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding DiffPreviewRows}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="explorer:DiffPreviewRowViewModel">
+                                                    <StackPanel Spacing="4" Margin="0,0,0,4">
+                                                        <Border IsVisible="{Binding IsHunkHeader}"
+                                                                Background="{DynamicResource VeyraDiffHunkBgBrush}"
+                                                                BorderBrush="{DynamicResource VeyraDiffHunkBorderBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="8"
+                                                                Padding="8,4">
+                                                            <TextBlock Text="{Binding HunkHeader}"
+                                                                       FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                       FontSize="12"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                        </Border>
+
+                                                        <Grid IsVisible="{Binding IsContentRow}" ColumnDefinitions="*,*" ColumnSpacing="8">
+                                                            <Border Grid.Column="0" Background="{Binding LeftBackground}" CornerRadius="6" Padding="8,4">
+                                                                <Grid ColumnDefinitions="58,18,*" ColumnSpacing="6">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding LeftLineNumber}"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding LeftMarker}"
+                                                                               Foreground="{Binding LeftMarkerForeground}"
+                                                                               FontWeight="Bold"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding LeftText}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"
+                                                                               TextWrapping="NoWrap"/>
+                                                                </Grid>
+                                                            </Border>
+
+                                                            <Border Grid.Column="1" Background="{Binding RightBackground}" CornerRadius="6" Padding="8,4">
+                                                                <Grid ColumnDefinitions="58,18,*" ColumnSpacing="6">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding RightLineNumber}"
+                                                                               Foreground="{DynamicResource VeyraDiffLineNumberBrush}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="1"
+                                                                               Text="{Binding RightMarker}"
+                                                                               Foreground="{Binding RightMarkerForeground}"
+                                                                               FontWeight="Bold"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"/>
+                                                                    <TextBlock Grid.Column="2"
+                                                                               Text="{Binding RightText}"
+                                                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                                                               FontSize="12"
+                                                                               TextWrapping="NoWrap"/>
+                                                                </Grid>
+                                                            </Border>
+                                                        </Grid>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1"
+                                    Classes="card"
+                                    Padding="20"
+                                    IsVisible="{Binding HasNoDiffPreviewRows}">
+                                <TextBlock Text="{loc:Tr explorer.diff_data_unavailable}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Border>
+
+            <Border Classes="loading-overlay"
+                    Grid.RowSpan="3"
+                    IsVisible="{Binding ShowBlockingOverlay}">
+                <Border Classes="loading-card"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MinWidth="320"
+                        MaxWidth="420">
+                    <StackPanel Classes="loading-state">
+                        <TextBlock Text="{Binding BlockingOverlayTitle}" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding BlockingOverlayDetail}" Classes="muted" TextWrapping="Wrap"/>
+                        <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                    </StackPanel>
+                </Border>
             </Border>
         </Grid>
-    </DockPanel>
+    </Grid>
 </UserControl>

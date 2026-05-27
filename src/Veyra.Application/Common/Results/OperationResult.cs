@@ -1,29 +1,37 @@
-﻿namespace Veyra.Application.Common.Results;
+namespace Veyra.Application.Common.Results;
 
 public readonly struct OperationResult
 {
     public bool Success { get; }
     public string? Error { get; }
+    public OperationErrorKind ErrorKind { get; }
 
-    private OperationResult(bool success, string? error) { Success = success; Error = error; }
-
-    public static OperationResult Ok() => new(true, null);
-    public static OperationResult Fail(string error) => new(false, error);
-}
-
-public readonly struct OperationResult<T>
-{
-    public bool Success { get; }
-    public T? Value { get; }
-    public string? Error { get; }
-
-    private OperationResult(bool success, T? value, string? error)
+    private OperationResult(bool success, string? error, OperationErrorKind kind)
     {
         Success = success;
-        Value = value;
         Error = error;
+        ErrorKind = kind;
     }
 
-    public static OperationResult<T> Ok(T value) => new(true, value, null);
-    public static OperationResult<T> Fail(string error) => new(false, default, error);
+    public static OperationResult Ok() => new(true, null, OperationErrorKind.None);
+
+    public static OperationResult Fail(string error, OperationErrorKind kind = OperationErrorKind.General)
+        => new(false, error, kind);
+
+    public static OperationResult NetworkUnavailable(string? error = null)
+        => new(false, error, OperationErrorKind.NetworkUnavailable);
+
+    public static OperationResult CloudUnavailable(string? error = null)
+        => new(false, error, OperationErrorKind.CloudUnavailable);
+
+    public static OperationResult AuthRequired(string? error = null)
+        => new(false, error, OperationErrorKind.AuthenticationRequired);
+
+    public bool IsNetworkError => ErrorKind is OperationErrorKind.NetworkUnavailable
+        or OperationErrorKind.CloudUnavailable
+        or OperationErrorKind.Timeout;
+
+    public bool IsAuthError => ErrorKind is OperationErrorKind.AuthenticationRequired
+        or OperationErrorKind.TokenExpired
+        or OperationErrorKind.Unauthorized;
 }

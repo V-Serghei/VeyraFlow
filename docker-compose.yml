@@ -6,11 +6,11 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-veyra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-veyra_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-veyraflow}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-veyra} -d ${POSTGRES_DB:-veyraflow}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -27,10 +27,22 @@ services:
       db:
         condition: service_healthy
     environment:
-      HTTP_PORT: ${HTTP_PORT}
-      DB_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      DB_DSN: postgres://${POSTGRES_USER:-veyra}:${POSTGRES_PASSWORD:-veyra_dev_password}@db:5432/${POSTGRES_DB:-veyraflow}?sslmode=disable
+      BLOCK_STORE_DIR: ${BLOCK_STORE_DIR:-/var/lib/veyra/blocks}
+      BLOCK_PACK_TARGET_MB: ${BLOCK_PACK_TARGET_MB:-128}
+      BLOCK_COMPACTION_INTERVAL_SECONDS: ${BLOCK_COMPACTION_INTERVAL_SECONDS:-120}
+      BLOCK_COMPACTION_BATCH_SIZE: ${BLOCK_COMPACTION_BATCH_SIZE:-128}
+      SYNC_MAX_PUSH_PAYLOAD_MB: ${SYNC_MAX_PUSH_PAYLOAD_MB:-256}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-veyra-dev-secret-change-me}
+      AUTH_TOKEN_LIFETIME_MINUTES: ${AUTH_TOKEN_LIFETIME_MINUTES:-1440}
+      AUTH_REFRESH_TOKEN_LIFETIME_MINUTES: ${AUTH_REFRESH_TOKEN_LIFETIME_MINUTES:-43200}
+      SEQ_URL: ${SEQ_URL:-http://seq}
     ports:
       - "8080:8080"
+    volumes:
+      - cloud-blocks:/var/lib/veyra/blocks
+
   seq:
     image: datalust/seq:2024.1
     container_name: veyra-seq
@@ -44,4 +56,5 @@ services:
 
 volumes:
   pgdata:
+  cloud-blocks:
   seq-data:

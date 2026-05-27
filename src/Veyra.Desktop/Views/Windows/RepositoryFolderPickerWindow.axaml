@@ -1,0 +1,104 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.RepositoryFolderPickerWindow"
+        x:DataType="vm:RepositoryFolderPickerWindowViewModel"
+        Width="760"
+        Height="620"
+        MinWidth="620"
+        MinHeight="460"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True"
+        SystemDecorations="Full"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Title="{loc:Tr repo_settings.excluded_paths_picker_window_title}"
+        d:DataContext="{d:DesignInstance vm:RepositoryFolderPickerWindowViewModel, IsDesignTimeCreatable=True}">
+    <Border Padding="16" Background="{DynamicResource VeyraCanvasBrush}">
+        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="dialog-hero">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_window_title}" Classes="h2"/>
+                    <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_hint}" Classes="muted" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding RepositoryRoot}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Row="1" Spacing="6">
+                <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_search_label}" Classes="label"/>
+                <TextBox Text="{Binding SearchText, Mode=TwoWay}"
+                         Watermark="{loc:Tr repo_settings.excluded_paths_picker_search_watermark}"/>
+            </StackPanel>
+
+            <Border Grid.Row="2" Classes="dialog-shell" Padding="14">
+                <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
+                    <TextBlock Grid.Row="0"
+                               Text="{Binding StatusMessage}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
+
+                    <Grid Grid.Row="1">
+                        <Border Classes="metric-card" IsVisible="{Binding IsLoading}">
+                            <StackPanel Classes="loading-state">
+                                <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_loading_title}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_loading_detail}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"/>
+                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card"
+                                Padding="14"
+                                IsVisible="{Binding HasErrorMessage}"
+                                BorderBrush="{DynamicResource VeyraDangerBrush}"
+                                Background="{DynamicResource VeyraDiffRemoveBgBrush}">
+                            <TextBlock Text="{Binding ErrorMessage}"
+                                       Foreground="{DynamicResource VeyraDangerBrush}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+
+                        <Border Classes="card" Padding="16" IsVisible="{Binding ShowEmptyState}">
+                            <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_empty}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+
+                        <ListBox ItemsSource="{Binding VisibleFolders}"
+                                 SelectedItem="{Binding SelectedFolder, Mode=TwoWay}"
+                                 IsVisible="{Binding HasFolders}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding .}" TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+
+                    <Border Grid.Row="2" Classes="metric-card">
+                        <TextBlock Text="{loc:Tr repo_settings.excluded_paths_picker_footer}"
+                                   Classes="muted"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="3" Classes="toolbar" Padding="10">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="{loc:Tr common.cancel}"
+                            Command="{Binding CancelCommand}"
+                            Classes="subtle"
+                            Width="120"/>
+                    <Button Content="{loc:Tr repo_settings.excluded_paths_picker_choose}"
+                            Command="{Binding ConfirmCommand}"
+                            Classes="primary"
+                            Width="170"
+                            IsEnabled="{Binding CanConfirm}"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

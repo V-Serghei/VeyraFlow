@@ -1,0 +1,71 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        xmlns:dto="clr-namespace:Veyra.Application.DTOs;assembly=Veyra.Application"
+        x:Class="Veyra.Desktop.Views.Windows.CloudRestoreWizardWindow"
+        x:DataType="vm:CloudRestoreWizardWindowViewModel"
+        Width="860"
+        Height="680"
+        MinWidth="720"
+        MinHeight="560"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr cloud_restore.title}">
+    <Border Classes="dialog-shell" Margin="16" Padding="18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="hero">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{loc:Tr cloud_restore.title}" Classes="h2"/>
+                    <TextBlock Text="{Binding RepositoryName}" Classes="muted"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="1" Classes="card" Padding="12">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{loc:Tr cloud_restore.target_path}" Classes="section-title"/>
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBox Text="{Binding TargetPath, Mode=TwoWay}" Watermark="{loc:Tr cloud_restore.target_watermark}"/>
+                        <Button Grid.Column="1" Content="{loc:Tr common.browse}" Command="{Binding BrowseTargetFolderCommand}" Classes="subtle"/>
+                    </Grid>
+                    <CheckBox Content="{loc:Tr cloud_restore.restore_to_another_folder}" IsChecked="{Binding RestoreToAnotherFolder, Mode=TwoWay}"/>
+                    <CheckBox Content="{loc:Tr cloud_restore.restore_full_history}" IsChecked="{Binding RestoreFullHistory, Mode=TwoWay}"/>
+                    <CheckBox Content="{loc:Tr cloud_restore.metadata_only}" IsChecked="{Binding RestoreMetadataOnly, Mode=TwoWay}"/>
+                    <CheckBox Content="{loc:Tr cloud_restore.relink_existing_folder}" IsChecked="{Binding RelinkExistingLocalFolder, Mode=TwoWay}"/>
+                    <Button Content="{loc:Tr cloud_restore.build_plan}" Command="{Binding BuildPlanCommand}" Classes="subtle"/>
+                    <TextBlock Text="{Binding PlanText}" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding StatusText}" Classes="muted" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="2" Classes="card" Padding="12">
+                <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                    <TextBlock Text="{loc:Tr cloud_restore.conflicts}" Classes="section-title"/>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Conflicts}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="dto:CloudRepositoryConflictItemDto">
+                                    <Border Classes="metric-card" Padding="10" Margin="0,0,0,8">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{Binding RelativePath}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding ConflictKind}" Classes="muted"/>
+                                            <TextBlock Text="{Binding RecommendedAction}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{loc:Tr common.cancel}" Command="{Binding CloseCommand}" Classes="subtle"/>
+                <Button Content="{loc:Tr cloud_restore.start_background}"
+                        Command="{Binding StartRestoreCommand}"
+                        IsEnabled="{Binding CanStartRestore}"
+                        Classes="primary"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

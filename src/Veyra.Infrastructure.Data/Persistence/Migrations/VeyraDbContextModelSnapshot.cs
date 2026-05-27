@@ -17,6 +17,53 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.2");
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Extension")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RepositoryId", "IsDeleted");
+
+                    b.HasIndex("RepositoryId", "RelativePath")
+                        .IsUnique();
+
+                    b.ToTable("FileIdentities");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.FileSnapshot", b =>
                 {
                     b.Property<int>("Id")
@@ -40,7 +87,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.HasKey("Id");
 
@@ -51,11 +100,363 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.ToTable("FileSnapshots");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHashSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsDeletionMarker")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("LastWriteUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentHashSha256");
+
+                    b.HasIndex("FileIdentityId", "CreatedAt");
+
+                    b.HasIndex("FileIdentityId", "IsDeleted", "CreatedAt");
+
+                    b.ToTable("FileVersions");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionBlock", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BlockStorageKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .HasColumnName("BlockHashBlake3");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("LengthBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StoredSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BlockStorageKey");
+
+                    b.HasIndex("FileVersionId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("FileVersionId", "IsDeleted", "Sequence");
+
+                    b.ToTable("FileVersionBlocks");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiff", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AddedLines")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DiffKeySha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsTruncated")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LeftFileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LinesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MaxLines")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RemovedLines")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("RightFileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StorageFormatVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(2);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiffKeySha256");
+
+                    b.HasIndex("RightFileVersionId");
+
+                    b.HasIndex("LeftFileVersionId", "RightFileVersionId", "MaxLines")
+                        .IsUnique();
+
+                    b.HasIndex("LeftFileVersionId", "RightFileVersionId", "IsDeleted", "MaxLines");
+
+                    b.ToTable("FileVersionTextDiffs");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangeKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DiffId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EndLineSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int>("NewLineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NewStartLine")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OldLineCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OldStartLine")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("StartLineSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DiffId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("DiffId", "IsDeleted", "Sequence");
+
+                    b.ToTable("FileVersionTextDiffHunks");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DiffId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("HunkId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("InHunkSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LeftLineNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RightLineNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("TextLineAtomId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HunkId");
+
+                    b.HasIndex("TextLineAtomId");
+
+                    b.HasIndex("DiffId", "Sequence")
+                        .IsUnique();
+
+                    b.HasIndex("HunkId", "InHunkSequence")
+                        .IsUnique();
+
+                    b.HasIndex("DiffId", "IsDeleted", "Sequence");
+
+                    b.ToTable("FileVersionTextDiffLines");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.OperationJournalEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Category", "OccurredAtUtc");
+
+                    b.HasIndex("OccurredAtUtc", "Id");
+
+                    b.HasIndex("RepositoryId", "OccurredAtUtc");
+
+                    b.ToTable("OperationJournalEntries");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoCaptureFileVersions")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<long?>("CloudLastLocalSnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CloudLastRemoteSnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CloudLastSyncedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudSyncLastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloudSyncLastStatus")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
@@ -70,13 +471,18 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<int>("DirectoryId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ExclusionPatternsJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("FileCount")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime?>("LastScannedAt")
                         .HasColumnType("TEXT");
@@ -85,6 +491,89 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("ProtectCloudMetadata")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("RetentionAllowManualSnapshotCleanup")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("RetentionAutomaticCompactionEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("RetentionAutomaticCompactionWindowHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RetentionEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("RetentionPolicyOverrideEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTime?>("RetentionLastRunAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RetentionLastStatus")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RetentionMaintenanceWindowEndHour")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RetentionMaintenanceWindowStartHour")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RetentionMaxAgeDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("RetentionMaxSnapshots")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("RetentionMaxTotalSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RetentionRunIntervalMinutes")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(60);
+
+                    b.Property<string>("RetentionStorageMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("delete");
+
+                    b.Property<string>("RetentionTriggerFilter")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SyncConflictStrategy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("last_write_wins");
+
+                    b.Property<int>("SyncRetryBaseDelaySeconds")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(30);
+
+                    b.Property<int>("SyncRetryMaxAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(5);
 
                     b.Property<long>("TotalSizeBytes")
                         .ValueGeneratedOnAdd()
@@ -104,6 +593,10 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasIndex("DirectoryId")
                         .IsUnique();
 
+                    b.HasIndex("CloudLastSyncedAt", "CloudLastRemoteSnapshotId");
+
+                    b.HasIndex("RetentionEnabled", "RetentionLastRunAt");
+
                     b.ToTable("Repositories");
                 });
 
@@ -113,7 +606,20 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ArchiveFilePath")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ArchiveFileSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ArchivedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("DirectoryEntries")
@@ -122,8 +628,26 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<int>("FileEntries")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsArchived")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<int>("RepositoryId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("TagsCsv")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("TotalEntries")
                         .HasColumnType("INTEGER");
@@ -139,6 +663,10 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("RepositoryId", "CreatedAt");
+
+                    b.HasIndex("RepositoryId", "IsArchived", "CreatedAt");
+
+                    b.HasIndex("RepositoryId", "IsDeleted", "CreatedAt");
 
                     b.ToTable("RepositorySnapshots");
                 });
@@ -156,9 +684,17 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Extension")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsDirectory")
                         .HasColumnType("INTEGER");
@@ -200,7 +736,165 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.HasIndex("SnapshotId", "RelativePath")
                         .IsUnique();
 
+                    b.HasIndex("SnapshotId", "IsDeleted", "RelativePath");
+
+                    b.HasIndex("RepositoryId", "SnapshotId", "IsDeleted", "RelativePath");
+
                     b.ToTable("RepositorySnapshotEntries");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.RepositorySyncQueueItem", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ConflictStrategy")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MaxAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(5);
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ObservedRemoteSnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OperationType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("RemoteSnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UploadCheckpointNextIndex")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("UploadCheckpointSignature")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UploadCheckpointTotal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationType", "Status", "UpdatedAt");
+
+                    b.HasIndex("RepositoryId", "SnapshotId", "OperationType")
+                        .IsUnique();
+
+                    b.HasIndex("RepositoryId", "Status", "NextAttemptAtUtc");
+
+                    b.HasIndex("Status", "NextAttemptAtUtc", "CreatedAt");
+
+                    b.HasIndex("OperationType", "Status", "NextAttemptAtUtc", "CreatedAt");
+
+                    b.ToTable("RepositorySyncQueueItems");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.SnapshotFileLink", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileIdentityId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("FileVersionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<long>("SnapshotId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileVersionId");
+
+                    b.HasIndex("FileIdentityId", "SnapshotId");
+
+                    b.HasIndex("SnapshotId", "FileIdentityId")
+                        .IsUnique();
+
+                    b.HasIndex("SnapshotId", "IsDeleted", "FileIdentityId");
+
+                    b.HasIndex("SnapshotId", "IsDeleted", "FileVersionId");
+
+                    b.ToTable("SnapshotFileLinks");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.TextLineAtom", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HashSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HashSha256");
+
+                    b.HasIndex("HashSha256", "Text")
+                        .IsUnique();
+
+                    b.ToTable("TextLineAtoms");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.UserProfile", b =>
@@ -209,7 +903,24 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AccessToken")
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AccessTokenExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CloudSessionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CloudUserId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(320)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsActive")
@@ -217,6 +928,18 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.Property<DateTime>("LastLoginAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("RefreshToken")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RefreshTokenExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequirePasswordForSensitiveActions")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -227,6 +950,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
 
                     b.HasIndex("Username")
                         .IsUnique();
@@ -247,7 +973,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("INTEGER");
@@ -285,7 +1013,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("INTEGER");
@@ -325,7 +1055,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -338,6 +1070,91 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("WatchedDirectoryFormats");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.Repository", "Repository")
+                        .WithMany("FileIdentities")
+                        .HasForeignKey("RepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Repository");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileIdentity", "FileIdentity")
+                        .WithMany("Versions")
+                        .HasForeignKey("FileIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileIdentity");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionBlock", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", "FileVersion")
+                        .WithMany("Blocks")
+                        .HasForeignKey("FileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileVersion");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiff", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", null)
+                        .WithMany()
+                        .HasForeignKey("LeftFileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", null)
+                        .WithMany()
+                        .HasForeignKey("RightFileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersionTextDiff", "Diff")
+                        .WithMany("Hunks")
+                        .HasForeignKey("DiffId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diff");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffLine", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileVersionTextDiff", "Diff")
+                        .WithMany("Lines")
+                        .HasForeignKey("DiffId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.FileVersionTextDiffHunk", "Hunk")
+                        .WithMany("Lines")
+                        .HasForeignKey("HunkId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Veyra.Domain.Entities.TextLineAtom", "TextLineAtom")
+                        .WithMany("DiffLines")
+                        .HasForeignKey("TextLineAtomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Diff");
+
+                    b.Navigation("Hunk");
+
+                    b.Navigation("TextLineAtom");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
@@ -373,6 +1190,44 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Navigation("Snapshot");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.RepositorySyncQueueItem", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.Repository", "Repository")
+                        .WithMany("SyncQueueItems")
+                        .HasForeignKey("RepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Repository");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.SnapshotFileLink", b =>
+                {
+                    b.HasOne("Veyra.Domain.Entities.FileIdentity", "FileIdentity")
+                        .WithMany("SnapshotLinks")
+                        .HasForeignKey("FileIdentityId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.FileVersion", "FileVersion")
+                        .WithMany("SnapshotLinks")
+                        .HasForeignKey("FileVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Veyra.Domain.Entities.RepositorySnapshot", "Snapshot")
+                        .WithMany("FileLinks")
+                        .HasForeignKey("SnapshotId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FileIdentity");
+
+                    b.Navigation("FileVersion");
+
+                    b.Navigation("Snapshot");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.WatchedDirectoryFormat", b =>
                 {
                     b.HasOne("Veyra.Domain.Entities.Watched.WatchedDirectory", "Directory")
@@ -392,14 +1247,51 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Navigation("Format");
                 });
 
+            modelBuilder.Entity("Veyra.Domain.Entities.FileIdentity", b =>
+                {
+                    b.Navigation("SnapshotLinks");
+
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersion", b =>
+                {
+                    b.Navigation("Blocks");
+
+                    b.Navigation("SnapshotLinks");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiff", b =>
+                {
+                    b.Navigation("Hunks");
+
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.FileVersionTextDiffHunk", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
             modelBuilder.Entity("Veyra.Domain.Entities.Repository", b =>
                 {
+                    b.Navigation("FileIdentities");
+
                     b.Navigation("Snapshots");
+
+                    b.Navigation("SyncQueueItems");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.RepositorySnapshot", b =>
                 {
                     b.Navigation("Entries");
+
+                    b.Navigation("FileLinks");
+                });
+
+            modelBuilder.Entity("Veyra.Domain.Entities.TextLineAtom", b =>
+                {
+                    b.Navigation("DiffLines");
                 });
 
             modelBuilder.Entity("Veyra.Domain.Entities.Watched.D_WatchedFormat", b =>

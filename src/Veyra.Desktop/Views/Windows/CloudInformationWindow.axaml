@@ -1,0 +1,104 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        xmlns:dto="clr-namespace:Veyra.Application.DTOs;assembly=Veyra.Application"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        x:Class="Veyra.Desktop.Views.Windows.CloudInformationWindow"
+        x:DataType="vm:CloudInformationWindowViewModel"
+        Width="920"
+        Height="680"
+        MinWidth="760"
+        MinHeight="560"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr cloud_info.title}">
+    <Border Classes="dialog-shell" Margin="16" Padding="18">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="hero">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{loc:Tr cloud_info.title}" Classes="h2"/>
+                        <TextBlock Text="{loc:Tr cloud_info.subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="{loc:Tr cloud_info.open_manager}" Command="{Binding OpenManagerCommand}" Classes="primary"/>
+                    <Button Grid.Column="2" Content="{loc:Tr common.refresh}" Command="{Binding RefreshCommand}" Classes="subtle"/>
+                    <Button Grid.Column="3" Content="{loc:Tr common.close}" Command="{Binding CloseCommand}" Classes="subtle"/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1"
+                    Classes="metric-card"
+                    IsVisible="{Binding IsCloudUnavailable}"
+                    Background="#1AF59E0B"
+                    BorderBrush="#F59E0B">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <TextBlock Text="&#xE783;"
+                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                               Foreground="#F59E0B"
+                               VerticalAlignment="Center"
+                               FontSize="16"/>
+                    <StackPanel Grid.Column="1" Spacing="3">
+                        <TextBlock Text="{Binding CloudWarningTitle}"
+                                   FontWeight="SemiBold"
+                                   FontSize="12"
+                                   Foreground="#F59E0B"/>
+                        <TextBlock Text="{Binding CloudWarningDetail}"
+                                   Classes="muted"
+                                   FontSize="11"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <WrapPanel Grid.Row="2" ItemWidth="200" ItemHeight="86">
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_manager.account}" Classes="muted"/><TextBlock Text="{Binding AccountText}" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_manager.connection}" Classes="muted"/><TextBlock Text="{Binding ConnectionText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.last_sync}" Classes="muted"/><TextBlock Text="{Binding LastSyncText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.storage}" Classes="muted"/><TextBlock Text="{Binding StorageText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.repositories}" Classes="muted"/><TextBlock Text="{Binding RepositoryCountText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.snapshots}" Classes="muted"/><TextBlock Text="{Binding SnapshotCountText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.blocks}" Classes="muted"/><TextBlock Text="{Binding BlockCountText}" FontWeight="SemiBold"/></StackPanel></Border>
+                <Border Classes="metric-card" Margin="0,0,10,10"><StackPanel><TextBlock Text="{loc:Tr cloud_info.operations}" Classes="muted"/><TextBlock Text="{Binding OperationText}" FontWeight="SemiBold"/></StackPanel></Border>
+            </WrapPanel>
+            <Grid Grid.Row="3" ColumnDefinitions="*,*,*" ColumnSpacing="10">
+                <Border Classes="card" Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{loc:Tr cloud_info.cloud_only_missing}" Classes="section-title"/>
+                        <ItemsControl ItemsSource="{Binding CloudOnlyRepositories}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                    <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Classes="card" Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{loc:Tr cloud_info.linked_locally}" Classes="section-title"/>
+                        <ItemsControl ItemsSource="{Binding LinkedRepositories}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                    <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Classes="card" Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="{loc:Tr cloud_info.conflicts}" Classes="section-title"/>
+                        <ItemsControl ItemsSource="{Binding ConflictedRepositories}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                    <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </Grid>
+            <TextBlock Grid.Row="4" Text="{Binding StatusText}" Classes="muted" TextWrapping="Wrap"/>
+        </Grid>
+    </Border>
+</Window>

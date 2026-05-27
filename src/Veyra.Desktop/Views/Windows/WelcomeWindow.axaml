@@ -1,14 +1,44 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         x:Class="Veyra.Desktop.Views.Windows.WelcomeWindow"
-        Width="960" Height="540"
-        CanResize="False"
+        Width="1020" Height="660"
+        MinWidth="820" MinHeight="560"
+        CanResize="True"
         WindowStartupLocation="CenterScreen"
-        Title="VeyraFlow — Welcome"
+        SystemDecorations="Full"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Title="{loc:Tr welcome.window_title}"
         d:DataContext="{d:DesignInstance vm:WelcomeWindowViewModel, IsDesignTimeCreatable=True}"
         x:DataType="vm:WelcomeWindowViewModel">
 
-    <ContentControl Content="{Binding CurrentPage}" />
+    <Grid Margin="16" RowDefinitions="Auto,*" RowSpacing="12">
+        <Border Grid.Row="0" Classes="toolbar" Padding="14,12">
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Border Classes="badge">
+                        <TextBlock Text="{loc:Tr app.brand}"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource VeyraAccentBrush}"/>
+                    </Border>
+                    <TextBlock Text="{loc:Tr welcome.window_title}" Classes="section-title" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1"
+                           Text="{loc:Tr main.product_subtitle}"
+                           Classes="muted"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Classes="dialog-shell" Padding="8">
+            <ContentControl Content="{Binding CurrentPage}"/>
+        </Border>
+    </Grid>
 </Window>
+
+
+

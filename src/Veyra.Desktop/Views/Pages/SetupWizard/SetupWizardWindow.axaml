@@ -1,47 +1,190 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
         xmlns:pages="clr-namespace:Veyra.Desktop.Views.Pages.SetupWizard"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
         x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SetupWizardWindow"
         x:DataType="vm:SetupWizardViewModel"
-        Width="920" Height="640" Title="Первичная настройка"
-        Background="#121212" Foreground="#EEEEEE" CanResize="False">
+        Width="1020" Height="700" MinWidth="820" MinHeight="560" Title="{loc:Tr setup_wizard.window_title}"
+        Background="{DynamicResource VeyraCanvasBrush}" Foreground="{DynamicResource VeyraTextPrimaryBrush}" CanResize="True"
+        WindowStartupLocation="CenterOwner">
 
-    <DockPanel Margin="24">
+    <Grid>
+        <Grid Margin="16" ColumnDefinitions="250,8,*" ColumnSpacing="0">
+            <Border Grid.Column="0" Classes="sidebar" Padding="16" MinWidth="210">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{loc:Tr setup_wizard.title}" Classes="h2"/>
+                    <TextBlock Text="{loc:Tr setup_wizard.subtitle}" Classes="muted" TextWrapping="Wrap"/>
 
-        <!-- Bottom: navigation buttons + step info -->
-        <Grid DockPanel.Dock="Bottom" Margin="0,16,0,0" ColumnDefinitions="Auto,*,Auto">
-            <TextBlock Grid.Column="0" Text="{Binding StepInfo}"
-                       VerticalAlignment="Center" Opacity="0.6"/>
+                    <Border Classes="card" Padding="12" Margin="0,10,0,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr setup_wizard.steps}" Classes="label"/>
+                            <TextBlock Text="{loc:Tr setup_wizard.step1}"/>
+                            <TextBlock Text="{loc:Tr setup_wizard.step2}"/>
+                            <TextBlock Text="{loc:Tr setup_wizard.step3}"/>
+                        </StackPanel>
+                    </Border>
 
-            <TextBlock Grid.Column="1" Text="{Binding ErrorMessage}"
-                       Foreground="#FF5555" TextWrapping="Wrap"
-                       VerticalAlignment="Center" Margin="16,0"
-                       IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                    <TextBlock Text="{Binding StepInfo}" Opacity="0.7" Margin="0,10,0,0"/>
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="{DynamicResource VeyraDangerBrush}" TextWrapping="Wrap"
+                               IsVisible="{Binding ErrorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                </StackPanel>
+            </Border>
 
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Content="Назад" Width="120" Margin="0,0,8,0"
-                        Command="{Binding BackCommand}"/>
-                <Button Content="{Binding NextButtonText}" Width="160"
-                        Command="{Binding NextCommand}"
-                        IsEnabled="{Binding CanGoNext}"/>
-            </StackPanel>
+            <GridSplitter Grid.Column="1"
+                          Width="8"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"/>
+
+            <DockPanel Grid.Column="2" Margin="12,0,0,0">
+                <Border DockPanel.Dock="Bottom" Classes="toolbar" Padding="12" Margin="0,14,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                        <Button Content="{loc:Tr common.back}" Width="120" Command="{Binding BackCommand}" Classes="subtle"/>
+                        <Button Content="{Binding NextButtonText}" Width="170"
+                                Command="{Binding NextCommand}" IsEnabled="{Binding CanGoNext}" Classes="primary"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Classes="panel" Padding="18">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="14">
+                            <ContentControl Content="{Binding CurrentStep}"
+                                            IsVisible="{Binding ShowStepContent}">
+                                <ContentControl.DataTemplates>
+                                    <DataTemplate DataType="vm:SelectDirectoriesViewModel">
+                                        <pages:SelectDirectoriesPage/>
+                                    </DataTemplate>
+                                    <DataTemplate DataType="vm:SelectFormatsViewModel">
+                                        <pages:SelectFormatsPage/>
+                                    </DataTemplate>
+                                    <DataTemplate DataType="vm:RepositoryNameViewModel">
+                                        <pages:RepositoryNamePage/>
+                                    </DataTemplate>
+                                </ContentControl.DataTemplates>
+                            </ContentControl>
+
+                            <StackPanel IsVisible="{Binding ShowScanSection}" Spacing="14">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr create_repo.scan_title}" Classes="section-title" FontSize="16"/>
+                                <Border Grid.Row="0" Grid.Column="1" Classes="badge">
+                                    <TextBlock Text="{Binding StepInfo}" FontSize="11" FontWeight="SemiBold"/>
+                                </Border>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                           Text="{Binding ProgressMessage}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+
+                            <ProgressBar Minimum="0"
+                                         Maximum="100"
+                                         Value="{Binding ProgressPercent}"
+                                         Height="14"
+                                         IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+
+                            <Border Classes="metric-card">
+                                <TextBlock Text="{loc:Tr create_repo.scan_hint}" Classes="muted" TextWrapping="Wrap"/>
+                            </Border>
+
+                            <WrapPanel Orientation="Horizontal" ItemWidth="190">
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding FilesFoundCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.files_found_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding SelectedFormatCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.formats_selected_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding TrackedFolderCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraInfoBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.tracked_folders_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.progress_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+
+                            <Border Classes="card" Padding="12">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                    <TextBlock Grid.Row="0" Text="{loc:Tr create_repo.log_title}" FontWeight="SemiBold"/>
+                                    <ScrollViewer Grid.Row="1"
+                                                  Height="220"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl ItemsSource="{Binding ProgressLogItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:SetupWizardProgressLogItemViewModel">
+                                                    <Grid ColumnDefinitions="72,*" ColumnSpacing="10" Margin="0,0,0,8">
+                                                        <TextBlock Grid.Column="0" Text="{Binding TimestampText}" Classes="muted" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="11"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+
+                            <Border Classes="card"
+                                    BorderBrush="{DynamicResource VeyraSuccessBrush}"
+                                    Background="{DynamicResource VeyraDiffAddBgBrush}"
+                                    IsVisible="{Binding IsCompleted}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr create_repo.success_banner_title}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                    <TextBlock Text="{loc:Tr create_repo.success_banner_body}" TextWrapping="Wrap" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="{loc:Tr create_repo.close_after_finish_hint}"
+                                       Classes="muted"
+                                       FontSize="12"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
         </Grid>
 
-        <!-- Content: step views -->
-        <ContentControl Content="{Binding CurrentStep}">
-            <ContentControl.DataTemplates>
-                <DataTemplate DataType="vm:SelectDirectoriesViewModel">
-                    <pages:SelectDirectoriesPage/>
-                </DataTemplate>
-                <DataTemplate DataType="vm:SelectFormatsViewModel">
-                    <pages:SelectFormatsPage/>
-                </DataTemplate>
-                <DataTemplate DataType="vm:RepositoryNameViewModel">
-                    <pages:RepositoryNamePage/>
-                </DataTemplate>
-            </ContentControl.DataTemplates>
-        </ContentControl>
-    </DockPanel>
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr create_repo.scan_title}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"/>
+                    <TextBlock Text="{Binding ProgressMessage}"
+                               Classes="muted"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <ProgressBar Classes="loading-progress"
+                                 Minimum="0"
+                                 Maximum="100"
+                                 Value="{Binding ProgressPercent}"
+                                 IsIndeterminate="{Binding IsProgressIndeterminate}"/>
+                    <TextBlock Text="{Binding ProgressPercent, StringFormat='{}{0}%'}"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
 </Window>
+
