@@ -1,0 +1,276 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:formatted="clr-namespace:Veyra.Desktop.Models.TrackedFormats"
+        xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        mc:Ignorable="d"
+        x:Class="Veyra.Desktop.Views.Windows.CreateRepositoryWindow"
+        x:Name="Root"
+        x:DataType="windows:CreateRepositoryWindowViewModel"
+        Width="980"
+        Height="700"
+        MinWidth="740"
+        MinHeight="540"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="Full"
+        CanResize="True"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Foreground="{DynamicResource VeyraTextPrimaryBrush}"
+        Title="{loc:Tr create_repo.window_title}">
+
+    <Grid>
+        <DockPanel Margin="16">
+            <Border DockPanel.Dock="Top" Classes="dialog-hero" Padding="18" Margin="0,0,0,12">
+                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}" FontSize="20" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding StepInfo}" Classes="muted"/>
+                    <TextBlock Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                               Text="{Binding ErrorMessage}"
+                               Foreground="{DynamicResource VeyraDangerBrush}"
+                               MaxWidth="360"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasErrorMessage}"/>
+                </Grid>
+            </Border>
+
+            <Grid RowDefinitions="*,Auto" RowSpacing="14">
+                <Border Grid.Row="0" Classes="panel" Padding="14">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid>
+                            <StackPanel IsVisible="{Binding IsStepRepository}" Spacing="12">
+                            <TextBlock Text="{loc:Tr create_repo.step_repository_intro}" Classes="section-title"/>
+
+                            <TextBlock Text="{loc:Tr create_repo.repository_name}" Opacity="0.8"/>
+                            <TextBox Text="{Binding RepositoryName, Mode=TwoWay}" Watermark="{loc:Tr create_repo.repository_name_placeholder}"/>
+
+                            <TextBlock Text="{loc:Tr create_repo.description}" Opacity="0.8"/>
+                            <TextBox Text="{Binding Description, Mode=TwoWay}" AcceptsReturn="True" Height="96"/>
+
+                            <TextBlock Text="{loc:Tr create_repo.directory}" Opacity="0.8"/>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding DirectoryPath, Mode=TwoWay}"
+                                         IsReadOnly="{Binding IsDirectoryPathLocked}"/>
+                                <Button Grid.Column="1"
+                                        Content="{loc:Tr common.browse}"
+                                        Command="{Binding BrowseDirectoryCommand}"
+                                        IsEnabled="{Binding CanBrowseDirectory}"/>
+                            </Grid>
+                        </StackPanel>
+
+                            <StackPanel IsVisible="{Binding IsStepFormats}" Spacing="12">
+                            <TextBlock Text="{loc:Tr create_repo.select_formats}" FontSize="15" FontWeight="SemiBold"/>
+                            <TextBlock Text="{loc:Tr create_repo.format_categories_hint}" Classes="muted" TextWrapping="Wrap"/>
+
+                            <ItemsControl ItemsSource="{Binding FormatCategories}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="formatted:FormatCategoryItemViewModel">
+                                        <Button Margin="4"
+                                                Padding="10,5"
+                                                Classes="subtle compact"
+                                                Classes.primary="{Binding IsApplied}"
+                                                Command="{Binding #Root.((windows:CreateRepositoryWindowViewModel)DataContext).ToggleFormatCategoryCommand}"
+                                                CommandParameter="{Binding .}">
+                                            <TextBlock Text="{Binding DisplayName}"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="360">
+                                <ItemsControl ItemsSource="{Binding Formats}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="windows:RepositoryFormatOptionViewModel">
+                                            <ToggleButton Margin="4" Padding="10,5"
+                                                          IsChecked="{Binding IsSelected, Mode=TwoWay}">
+                                                <TextBlock Text="{Binding Format}"/>
+                                            </ToggleButton>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0" Text="{Binding CustomFormat, Mode=TwoWay}" Watermark="{loc:Tr create_repo.add_format_placeholder}"/>
+                                <Button Grid.Column="1" Content="{loc:Tr common.add}" Command="{Binding AddCustomFormatCommand}"/>
+                            </Grid>
+                        </StackPanel>
+
+                            <StackPanel IsVisible="{Binding IsStepScan}" Spacing="14">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" RowSpacing="6">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr create_repo.scan_title}" Classes="section-title" FontSize="16"/>
+                                <Border Grid.Row="0" Grid.Column="1" Classes="badge">
+                                    <TextBlock Text="{Binding StepInfo}" FontSize="11" FontWeight="SemiBold"/>
+                                </Border>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                           Text="{Binding ProgressMessage}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+
+                            <StackPanel Spacing="6">
+                                <ProgressBar Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding ProgressPercent}"
+                                             Height="14"/>
+                                <ProgressBar Classes="loading-progress"
+                                             Height="4"
+                                             IsIndeterminate="True"
+                                             IsVisible="{Binding ShowAnimatedActivity}"/>
+                            </StackPanel>
+
+                            <Border Classes="metric-card">
+                                <TextBlock Text="{loc:Tr create_repo.scan_hint}" Classes="muted" TextWrapping="Wrap"/>
+                            </Border>
+
+                            <WrapPanel Orientation="Horizontal" ItemWidth="190">
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding FilesFoundCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.files_found_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding SelectedFormatCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.formats_selected_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding TrackedFolderCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraInfoBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.tracked_folders_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="metric-card" Margin="0,0,12,12">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding TrackedFilesCount}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                        <TextBlock Text="{loc:Tr create_repo.tracked_files_card}" Classes="muted"/>
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+
+                            <Border Classes="card" Padding="12">
+                                <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                    <TextBlock Grid.Row="0" Text="{loc:Tr create_repo.log_title}" FontWeight="SemiBold"/>
+                                    <ScrollViewer Grid.Row="1"
+                                                  Height="220"
+                                                  VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Disabled">
+                                        <ItemsControl ItemsSource="{Binding ProgressLogItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="windows:RepositoryCreationLogItemViewModel">
+                                                    <Grid ColumnDefinitions="72,*" ColumnSpacing="10" Margin="0,0,0,8">
+                                                        <TextBlock Grid.Column="0" Text="{Binding TimestampText}" Classes="muted" FontFamily="Cascadia Code,Consolas,Monospace" FontSize="11"/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap"/>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Border>
+
+                            <Border Classes="card" BorderBrush="{DynamicResource VeyraSuccessBrush}" Background="{DynamicResource VeyraDiffAddBgBrush}" IsVisible="{Binding ShowCreateSuccessBanner}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="{loc:Tr create_repo.success_banner_title}" FontWeight="SemiBold" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                    <TextBlock Text="{loc:Tr create_repo.success_banner_body}" TextWrapping="Wrap" Foreground="{DynamicResource VeyraSuccessBrush}"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Classes="card"
+                                    BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                    IsVisible="{Binding HasRetryableBusyFiles}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="{loc:Tr create_repo.warning_busy_files_title}"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource VeyraWarningBrush}"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesSummary}"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding RetryableBusyFilesPreview}"
+                                               TextWrapping="Wrap"
+                                               FontFamily="Cascadia Code,Consolas,Monospace"
+                                               FontSize="12"
+                                               IsVisible="{Binding HasRetryableBusyFilesPreview}"/>
+                                    <Button Content="{loc:Tr create_repo.retry_unavailable_files}"
+                                            Command="{Binding RetryUnavailableFilesCommand}"
+                                            HorizontalAlignment="Left"
+                                            Classes="primary"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="{loc:Tr create_repo.close_after_finish_hint}"
+                                       Classes="muted"
+                                       FontSize="12"/>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Border>
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="{loc:Tr common.back}" Width="110" Command="{Binding BackCommand}" Classes="subtle"/>
+                    <Button Content="{Binding CancelButtonText}"
+                            Width="110"
+                            Command="{Binding CancelCommand}"
+                            Classes="subtle"
+                            IsVisible="{Binding ShowCancelButton}"
+                            IsEnabled="{Binding CanCancelOperation}"/>
+                    <Button Content="{Binding NextButtonText}" Width="140" Command="{Binding NextCommand}" Classes="primary"/>
+                </StackPanel>
+            </Grid>
+        </DockPanel>
+
+        <Border Classes="loading-overlay"
+                IsVisible="{Binding IsBusy}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr create_repo.scan_title}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"/>
+                    <TextBlock Text="{Binding ProgressMessage}"
+                               Classes="muted"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <StackPanel Spacing="6">
+                        <ProgressBar Minimum="0"
+                                     Maximum="100"
+                                     Value="{Binding ProgressPercent}"
+                                     Height="10"/>
+                        <ProgressBar Classes="loading-progress"
+                                     Height="4"
+                                     IsIndeterminate="True"
+                                     IsVisible="{Binding ShowAnimatedActivity}"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding ProgressDisplayText}"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               IsVisible="{Binding ShowDeterminateProgressValue}"/>
+                    <Button Content="{loc:Tr common.cancel}"
+                            Command="{Binding CancelCommand}"
+                            Classes="subtle"
+                            HorizontalAlignment="Center"
+                            MinWidth="130"
+                            IsVisible="{Binding ShowBusyCancelButton}"
+                            IsEnabled="{Binding CanCancelOperation}"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

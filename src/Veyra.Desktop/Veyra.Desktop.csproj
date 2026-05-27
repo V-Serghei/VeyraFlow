@@ -1,0 +1,87 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <VeyraCoreNativeWinPath Condition="Exists('..\..\native\veyra_core\target\x86_64-pc-windows-msvc\release\veyra_core.dll')">..\..\native\veyra_core\target\x86_64-pc-windows-msvc\release\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\release\veyra_core.dll')">..\..\native\veyra_core\target\release\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\x86_64-pc-windows-msvc\debug\veyra_core.dll')">..\..\native\veyra_core\target\x86_64-pc-windows-msvc\debug\veyra_core.dll</VeyraCoreNativeWinPath>
+    <VeyraCoreNativeWinPath Condition="'$(VeyraCoreNativeWinPath)' == '' and Exists('..\..\native\veyra_core\target\debug\veyra_core.dll')">..\..\native\veyra_core\target\debug\veyra_core.dll</VeyraCoreNativeWinPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+    <Folder Include="Views\Controls\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Labs.CommandManager" Version="11.3.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Diagnostics" Version="11.3.11">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="FluentAvaloniaUI" Version="2.5.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.2" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+    <PackageReference Include="Svg.Skia" Version="3.4.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Veyra.Application\Veyra.Application.csproj" />
+    <ProjectReference Include="..\Veyra.Infrastructure.Sync\Veyra.Infrastructure.Sync.csproj" />
+    <ProjectReference Include="..\Veyra.Infrastructure.Data\Veyra.Infrastructure.Data.csproj" />
+    <ProjectReference Include="..\Veyra.Infrastructure.Native\Veyra.Infrastructure.Native.csproj" />
+    <ProjectReference Include="..\Veyra.Shared.Logging\Veyra.Shared.Logging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>runtimes\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+
+    <None Include="$(VeyraCoreNativeWinPath)" Condition="'$(VeyraCoreNativeWinPath)' != ''">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>runtimes\win-x64\native\veyra_core.dll</Link>
+    </None>
+
+    <None Include="Localization\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <Link>Localization\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Views\Pages\Dashboard\RepositoryDashboardView.cs">
+      <DependentUpon>RepositoryDashboardView.axaml</DependentUpon>
+    </Compile>
+    <Compile Update="Views\Pages\SetupWizard\RepositoryNamePage.axaml.cs">
+      <DependentUpon>RepositoryNamePage.axaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Views\Pages\Explorer\RepositoryExplorerView.axaml.cs">
+      <DependentUpon>RepositoryExplorerView.axaml</DependentUpon>
+    </Compile>
+    <Compile Update="Views\Windows\SnapshotNameDialogWindow.axaml.cs">
+      <DependentUpon>SnapshotNameDialogWindow.axaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+</Project>

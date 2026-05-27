@@ -1,0 +1,177 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.OperationJournalWindow"
+        x:DataType="vm:OperationJournalWindowViewModel"
+        Width="1240"
+        MinWidth="820"
+        Height="780"
+        MinHeight="680"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr app_settings.operation_journal_title}">
+
+    <Grid>
+        <Border Classes="dialog-shell" Margin="16" Padding="18">
+            <Grid RowDefinitions="Auto,Auto,*" RowSpacing="14">
+                <Border Grid.Row="0" Classes="hero">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" Classes="h2"/>
+                            <TextBlock Text="{loc:Tr operation_journal.window_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="{loc:Tr common.close}"
+                                Command="{Binding CloseCommand}"
+                                Classes="subtle"/>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Classes="filter-sheet">
+                    <WrapPanel Orientation="Horizontal">
+                        <TextBox Width="280"
+                                 Margin="0,0,10,10"
+                                 Classes="compact"
+                                 Text="{Binding SearchQuery, Mode=TwoWay}"
+                                 Watermark="{loc:Tr operation_journal.search_placeholder}"/>
+
+                        <ComboBox Width="150"
+                                  Margin="0,0,10,10"
+                                  Classes="compact"
+                                  ItemsSource="{Binding LevelFilters}"
+                                  SelectedItem="{Binding SelectedLevelFilter, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:OperationJournalFilterOptionItem">
+                                    <TextBlock Text="{Binding Label}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <ComboBox Width="170"
+                                  Margin="0,0,10,10"
+                                  Classes="compact"
+                                  ItemsSource="{Binding CategoryFilters}"
+                                  SelectedItem="{Binding SelectedCategoryFilter, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:OperationJournalFilterOptionItem">
+                                    <TextBlock Text="{Binding Label}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <TextBox Width="150"
+                                 Margin="0,0,10,10"
+                                 Classes="compact"
+                                 Text="{Binding DateFilter, Mode=TwoWay}"
+                                 Watermark="{loc:Tr operation_journal.date_placeholder}"/>
+
+                        <Button Margin="0,0,10,10"
+                                Content="{loc:Tr explorer.clear_filters}"
+                                Command="{Binding ClearFiltersCommand}"
+                                Classes="subtle compact"/>
+                    </WrapPanel>
+                </Border>
+
+                <Grid x:Name="OperationJournalContentGrid" Grid.Row="2" ColumnDefinitions="1.15*,0.95*" ColumnSpacing="14">
+                    <Border x:Name="OperationJournalEntriesPanel" Grid.Column="0" Classes="card" Padding="12">
+                        <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Text="{loc:Tr operation_journal.entries_title}" Classes="section-title"/>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock Text="{loc:Tr operation_journal.empty}"
+                                           Classes="muted"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           IsVisible="{Binding HasNoItems}"/>
+
+                                <ListBox Classes="clean-list"
+                                         ItemsSource="{Binding Items}"
+                                         SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                                         IsVisible="{Binding HasNoItems, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:OperationJournalWindowItemViewModel">
+                                            <Border Padding="10" Background="Transparent" BorderThickness="0">
+                                                <StackPanel Spacing="6">
+                                                    <WrapPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding TimestampText}" Classes="muted" Margin="0,0,10,4"/>
+                                                        <TextBlock Text="{Binding LevelLabel}" FontWeight="SemiBold" Margin="0,0,10,4"/>
+                                                        <TextBlock Text="{Binding CategoryLabel}" Classes="muted" Margin="0,0,10,4"/>
+                                                        <TextBlock Text="{Binding ScopeText}" Classes="muted" Margin="0,0,0,4"/>
+                                                    </WrapPanel>
+                                                    <TextBlock Text="{Binding Action}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Message}" Classes="muted" TextWrapping="Wrap" MaxLines="2"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border x:Name="OperationJournalDetailsPanel" Grid.Column="1" Classes="card" Padding="12">
+                        <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Text="{loc:Tr common.details}" Classes="section-title"/>
+
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="10" IsVisible="{Binding HasSelectedItem}">
+                                    <Grid ColumnDefinitions="120,*" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr common.date}" Classes="label"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.TimestampText}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="120,*" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr operation_journal.level_label}" Classes="label"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.LevelLabel}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="120,*" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr operation_journal.category_label}" Classes="label"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.CategoryLabel}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="120,*" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr operation_journal.action_label}" Classes="label"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.Action}" TextWrapping="Wrap"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="120,*" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0" Text="{loc:Tr operation_journal.scope_label}" Classes="label"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SelectedItem.ScopeText}" TextWrapping="Wrap"/>
+                                    </Grid>
+
+                                    <Border Height="1" Background="{DynamicResource VeyraBorderSoftBrush}"/>
+
+                                    <TextBlock Text="{loc:Tr operation_journal.message_label}" Classes="label"/>
+                                    <Border Classes="metric-card">
+                                        <TextBlock Text="{Binding SelectedItem.Message}" TextWrapping="Wrap"/>
+                                    </Border>
+
+                                    <TextBlock Text="{loc:Tr common.details}" Classes="label"/>
+                                    <Border Classes="metric-card">
+                                        <TextBlock Text="{Binding SelectedItem.DetailsText}" TextWrapping="Wrap"/>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border Classes="loading-overlay"
+                Margin="16"
+                IsVisible="{Binding IsLoading}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr operation_journal.loading_title}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr operation_journal.loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

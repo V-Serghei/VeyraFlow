@@ -1,0 +1,234 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            rust-target: x86_64-unknown-linux-gnu
+            native-ext: so
+          - os: windows-latest
+            rid: win-x64
+            rust-target: x86_64-pc-windows-msvc
+            native-ext: dll
+          - os: macos-latest
+            rid: osx-x64
+            rust-target: x86_64-apple-darwin
+            native-ext: dylib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Cache NuGet
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/*.sln', '**/*.csproj', '**/Directory.Packages.props') }}
+        restore-keys: nuget-${{ runner.os }}-
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.rust-target }}
+        override: true
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          native/veyra_core/target
+        key: cargo-${{ runner.os }}-${{ matrix.rust-target }}-${{ hashFiles('native/veyra_core/Cargo.lock') }}
+        restore-keys: |
+          cargo-${{ runner.os }}-${{ matrix.rust-target }}-
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25.x'
+
+    - name: Install cbindgen
+      run: cargo install cbindgen
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+        key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: go-${{ runner.os }}-
+
+    - name: Build Rust library
+      working-directory: ./native/veyra_core
+      run: |
+        cargo build --release --target ${{ matrix.rust-target }}
+
+    - name: Copy native library (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        mkdir -p src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native
+        cp native/veyra_core/target/${{ matrix.rust-target }}/release/libveyra_core.${{ matrix.native-ext }} src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native/
+
+    - name: Copy native library (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        if (!(Test-Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native")) {
+            New-Item -ItemType Directory -Force -Path "src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native" | Out-Null
+        }
+        Copy-Item "native\veyra_core\target\${{ matrix.rust-target }}\release\veyra_core.${{ matrix.native-ext }}" "src\Veyra.Desktop\runtimes\${{ matrix.rid }}\native\" -Force
+
+    - name: Copy native library (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        mkdir -p src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native
+        cp native/veyra_core/target/${{ matrix.rust-target }}/release/libveyra_core.${{ matrix.native-ext }} src/Veyra.Desktop/runtimes/${{ matrix.rid }}/native/
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build .NET solution
+      run: dotnet build --no-restore --configuration Release
+
+    - name: Test .NET solution
+      run: dotnet test --no-build --configuration Release --verbosity normal
+
+    - name: Build Go sync agent (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      working-directory: ./tools/sync-agent
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        $env:CGO_ENABLED = "0"
+        $env:GOARCH = "amd64"
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o .\dist\sync-agent.exe .\cmd\sync-agent
+
+    - name: Build Go sync agent (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      working-directory: ./tools/sync-agent
+      shell: bash
+      run: |
+        set -euxo pipefail
+        mkdir -p dist
+        export CGO_ENABLED=0
+        export GOARCH=amd64
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o ./dist/sync-agent ./cmd/sync-agent
+
+    - name: Build Go cloud-api (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('server/cloud-api/go.mod') != ''
+      working-directory: ./server/cloud-api
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist | Out-Null
+        $env:CGO_ENABLED = "0"
+        $env:GOARCH = "amd64"
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o .\dist\cloud-api.exe .\cmd\api
+
+    - name: Build Go cloud-api (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('server/cloud-api/go.mod') != ''
+      working-directory: ./server/cloud-api
+      shell: bash
+      run: |
+        set -euxo pipefail
+        mkdir -p dist
+        export CGO_ENABLED=0
+        export GOARCH=amd64
+        go mod download
+        go build -trimpath -ldflags="-s -w" -o ./dist/cloud-api ./cmd/api
+
+    - name: Publish Desktop app
+      run: dotnet publish src/Veyra.Desktop/Veyra.Desktop.csproj --configuration Release --runtime ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true
+
+    - name: Upload Desktop app artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: veyraflow-${{ matrix.rid }}
+        path: src/Veyra.Desktop/bin/Release/net9.0/${{ matrix.rid }}/publish/
+
+    - name: Upload sync agent artifact (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/dist/sync-agent.exe
+
+    - name: Upload sync agent artifact (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('tools/sync-agent/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: sync-agent-${{ matrix.rid }}
+        path: tools/sync-agent/dist/sync-agent
+
+
+    - name: Upload cloud-api artifact (Windows)
+      if: matrix.os == 'windows-latest' && hashFiles('server/cloud-api/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: cloud-api-${{ matrix.rid }}
+        path: server/cloud-api/dist/cloud-api.exe
+
+    - name: Upload cloud-api artifact (Unix)
+      if: matrix.os != 'windows-latest' && hashFiles('server/cloud-api/go.mod') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: cloud-api-${{ matrix.rid }}
+        path: server/cloud-api/dist/cloud-api
+
+  docker-cloud-api:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write  
+    steps:
+      - uses: actions/checkout@v4
+  
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+  
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+  
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cloud-api
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+  
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server/cloud-api
+          file: ./server/cloud-api/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

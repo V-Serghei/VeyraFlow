@@ -1,0 +1,198 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.InfoWindow"
+        x:Name="HelpRoot"
+        Width="980" Height="680"
+        MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True"
+        SystemDecorations="Full"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Title="{loc:Tr info.window_title}"
+        d:DataContext="{d:DesignInstance vm:InfoWindowViewModel, IsDesignTimeCreatable=True}"
+        x:DataType="vm:InfoWindowViewModel">
+    <Border Padding="16" Background="{DynamicResource VeyraCanvasBrush}">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="dialog-hero">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <Border Classes="badge" HorizontalAlignment="Left">
+                            <TextBlock Text="{loc:Tr help.center_badge}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource VeyraInfoBrush}"/>
+                        </Border>
+                        <TextBlock Text="{loc:Tr help.center_title}" Classes="h2"/>
+                        <TextBlock Text="{loc:Tr help.center_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="{loc:Tr common.close}"
+                            Command="{Binding CloseCommand}"
+                            Classes="subtle"
+                            VerticalAlignment="Top"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" ColumnDefinitions="300,12,*">
+                <Border Grid.Column="0" Classes="dialog-shell" Padding="14">
+                    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+                        <StackPanel Grid.Row="0" Spacing="6">
+                            <TextBlock Text="{loc:Tr help.mode_label}" Classes="label"/>
+                            <ComboBox ItemsSource="{Binding ModeFilters}"
+                                      SelectedItem="{Binding SelectedModeFilter, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:HelpModeFilterViewModel">
+                                        <TextBlock Text="{Binding Title}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding SearchQuery, Mode=TwoWay}"
+                                     Watermark="{loc:Tr help.search_placeholder}"/>
+                            <Button Grid.Column="1"
+                                    Content="&#xE711;"
+                                    FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                    Command="{Binding ClearSearchCommand}"
+                                    IsVisible="{Binding HasSearchQuery}"
+                                    Classes="ghost icon compact"/>
+                        </Grid>
+
+                        <ScrollViewer Grid.Row="2"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="{loc:Tr help.no_results}"
+                                           Classes="muted"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding HasVisibleArticles, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                <ItemsControl ItemsSource="{Binding VisibleArticles}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:HelpArticleViewModel">
+                                            <Button Command="{Binding #HelpRoot.((vm:InfoWindowViewModel)DataContext).OpenArticleCommand}"
+                                                    CommandParameter="{Binding .}"
+                                                    Classes="subtle"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    Margin="0,0,0,8">
+                                                <StackPanel Spacing="3">
+                                                    <TextBlock Text="{Binding Category}" Classes="muted" FontSize="11"/>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding Summary}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <GridSplitter Grid.Column="1"
+                              Width="12"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              ResizeDirection="Columns"
+                              ResizeBehavior="PreviousAndNext"/>
+
+                <Border Grid.Column="2" Classes="dialog-shell" Padding="18">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding SelectedArticle.Category}" Classes="muted"/>
+                                <TextBlock Text="{Binding SelectedArticle.Title}" Classes="h2" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding SelectedArticle.Summary}" Classes="muted" TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <ItemsControl ItemsSource="{Binding SelectedArticle.Blocks}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:HelpBlockViewModel">
+                                        <StackPanel Spacing="8" Margin="0,0,0,4">
+                                            <TextBlock Text="{Binding Text}"
+                                                       TextWrapping="Wrap"
+                                                       IsVisible="{Binding IsParagraph}"/>
+
+                                            <Grid ColumnDefinitions="Auto,*"
+                                                  ColumnSpacing="8"
+                                                  IsVisible="{Binding IsBullet}">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="&#xE73E;"
+                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                           Foreground="{DynamicResource VeyraInfoBrush}"
+                                                           Margin="0,2,0,0"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Text}"
+                                                           TextWrapping="Wrap"/>
+                                            </Grid>
+
+                                            <Border Classes="metric-card"
+                                                    Padding="10"
+                                                    IsVisible="{Binding IsPath}">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{loc:Tr help.settings_path_label}" Classes="muted" FontSize="11"/>
+                                                    <TextBlock Text="{Binding Text}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <Border Classes="filter-sheet floating-panel"
+                                                    Padding="10"
+                                                    IsVisible="{Binding IsCallout}">
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
+                                            </Border>
+
+                                            <Border Classes="card"
+                                                    Padding="12"
+                                                    BorderBrush="{DynamicResource VeyraInfoBrush}"
+                                                    IsVisible="{Binding IsVisual}">
+                                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                                    <Border Grid.Column="0" Classes="badge" VerticalAlignment="Top">
+                                                        <TextBlock Text="&#xE9F5;"
+                                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                   Foreground="{DynamicResource VeyraInfoBrush}"/>
+                                                    </Border>
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Text}"
+                                                               TextWrapping="Wrap"
+                                                               Classes="muted"/>
+                                                </Grid>
+                                            </Border>
+
+                                            <Border Classes="card"
+                                                    Padding="12"
+                                                    IsVisible="{Binding IsAction}">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding Text}"
+                                                               TextWrapping="Wrap"
+                                                               VerticalAlignment="Center"/>
+                                                    <Button Grid.Column="1"
+                                                            Content="{Binding ActionLabel}"
+                                                            Command="{Binding #HelpRoot.((vm:InfoWindowViewModel)DataContext).OpenDeepLinkCommand}"
+                                                            CommandParameter="{Binding ActionLink}"
+                                                            Classes="primary compact"
+                                                            VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <Border Grid.Row="2" Classes="toolbar" Padding="10">
+                <TextBlock Text="{loc:Tr help.offline_note}" Classes="muted" TextWrapping="Wrap"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

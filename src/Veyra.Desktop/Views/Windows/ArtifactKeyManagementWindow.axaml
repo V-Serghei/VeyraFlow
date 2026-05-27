@@ -1,0 +1,239 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        xmlns:settings="clr-namespace:Veyra.Desktop.ViewModels.Pages.Settings"
+        x:Class="Veyra.Desktop.Views.Windows.ArtifactKeyManagementWindow"
+        x:DataType="vm:ArtifactKeyManagementWindowViewModel"
+        x:Name="Root"
+        Width="1220"
+        MinWidth="960"
+        Height="820"
+        MinHeight="680"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr app_settings.artifact_key_management_title}">
+
+    <Grid>
+        <Border Classes="dialog-shell" Margin="16" Padding="18">
+            <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="14">
+                <Border Grid.Row="0" Classes="hero">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_title}" Classes="h2"/>
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="{loc:Tr common.close}"
+                                Command="{Binding CloseCommand}"
+                                Classes="subtle"/>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                    <Border Grid.Column="0" Classes="filter-sheet">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_coverage_title}" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding Source.ArtifactEncryptionCoverageSummary}" Classes="muted" TextWrapping="Wrap"/>
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{loc:Tr app_settings.artifact_key_management_local_blocks}" Classes="muted" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr app_settings.artifact_key_management_uploaded_blocks}" Classes="muted" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr app_settings.artifact_key_management_restore_path}" Classes="muted" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Button Grid.Column="1"
+                            Command="{Binding RefreshCommand}"
+                            Classes="subtle compact responsive-icon"
+                            VerticalAlignment="Top"
+                            IsEnabled="{Binding Source.IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+
+                    <Button Grid.Column="2"
+                            Command="{Binding RotateCommand}"
+                            Classes="primary compact responsive-icon"
+                            VerticalAlignment="Top"
+                            IsEnabled="{Binding Source.IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE8AC;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_encryption_rotate_button}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                </Grid>
+
+                <WrapPanel Grid.Row="2" Orientation="Horizontal" ItemWidth="220" ItemHeight="120">
+                    <Border Classes="metric-card" Width="220" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_metric_active}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding Source.ArtifactActiveKeyCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="220" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_metric_retired}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding Source.ArtifactRetiredKeyCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="220" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_key_management_metric_revoked}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding Source.ArtifactRevokedKeyCount}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="340" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.artifact_encryption_active_key_label}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding Source.ArtifactEncryptionActiveKeyText}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <Grid Grid.Row="3" ColumnDefinitions="320,*" ColumnSpacing="14">
+                    <StackPanel Grid.Column="0" Spacing="12">
+                        <Border Classes="card" Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="{loc:Tr app_settings.artifact_encryption_title}" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="130,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_status_label}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Source.ArtifactEncryptionStatusText}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="130,*" ColumnSpacing="10">
+                                    <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_updated_label}" Opacity="0.8"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Source.ArtifactEncryptionUpdatedText}" TextWrapping="Wrap"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="card" Padding="12">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="{loc:Tr app_settings.artifact_encryption_rotate_button}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr app_settings.artifact_key_management_rotation_note}" Classes="muted" TextWrapping="Wrap"/>
+                                <TextBox Text="{Binding RotationNote, Mode=TwoWay}"
+                                         Watermark="{loc:Tr app_settings.artifact_key_management_rotation_note_placeholder}"
+                                         AcceptsReturn="True"
+                                         MinHeight="88"
+                                         TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="metric-card" IsVisible="{Binding Source.IsArtifactEncryptionBusy}">
+                            <StackPanel Classes="loading-state">
+                                <TextBlock Text="{loc:Tr app_settings.artifact_encryption_running}" FontWeight="SemiBold"/>
+                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="{Binding Source.ArtifactEncryptionMessage}"
+                                   IsVisible="{Binding Source.ArtifactEncryptionMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
+                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
+                        <TextBlock Grid.Row="0"
+                                   Text="{loc:Tr app_settings.artifact_key_management_no_selection}"
+                                   Classes="muted"
+                                   HorizontalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding Source.HasArtifactKeys, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="320,*" ColumnSpacing="12" IsVisible="{Binding Source.HasArtifactKeys}">
+                            <Border Grid.Column="0" Classes="card" Padding="12">
+                                <StackPanel Spacing="10">
+                                    <TextBlock Text="{loc:Tr app_settings.artifact_key_management_details_title}" FontWeight="SemiBold"/>
+                                    <ListBox ItemsSource="{Binding Source.ArtifactKeys}"
+                                             SelectedItem="{Binding SelectedKey, Mode=TwoWay}"
+                                             MinHeight="420">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="settings:AppArtifactKeyItemViewModel">
+                                                <Border Classes="metric-card" Margin="0,0,0,8">
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock Text="{Binding KeyId}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding StatusText}" Classes="muted"/>
+                                                        <TextBlock Text="{Binding CreatedAtText}" Classes="muted" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" Classes="card" Padding="12">
+                                <Grid>
+                                    <TextBlock Text="{loc:Tr app_settings.artifact_key_management_no_selection}"
+                                               Classes="muted"
+                                               VerticalAlignment="Center"
+                                               HorizontalAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               IsVisible="{Binding HasSelectedKey, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                    <StackPanel Spacing="10" IsVisible="{Binding HasSelectedKey}">
+                                        <TextBlock Text="{loc:Tr app_settings.artifact_key_management_selected_key}" FontWeight="SemiBold" FontSize="16"/>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_active_key_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.KeyId}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_status_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.StatusText}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr common.created}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.CreatedAtText}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10" IsVisible="{Binding SelectedKey.HasRotatedAt}">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr common.updated}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.RotatedAtText}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10" IsVisible="{Binding SelectedKey.HasRevokedAt}">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr common.deleted}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.RevokedAtText}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr common.note}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding SelectedKey.NoteText}" TextWrapping="Wrap"/>
+                                        </Grid>
+
+                                        <Border Classes="filter-sheet" Padding="12">
+                                            <StackPanel Spacing="8">
+                                                <TextBlock Text="{loc:Tr app_settings.artifact_key_management_revocation_note}" FontWeight="SemiBold"/>
+                                                <TextBox Text="{Binding RevocationNote, Mode=TwoWay}"
+                                                         Watermark="{loc:Tr app_settings.artifact_key_management_revocation_note_placeholder}"
+                                                         AcceptsReturn="True"
+                                                         MinHeight="88"
+                                                         TextWrapping="Wrap"/>
+                                                <Button Command="{Binding RevokeSelectedCommand}"
+                                                        Classes="subtle compact responsive-icon"
+                                                        HorizontalAlignment="Left"
+                                                        IsEnabled="{Binding CanRevokeSelectedKey}">
+                                                    <Button.Content>
+                                                        <StackPanel Classes="button-content">
+                                                            <TextBlock Classes="button-icon" Text="&#xE74D;"/>
+                                                            <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_encryption_revoke_button}"/>
+                                                        </StackPanel>
+                                                    </Button.Content>
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

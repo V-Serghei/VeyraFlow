@@ -1,0 +1,223 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.OperationMonitorWindow"
+        x:DataType="vm:OperationMonitorWindowViewModel"
+        Width="1180"
+        MinWidth="860"
+        Height="720"
+        MinHeight="580"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr app_settings.operation_monitor_title}">
+
+    <Grid>
+        <Border Classes="dialog-shell" Margin="16" Padding="18">
+            <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="14">
+                <Border Grid.Row="0" Classes="hero">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_title}" Classes="h2"/>
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_subtitle}" Classes="muted" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <Button Grid.Column="1"
+                                Content="{loc:Tr common.close}"
+                                Command="{Binding CloseCommand}"
+                                Classes="subtle"/>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1" Classes="filter-sheet">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_last_updated}" Classes="label"/>
+                            <TextBlock Text="{Binding LastUpdatedText}" FontWeight="SemiBold"/>
+                        </StackPanel>
+
+                        <CheckBox Grid.Column="1"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0"
+                                  Content="{loc:Tr app_settings.operation_monitor_auto_refresh}"
+                                  IsChecked="{Binding IsAutoRefreshEnabled, Mode=TwoWay}"/>
+
+                        <Button Grid.Column="2"
+                                Command="{Binding RefreshCommand}"
+                                Classes="subtle compact responsive-icon"
+                                IsEnabled="{Binding IsRefreshing, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                            <Button.Content>
+                                <StackPanel Classes="button-content">
+                                    <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                    <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                                </StackPanel>
+                            </Button.Content>
+                        </Button>
+
+                        <TextBlock Grid.Column="3"
+                                   VerticalAlignment="Center"
+                                   Text="{Binding MonitorMessage}"
+                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding MonitorMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                    </Grid>
+                </Border>
+
+                <WrapPanel Grid.Row="2" Orientation="Horizontal" ItemWidth="210" ItemHeight="120">
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_cpu}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding CpuText}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_working_set}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding WorkingSetText}" FontSize="24" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding PrivateBytesText}" Classes="muted" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_managed_heap}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding ManagedHeapText}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_threads}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding ThreadCountText}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_handles}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding HandleCountText}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Classes="metric-card" Width="210" Margin="0,0,10,10">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{loc:Tr app_settings.operation_monitor_metric_uptime}" Classes="muted" FontSize="11"/>
+                            <TextBlock Text="{Binding ProcessAgeText}" FontSize="24" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                </WrapPanel>
+
+                <Grid Grid.Row="3" ColumnDefinitions="1.05*,0.95*" ColumnSpacing="14">
+                    <Border Classes="card" Padding="12">
+                        <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Text="{loc:Tr app_settings.operation_monitor_active_title}" Classes="section-title"/>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock Text="{loc:Tr app_settings.operation_monitor_empty_active}"
+                                           Classes="muted"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding HasActiveOperations, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                <ScrollViewer IsVisible="{Binding HasActiveOperations}"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding ActiveOperations}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:OperationMonitorActiveOperationItemViewModel">
+                                                <Border Classes="card" Padding="10" Margin="0,0,0,8">
+                                                    <StackPanel Spacing="8">
+                                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                            <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold"/>
+                                                            <Border Grid.Column="1" Classes="badge">
+                                                                <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold"/>
+                                                            </Border>
+                                                        </Grid>
+
+                                                        <TextBlock Text="{Binding QueueText}" Classes="muted" TextWrapping="Wrap"/>
+
+                                                        <StackPanel Spacing="4" IsVisible="{Binding HasProgress}">
+                                                            <TextBlock Text="{Binding ProgressText}" Classes="muted"/>
+                                                            <ProgressBar Minimum="0"
+                                                                         Maximum="100"
+                                                                         Value="{Binding ProgressPercent}"/>
+                                                        </StackPanel>
+
+                                                        <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8">
+                                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.operation_monitor_elapsed_label}" Classes="label"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding ElapsedText}"/>
+                                                            <TextBlock Grid.Column="2" Text="{loc:Tr app_settings.operation_monitor_updated_label}" Classes="label"/>
+                                                            <TextBlock Grid.Column="3" Text="{Binding UpdatedText}" TextWrapping="Wrap"/>
+                                                        </Grid>
+
+                                                        <TextBlock Text="{Binding ErrorText}"
+                                                                   Foreground="{DynamicResource VeyraWarningBrush}"
+                                                                   TextWrapping="Wrap"
+                                                                   IsVisible="{Binding HasError}"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="1" Classes="card" Padding="12">
+                        <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                            <TextBlock Grid.Row="0" Text="{loc:Tr app_settings.operation_monitor_recent_title}" Classes="section-title"/>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock Text="{loc:Tr app_settings.operation_monitor_empty_recent}"
+                                           Classes="muted"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           IsVisible="{Binding HasRecentOperations, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                                <ScrollViewer IsVisible="{Binding HasRecentOperations}"
+                                              VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding RecentOperations}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:OperationMonitorRecentOperationItemViewModel">
+                                                <Border Classes="card" Padding="10" Margin="0,0,0,8">
+                                                    <StackPanel Spacing="6">
+                                                        <WrapPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding TimestampText}" Classes="muted" Margin="0,0,10,4"/>
+                                                            <TextBlock Text="{Binding CategoryText}" Classes="muted" Margin="0,0,10,4"/>
+                                                            <TextBlock Text="{Binding LevelText}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                                        </WrapPanel>
+                                                        <TextBlock Text="{Binding ActionText}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                        <TextBlock Text="{Binding Message}" Classes="muted" TextWrapping="Wrap"/>
+                                                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.operation_monitor_duration_label}" Classes="label"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding DurationText}" TextWrapping="Wrap"/>
+                                                        </Grid>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border Classes="loading-overlay"
+                Margin="16"
+                IsVisible="{Binding IsLoading}">
+            <Border Classes="loading-card"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    MinWidth="320"
+                    MaxWidth="420">
+                <StackPanel Classes="loading-state">
+                    <TextBlock Text="{loc:Tr app_settings.operation_monitor_loading_title}" FontSize="18" FontWeight="SemiBold"/>
+                    <TextBlock Text="{loc:Tr app_settings.operation_monitor_loading_detail}" Classes="muted" TextWrapping="Wrap"/>
+                    <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>

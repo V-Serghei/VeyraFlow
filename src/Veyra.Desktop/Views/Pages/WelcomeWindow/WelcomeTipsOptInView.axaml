@@ -1,0 +1,47 @@
+﻿<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Veyra.Desktop.Views.Pages.WelcomeWindow.WelcomeTipsOptInView"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.WelcomeWindow"
+             d:DataContext="{d:DesignInstance vm:WelcomeTipsOptInViewModel, IsDesignTimeCreatable=True}"
+             x:DataType="vm:WelcomeTipsOptInViewModel">
+    <Border Padding="24">
+        <StackPanel Spacing="16" HorizontalAlignment="Center" Width="520">
+
+            <StackPanel Spacing="6" HorizontalAlignment="Center">
+                <TextBlock Text="Interactive tours" FontSize="24" FontWeight="SemiBold" />
+                <TextBlock Text="Step-by-step introduction to features."
+                           TextWrapping="Wrap" Opacity="0.85"/>
+            </StackPanel>
+
+            <StackPanel>
+                <Border Classes="card">
+                    <StackPanel>
+                        <TextBlock Text="Context hints" FontWeight="SemiBold"/>
+                        <TextBlock Text="Tips for working with files" Opacity="0.85"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Classes="card">
+                    <StackPanel>
+                        <TextBlock Text="Enable tutorial hints" FontWeight="SemiBold"/>
+                        <TextBlock Text="Tips for working with files" Opacity="0.85"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="12">
+                <TextBlock Text="Enable tutorial hints" VerticalAlignment="Center"/>
+                <CheckBox IsChecked="{Binding EnableTips, Mode=TwoWay}"/>
+            </StackPanel>
+
+            <StackPanel>
+                <Button Content="Next"
+                        HorizontalAlignment="Center"
+                        Width="160"
+                        Command="{Binding ContinueCommand}"/>
+            </StackPanel>
+
+        </StackPanel>
+    </Border>
+</UserControl>
