@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Veyra.Desktop.Services.Sync;
 
 public sealed record RepositoryFsEventLease(
-    IReadOnlyList<long> ItemIds,
-    int Count)
+    IReadOnlyList<RepositoryFsEventLeaseItem> Items)
 {
-    public static RepositoryFsEventLease Empty { get; } = new(Array.Empty<long>(), 0);
+    public IReadOnlyList<long> ItemIds { get; } = Items.Select(static item => item.Id).ToArray();
+    public int Count => Items.Count;
+
+    public static RepositoryFsEventLease Empty { get; } = new(Array.Empty<RepositoryFsEventLeaseItem>());
 }

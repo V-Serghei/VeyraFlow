@@ -1,13 +1,14 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:conv="clr-namespace:Veyra.Desktop.Converters"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:windows="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         mc:Ignorable="d"
         x:Class="Veyra.Desktop.Views.MainWindow"
+        x:Name="RootWindow"
         x:DataType="windows:MainWindowViewModel"
-        Icon="/Assets/avalonia-logo.ico"
         Title="{loc:Tr main.window_title}"
         Width="1280" Height="820"
         MinWidth="980" MinHeight="640"
@@ -16,9 +17,21 @@
 
     <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14" RowSpacing="8">
         <Border x:Name="MainToolbar" Grid.Row="0" Classes="toolbar" Padding="12,10">
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                    <Border Classes="badge" Padding="10,6">
+                    <Button Command="{Binding ShellBackCommand}"
+                            Classes="subtle responsive-icon"
+                            IsVisible="{Binding ShowShellBackButton}"
+                            ToolTip.Tip="{loc:Tr common.back}">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72B;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.back}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+
+                    <Border Classes="badge" Padding="10,6" IsVisible="{Binding ShowShellBrandBadge}">
                         <TextBlock Text="&#x25C8;"
                                    FontSize="16"
                                    Foreground="{DynamicResource VeyraAccentBrush}"
@@ -26,18 +39,20 @@
                     </Border>
 
                     <StackPanel Spacing="2">
-                        <TextBlock Text="{loc:Tr main.product_name}" FontSize="17" FontWeight="SemiBold"/>
-                        <TextBlock Text="{loc:Tr main.product_subtitle}" Classes="muted hide-on-narrow" FontSize="11"/>
+                        <TextBlock Text="{Binding ShellTitle}"
+                                   FontSize="17"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding ShellSubtitle}"
+                                   Classes="muted hide-on-narrow"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding HasShellSubtitle}"
+                                   ToolTip.Tip="{Binding ShellSubtitleTooltip}"/>
                     </StackPanel>
                 </StackPanel>
 
-                <TextBlock Grid.Column="1"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Center"
-                           Classes="muted hide-on-narrow"
-                           Text="{loc:Tr app.brand}"/>
-
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                     <Button x:Name="MainSearchButton"
                             MinWidth="90"
                             Height="34"
@@ -48,6 +63,45 @@
                             <StackPanel Classes="button-content">
                                 <TextBlock Classes="button-icon" Text="&#xE721;"/>
                                 <TextBlock Classes="button-label" Text="{loc:Tr main.open_search}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainTagsButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding ToggleGlobalTagPickerCommand}"
+                            ToolTip.Tip="{loc:Tr search.tags_button}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE8EC;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr search.tags_button_short}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainHelpButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding OpenHelpCenterCommand}"
+                            ToolTip.Tip="{loc:Tr help.center_title}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE946;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.open_help}"/>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+                    <Button x:Name="MainCloudInfoButton"
+                            MinWidth="52"
+                            Height="34"
+                            Command="{Binding OpenCloudInformationCommand}"
+                            ToolTip.Tip="{loc:Tr cloud_info.tooltip}"
+                            Classes="subtle responsive-icon">
+                        <Button.Content>
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE753;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr main.cloud}"/>
                             </StackPanel>
                         </Button.Content>
                     </Button>
@@ -98,6 +152,72 @@
         </Border>
 
         <ContentControl x:Name="MainPageHost" Grid.Row="2" Content="{Binding CurrentPage}"/>
+
+        <Border Grid.RowSpan="4"
+                Background="#01000000"
+                IsVisible="{Binding Search.IsTagPickerVisible}"
+                PointerPressed="OnGlobalTagPickerBackdropPressed"/>
+
+        <Border Grid.RowSpan="4"
+                Classes="filter-sheet floating-panel"
+                Padding="14"
+                Width="340"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,44,126,0"
+                IsVisible="{Binding Search.IsTagPickerVisible}">
+            <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel Grid.Column="0" Spacing="2">
+                        <TextBlock Text="{loc:Tr search.tags_picker_title}" Classes="section-title"/>
+                        <TextBlock Text="{loc:Tr search.tags_picker_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Content="{loc:Tr common.close}"
+                            Command="{Binding Search.CloseTagPickerCommand}"
+                            Classes="subtle compact"/>
+                </Grid>
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding Search.TagPickerSearchQuery, Mode=TwoWay}"
+                             Watermark="{loc:Tr search.tags_picker_search_placeholder}"/>
+                    <Button Grid.Column="1"
+                            Content="&#xE711;"
+                            FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                            Command="{Binding Search.ClearTagPickerSearchCommand}"
+                            IsVisible="{Binding Search.HasTagPickerSearchQuery}"
+                            Classes="ghost icon compact"/>
+                </Grid>
+
+                <TextBlock Text="{loc:Tr search.tags_picker_empty}"
+                           Classes="muted"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding Search.HasTagPickerItems, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+
+                <ItemsControl ItemsSource="{Binding Search.TagPickerItems}" IsVisible="{Binding Search.HasTagPickerItems}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Classes="subtle compact"
+                                    Margin="0,0,8,8"
+                                    Padding="10,5"
+                                    Command="{Binding #RootWindow.((windows:MainWindowViewModel)DataContext).Search.SelectSnapshotTagCommand}"
+                                    CommandParameter="{Binding .}">
+                                <StackPanel Orientation="Horizontal" Spacing="0">
+                                    <TextBlock Text="#" Foreground="{DynamicResource VeyraInfoBrush}" FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding .}" Foreground="{DynamicResource VeyraInfoBrush}" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
 
         <Border Grid.Row="3"
                 Classes="card"

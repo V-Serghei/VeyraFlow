@@ -15,6 +15,10 @@ public static partial class DependencyInjection
         services.AddWindowWithDataContext<WelcomeWindow, WelcomeWindowViewModel>();
         services.AddWindowWithDataContext<MainWindow, MainWindowViewModel>();
         services.AddWindowWithDataContext<InfoWindow, InfoWindowViewModel>();
+        services.AddWindowWithDataContext<ProgramOverviewWindow, ProgramOverviewWindowViewModel>();
+        services.AddWindowWithDataContext<CloudInformationWindow, CloudInformationWindowViewModel>();
+        services.AddWindowWithDataContext<CloudRepositoryManagerWindow, CloudRepositoryManagerWindowViewModel>();
+        services.AddWindowWithDataContext<CloudRestoreWizardWindow, CloudRestoreWizardWindowViewModel>();
         services.AddWindowWithDataContext<CreateRepositoryWindow, CreateRepositoryWindowViewModel>();
         services.AddWindowWithDataContext<SnapshotNameDialogWindow, SnapshotNameDialogWindowViewModel>();
         services.AddWindowWithDataContext<FileVersionCompareWindow, FileVersionCompareWindowViewModel>();

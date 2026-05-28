@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS cloud_block_packs (
     sealed_at     timestamptz NULL
 );
 
+CREATE TABLE IF NOT EXISTS cloud_blocks (
+    block_hash   text PRIMARY KEY,
+    length_bytes integer NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now()
+);
+
 ALTER TABLE cloud_blocks
     ADD COLUMN IF NOT EXISTS storage_kind text NOT NULL DEFAULT 'loose',
     ADD COLUMN IF NOT EXISTS pack_id bigint NULL REFERENCES cloud_block_packs(id) ON DELETE SET NULL,
@@ -127,12 +133,6 @@ CREATE TABLE IF NOT EXISTS snapshot_file_versions (
     is_deletion_marker  boolean NOT NULL,
     created_at          timestamptz NOT NULL,
     blocks_json         jsonb NOT NULL DEFAULT '[]'::jsonb
-);
-
-CREATE TABLE IF NOT EXISTS cloud_blocks (
-    block_hash   text PRIMARY KEY,
-    length_bytes integer NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS sync_idempotency_keys (
@@ -259,4 +259,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_user_sessions_refresh_hash
 
 CREATE INDEX IF NOT EXISTS ix_user_sessions_user_active
     ON user_sessions(user_id, revoked_at, refresh_expires_at DESC, id DESC);
-

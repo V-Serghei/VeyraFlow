@@ -7,6 +7,7 @@ namespace Veyra.Desktop.ViewModels.Windows;
 public sealed partial class FileVersionCompareListItemViewModel : ObservableObject
 {
     public long FileVersionId { get; init; }
+    public int VersionOrdinal { get; init; }
     public DateTime CreatedAtUtc { get; init; }
     public long SizeBytes { get; init; }
     public bool IsDeletionMarker { get; init; }
@@ -18,7 +19,7 @@ public sealed partial class FileVersionCompareListItemViewModel : ObservableObje
     [ObservableProperty]
     private bool _isSelectedRight;
 
-    public string VersionName => $"v{FileVersionId}";
+    public string VersionName => $"v{VersionOrdinal}";
     public string CreatedAtDisplay => CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
     public string SizeDisplay => IsDeletionMarker ? Loc.T("common.deleted") : FormatSize(SizeBytes);
 

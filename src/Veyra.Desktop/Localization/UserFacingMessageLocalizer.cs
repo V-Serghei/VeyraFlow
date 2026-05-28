@@ -20,6 +20,7 @@ public static class UserFacingMessageLocalizer
     private static readonly Regex IntegrityAttentionRegex = new(@"^Integrity verification requires attention in\s+(?<problematic>\d+)\s+of\s+(?<total>\d+)\s+repositories\.$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex IntegrityCleanRegex = new(@"^Integrity verification completed with no unresolved issues in\s+(?<total>\d+)\s+repositories\.$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex IntegrityFollowUpRegex = new(@"^(?<problematic>\d+)\/(?<total>\d+)\s+repositories require follow-up\.$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex RepositoryCreatedSummaryRegex = new(@"^Repository created\.\s+Directory scan matched\s+(?<files>\d+)\s+file\(s\)\s+and\s+(?<folders>\d+)\s+folder\(s\)\s+using\s+(?<formats>\d+)\s+selected format\(s\)\.\s+Initial versioned snapshot\s+(?<snapshot>created|not created|needs retry)\.\s+Busy files:\s+(?<busy>\d+)\.$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly IReadOnlyDictionary<string, string> ExactMessageKeys =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -50,6 +51,11 @@ public static class UserFacingMessageLocalizer
             ["retention max snapshots must be positive."] = "ui_error.retention_max_snapshots_positive",
             ["sync conflict strategy is invalid."] = "ui_error.sync_strategy_invalid",
             ["repository was not found."] = "ui_error.repository_not_found",
+            ["file version was not found."] = "ui_error.file_version_not_found",
+            ["file version does not belong to the selected repository."] = "ui_error.file_version_repository_mismatch",
+            ["file version does not match the requested path."] = "ui_error.file_version_path_mismatch",
+            ["this version is a deletion marker and does not contain restore data."] = "ui_error.file_version_deletion_marker",
+            ["content blocks are missing for this version."] = "ui_error.file_version_content_blocks_missing",
             ["directory was added but repository creation failed."] = "ui_error.directory_added_repository_create_failed",
             ["failed to create repository for directory."] = "ui_error.repository_create_failed",
             ["failed to create repository for the selected directory."] = "ui_error.repository_create_selected_directory_failed",
@@ -177,6 +183,26 @@ public static class UserFacingMessageLocalizer
                 "operation_journal.message.integrity_follow_up_details",
                 integrityFollowUpMatch.Groups["problematic"].Value.Trim(),
                 integrityFollowUpMatch.Groups["total"].Value.Trim());
+        }
+
+        var repositoryCreatedSummaryMatch = RepositoryCreatedSummaryRegex.Match(message);
+        if (repositoryCreatedSummaryMatch.Success)
+        {
+            var snapshotValue = repositoryCreatedSummaryMatch.Groups["snapshot"].Value;
+            var snapshotKey = snapshotValue.ToLowerInvariant() switch
+            {
+                "created" => "operation_journal.snapshot_created_yes",
+                "needs retry" => "operation_journal.snapshot_created_retry",
+                _ => "operation_journal.snapshot_created_no"
+            };
+
+            return Loc.F(
+                "operation_journal.message.repository_created_summary",
+                repositoryCreatedSummaryMatch.Groups["files"].Value.Trim(),
+                repositoryCreatedSummaryMatch.Groups["folders"].Value.Trim(),
+                repositoryCreatedSummaryMatch.Groups["formats"].Value.Trim(),
+                Loc.T(snapshotKey),
+                repositoryCreatedSummaryMatch.Groups["busy"].Value.Trim());
         }
 
         var unhandledExceptionMatch = UnhandledExceptionRegex.Match(message);

@@ -220,7 +220,7 @@ public sealed partial class OperationJournalWindowViewModel : ObservableObject
         {
             "ScanRepositoryCommand" => Loc.T("operation_journal.action.scan_repository"),
             "EnsureRepositoriesCommand" => Loc.T("operation_journal.action.refresh_repositories"),
-            "CreateRepositoryWithFormatsCommand" => Loc.T("operation_journal.action.create_repository"),
+            "CreateRepositoryWithFormatsCommand" or "CreateRepositoryCommand" or "AddDirectoryAndCreateRepositoryCommand" => Loc.T("operation_journal.action.create_repository"),
             "dialog_login" or "settings_login" => Loc.T("operation_journal.action.sign_in"),
             "dialog_register" or "settings_register" => Loc.T("operation_journal.action.register"),
             "settings_cloud_storage_refresh" => Loc.T("operation_journal.action.refresh_cloud_status"),

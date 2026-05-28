@@ -27,7 +27,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Veyra.Desktop\Veyra.Desktop.csproj" />
-    <ProjectReference Include="..\..\src\Veyra.Infrastructure.Data\Veyra.Infrastructure.Data.csproj" />
     <ProjectReference Include="..\..\src\Veyra.Application\Veyra.Application.csproj" />
   </ItemGroup>
 

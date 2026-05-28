@@ -29,6 +29,16 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
     [ObservableProperty] private string _cloudModeColor = "#9E9E9E";
     [ObservableProperty] private string _cloudModeBorderColor = "#2A3442";
     [ObservableProperty] private string _cloudModeBackgroundColor = "#0F1319";
+    [ObservableProperty] private bool _showLiveSyncSection = true;
+    [ObservableProperty] private string _liveSyncStateText = string.Empty;
+    [ObservableProperty] private string _liveSyncModeText = string.Empty;
+    [ObservableProperty] private string _liveSyncSummaryText = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLiveSyncDetail))]
+    private string _liveSyncDetailText = string.Empty;
+    [ObservableProperty] private string _liveSyncAccentColor = "#94A3B8";
+    [ObservableProperty] private string _liveSyncBorderColor = "#2A3442";
+    [ObservableProperty] private string _liveSyncBackgroundColor = "#0F1319";
 
     [ObservableProperty] private string _cloudSyncStateKey = "idle";
     [ObservableProperty] private bool _isDirectoryAvailable = true;
@@ -64,11 +74,19 @@ public sealed partial class RepositoryCardViewModel : ObservableObject
         }
     }
 
+    public bool ShowUnavailableHint => !IsDirectoryAvailable;
+    public bool HasLiveSyncDetail => !string.IsNullOrWhiteSpace(LiveSyncDetailText);
+
+    partial void OnIsDirectoryAvailableChanged(bool value)
+        => OnPropertyChanged(nameof(ShowUnavailableHint));
+
     public void RefreshFormatsDisplay()
     {
         OnPropertyChanged(nameof(FormatsDisplay));
         OnPropertyChanged(nameof(FormatsBadge));
         OnPropertyChanged(nameof(ShortPath));
+        OnPropertyChanged(nameof(ShowUnavailableHint));
+        OnPropertyChanged(nameof(HasLiveSyncDetail));
     }
 
     public void RefreshLocalization()

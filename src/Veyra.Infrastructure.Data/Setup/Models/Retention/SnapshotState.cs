@@ -6,4 +6,6 @@ internal sealed record SnapshotState(
     long Id,
     DateTime CreatedAt,
     long TotalFileBytes,
-    string Trigger);
+    string Trigger,
+    bool IsArchived,
+    string? TagsCsv);

@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
-using Veyra.Infrastructure.Data.Preview;
 
 namespace Veyra.Desktop.Services.Preview;
 

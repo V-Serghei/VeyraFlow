@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Veyra.Application.Abstractions.Sync;
+using Veyra.Application.DTOs;
 using Veyra.Desktop.Services.Sync.Runtime.Models;
 
 namespace Veyra.Desktop.Services.Sync.Runtime;

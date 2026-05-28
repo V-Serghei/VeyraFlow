@@ -11,65 +11,92 @@
 
     <Grid>
         <Grid ColumnDefinitions="272,6,*" ColumnSpacing="0" Margin="16">
-            <Border Grid.Column="0" Classes="sidebar" Padding="16,18">
-            <Grid RowDefinitions="Auto,Auto,*" RowSpacing="14">
+            <Border Grid.Column="0" Classes="sidebar" Padding="14,16">
+            <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12">
                 <StackPanel Grid.Row="0" Spacing="4">
-                    <TextBlock Text="{loc:Tr dashboard.repositories_label}" Classes="section-title"/>
-                    <TextBlock Text="{Binding RepositoryResultsSummary}" Classes="muted" FontSize="12"/>
+                    <TextBlock Text="{loc:Tr explorer.folders}" Classes="section-title"/>
+                    <TextBlock Text="{loc:Tr dashboard.folder_tree_hint}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
                 </StackPanel>
 
-                <Button x:Name="DashboardCreateRepositoryButton"
-                        Grid.Row="1"
-                        Content="{loc:Tr dashboard.create_repository}"
-                        HorizontalAlignment="Stretch"
-                        Padding="12,11"
-                        Command="{Binding AddRepositoryCommand}"
-                        Classes="primary"/>
+                <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Content="{Binding FolderTreeModeButtonText}"
+                            Padding="10,9"
+                            Command="{Binding ToggleRepositoryTreeModeCommand}"
+                            Classes="subtle"/>
+                    <Button x:Name="DashboardCreateRepositoryButton"
+                            Grid.Column="1"
+                            Content="{loc:Tr dashboard.create_repository}"
+                            Padding="10,9"
+                            Command="{Binding AddRepositoryCommand}"
+                            Classes="primary"/>
+                </Grid>
 
-                <ListBox Grid.Row="2"
-                         Classes="clean-list passive-list"
-                         ItemsSource="{Binding Repositories}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                                <Border Classes="card" Padding="10,10,10,12" Margin="0,0,0,8">
-                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
-                                        <Button Grid.Row="0" Grid.Column="0"
-                                                Classes="ghost"
-                                                Padding="0"
-                                                HorizontalAlignment="Left"
-                                                HorizontalContentAlignment="Left"
-                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
-                                                CommandParameter="{Binding .}">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="15"/>
-                                        </Button>
-
-                                        <Button Grid.Row="0" Grid.Column="1"
-                                                Content="{loc:Tr common.settings}"
-                                                Padding="10,6"
-                                                Classes="subtle"
-                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
-                                                CommandParameter="{Binding .}"/>
-
-                                        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Spacing="4">
-                                            <TextBlock Text="{Binding ShortPath}"
-                                                       FontSize="11"
-                                                       Classes="muted"
-                                                       TextTrimming="CharacterEllipsis"/>
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <Border Classes="badge" Padding="8,3">
-                                                    <TextBlock Text="{Binding StatusText}"
-                                                               FontSize="10"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="{Binding StatusColor}"/>
-                                                </Border>
-                                                <TextBlock Text="{Binding LastActivity}" FontSize="11" Classes="muted" VerticalAlignment="Center"/>
+                <ScrollViewer Grid.Row="2"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <TreeView x:Name="DashboardFolderTreeView"
+                              ItemsSource="{Binding FolderTreeRoots}"
+                              SelectedItem="{Binding SelectedFolderNode, Mode=TwoWay}">
+                        <TreeView.DataTemplates>
+                            <TreeDataTemplate DataType="vm:DashboardFolderTreeNodeViewModel" ItemsSource="{Binding Children}">
+                                <Border Padding="6,5"
+                                        CornerRadius="8"
+                                        Background="Transparent"
+                                        ToolTip.ShowDelay="1200">
+                                    <ToolTip.Tip>
+                                        <Border Classes="card" Padding="10" MaxWidth="280">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Text="{Binding TooltipTitle}"
+                                                           FontWeight="SemiBold"
+                                                           TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding TooltipPath}"
+                                                           Classes="muted"
+                                                           FontSize="11"
+                                                           TextWrapping="Wrap"/>
+                                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" RowDefinitions="Auto,Auto,Auto,Auto" IsVisible="{Binding HasRepository}">
+                                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{loc:Tr common.size}" Classes="caption"/>
+                                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding TooltipSize}" FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="{loc:Tr dashboard.activity_label}" Classes="caption"/>
+                                                    <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TooltipLastActivity}"/>
+                                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="{loc:Tr dashboard.sync_label}" Classes="caption"/>
+                                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding TooltipSync}" TextWrapping="Wrap"/>
+                                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="{loc:Tr dashboard.formats_short_label}" Classes="caption"/>
+                                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding TooltipFormats}" TextWrapping="Wrap"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding StatusHint}"
+                                                           Classes="muted"
+                                                           FontSize="11"
+                                                           IsVisible="{Binding HasRepository, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
                                             </StackPanel>
-                                        </StackPanel>
+                                        </Border>
+                                    </ToolTip.Tip>
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="7">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Icon}"
+                                                   FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                   Foreground="{Binding AccentColor}"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="●"
+                                                   FontSize="8"
+                                                   Foreground="{Binding AccentColor}"
+                                                   IsVisible="{Binding HasTrackedDescendant}"
+                                                   VerticalAlignment="Center"/>
                                     </Grid>
                                 </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                </ListBox>
+                            </TreeDataTemplate>
+                        </TreeView.DataTemplates>
+                    </TreeView>
+                </ScrollViewer>
             </Grid>
             </Border>
 
@@ -81,29 +108,87 @@
                           ResizeBehavior="PreviousAndNext"/>
 
             <Grid Grid.Column="2" RowDefinitions="Auto,Auto,*" RowSpacing="8" Margin="12,0,0,0">
-                <Border Grid.Row="0" Classes="toolbar" Padding="14,12">
-                <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
-                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <Grid Grid.Row="0" MinHeight="46" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                        <Button Grid.Column="0"
+                                Classes="subtle icon compact"
+                                Command="{Binding ToggleSearchCommand}"
+                                ToolTip.Tip="{loc:Tr dashboard.toggle_search}">
+                            <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+                        </Button>
+
                         <TextBox x:Name="DashboardSearchBox"
-                                 Grid.Column="0"
+                                 Grid.Column="1"
+                                 Width="360"
                                  Classes="compact"
                                  Text="{Binding SearchQuery, Mode=TwoWay}"
                                  Watermark="{loc:Tr dashboard.search_placeholder}"
-                                 ToolTip.Tip="{loc:Tr dashboard.search_tokens_hint}"/>
+                                 ToolTip.Tip="{loc:Tr dashboard.search_tokens_hint}"
+                                 IsVisible="{Binding IsSearchVisible}"/>
 
-                        <Border Grid.Column="1"
-                                Classes="badge warning"
+                        <Button Grid.Column="3"
+                                Classes="subtle compact responsive-icon"
+                                Padding="10,7"
+                                Command="{Binding LoadCommand}"
+                                ToolTip.Tip="{loc:Tr common.refresh}">
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Border Grid.Column="4"
+                                Classes="badge"
                                 Padding="9,7"
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding ShowConnectivityPanel}"
+                                Background="{Binding ConnectivityPanelBackgroundColor}"
                                 ToolTip.Tip="{Binding ConnectivityPanelDetail}">
-                            <TextBlock Text="&#xE783;"
+                            <TextBlock Text="{Binding ConnectivityPanelIcon}"
                                        FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                        Foreground="{Binding ConnectivityPanelAccentColor}"
                                        VerticalAlignment="Center"/>
                         </Border>
 
-                        <Button Grid.Column="2"
+                        <Button Grid.Column="5"
+                                Classes="subtle compact responsive-icon"
+                                Padding="10,7"
+                                ToolTip.Tip="{loc:Tr dashboard.toggle_view_mode}">
+                            <StackPanel Classes="button-content">
+                                <TextBlock Classes="button-icon" Text="{Binding RepositoryViewModeIcon}"/>
+                                <TextBlock Classes="button-label" Text="{Binding RepositoryViewModeLabel}"/>
+                                <TextBlock Classes="button-icon" Text="&#xE70D;" FontSize="10"/>
+                            </StackPanel>
+                            <Button.Flyout>
+                                <MenuFlyout>
+                                    <MenuItem Command="{Binding SelectRoomyCardsViewCommand}">
+                                        <MenuItem.Header>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{loc:Tr dashboard.view_mode_roomy_cards}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem Command="{Binding SelectCompactCardsViewCommand}">
+                                        <MenuItem.Header>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="&#xE8A9;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{loc:Tr dashboard.view_mode_compact_cards}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem Command="{Binding SelectListViewCommand}">
+                                        <MenuItem.Header>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="&#xE8FD;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{loc:Tr dashboard.view_mode_list}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </MenuItem.Header>
+                                    </MenuItem>
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+
+                        <Button Grid.Column="6"
                                 Classes="subtle"
                                 Padding="12,7"
                                 Command="{Binding ToggleAdvancedFiltersCommand}"
@@ -115,14 +200,7 @@
                                 <TextBlock Text="{Binding FilterButtonLabel}" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
-                    </Grid>
-
-                    <TextBlock Grid.Row="1"
-                               Text="{Binding RepositoryResultsSummary}"
-                               Classes="muted"
-                               FontSize="11"/>
                 </Grid>
-                </Border>
 
                 <TextBlock Grid.Row="1"
                            Margin="8,0,8,0"
@@ -137,18 +215,24 @@
                         <ColumnDefinition Width="{Binding IsAdvancedFiltersVisible, Converter={x:Static conv:BooleanToGridLengthConverter.Instance}, ConverterParameter=336}"/>
                     </Grid.ColumnDefinitions>
 
-                    <ScrollViewer Grid.Column="0" Padding="6,6,6,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ScrollViewer x:Name="DashboardRepositoryHost"
+                                  Grid.Column="0"
+                                  Padding="6,6,6,0"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  SizeChanged="OnRepositoryHostSizeChanged">
                         <StackPanel Spacing="14">
-                    <ItemsControl ItemsSource="{Binding Repositories}">
+                    <ItemsControl ItemsSource="{Binding Repositories}"
+                                  IsVisible="{Binding IsRegularCardView}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <WrapPanel Orientation="Horizontal"/>
+                                <UniformGrid Columns="{Binding RepositoryGridColumns}"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
 
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:RepositoryCardViewModel">
-                                <Border Width="348" MinHeight="310" Margin="0,0,14,14" Classes="card" Padding="16">
+                                <Border MinHeight="354" Margin="0,0,14,14" Classes="card" Padding="16">
                                     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12">
                                         <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                             <StackPanel Spacing="6">
@@ -175,6 +259,26 @@
                                                            FontSize="11"
                                                            Classes="muted"
                                                            TextTrimming="CharacterEllipsis"/>
+
+                                                <Border Classes="metric-card"
+                                                        Padding="10"
+                                                        BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                                        IsVisible="{Binding ShowUnavailableHint}">
+                                                    <StackPanel Spacing="8">
+                                                        <TextBlock Text="{loc:Tr repo_relink.unavailable_title}"
+                                                                   FontSize="12"
+                                                                   FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{loc:Tr repo_relink.dashboard_hint}"
+                                                                   Classes="muted"
+                                                                   FontSize="11"
+                                                                   TextWrapping="Wrap"/>
+                                                        <Button Content="{loc:Tr repo_relink.auto_button_short}"
+                                                                Classes="subtle compact"
+                                                                HorizontalAlignment="Left"
+                                                                Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).AutoRelinkRepositoryCommand}"
+                                                                CommandParameter="{Binding .}"/>
+                                                    </StackPanel>
+                                                </Border>
                                             </StackPanel>
 
                                             <Button Grid.Column="1"
@@ -211,26 +315,28 @@
 
                                         <Border Grid.Row="2"
                                                 Classes="metric-card"
-                                                IsVisible="{Binding ShowCloudSection}"
-                                                Background="{Binding CloudModeBackgroundColor}"
-                                                BorderBrush="{Binding CloudModeBorderColor}">
+                                                IsVisible="{Binding ShowLiveSyncSection}"
+                                                Background="{Binding LiveSyncBackgroundColor}"
+                                                BorderBrush="{Binding LiveSyncBorderColor}">
                                             <StackPanel Spacing="6">
-                                                <TextBlock Text="{loc:Tr dashboard.cloud_sync}" FontWeight="SemiBold" FontSize="12"/>
-                                                <Border Classes="badge"
-                                                        Padding="8,3"
-                                                        HorizontalAlignment="Left"
-                                                        BorderBrush="{Binding CloudModeBorderColor}">
-                                                    <TextBlock Text="{Binding CloudModeText}"
-                                                               FontSize="10"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="{Binding CloudModeColor}"/>
-                                                </Border>
-                                                <TextBlock Text="{Binding CloudSyncStatus}" FontSize="12"/>
-                                                <TextBlock Text="{Binding CloudQueueSummary}"
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                    <TextBlock Text="{loc:Tr explorer.monitoring_card_title}" FontWeight="SemiBold" FontSize="12"/>
+                                                    <Border Grid.Column="1"
+                                                            Classes="badge"
+                                                            Padding="8,3"
+                                                            BorderBrush="{Binding LiveSyncBorderColor}">
+                                                        <TextBlock Text="{Binding LiveSyncStateText}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{Binding LiveSyncAccentColor}"/>
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock Text="{Binding LiveSyncSummaryText}" FontSize="12" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding LiveSyncDetailText}"
                                                            FontSize="11"
                                                            Classes="muted"
                                                            TextWrapping="Wrap"
-                                                           IsVisible="{Binding CloudQueueSummary, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                                           IsVisible="{Binding HasLiveSyncDetail}"/>
                                             </StackPanel>
                                         </Border>
 
@@ -269,17 +375,179 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <ItemsControl ItemsSource="{Binding Repositories}"
+                                  IsVisible="{Binding IsCompactCardView}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="{Binding RepositoryGridColumns}"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:RepositoryCardViewModel">
+                                <Border MinHeight="190" Margin="0,0,14,14" Classes="card" Padding="14">
+                                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="10">
+                                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                            <StackPanel Spacing="5">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Border Classes="badge" Padding="8,3">
+                                                        <TextBlock Text="{Binding StatusText}"
+                                                                   FontSize="10"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{Binding StatusColor}"/>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding LastActivity}" Classes="muted" VerticalAlignment="Center" FontSize="11"/>
+                                                </StackPanel>
+
+                                                <Button Classes="ghost"
+                                                        Padding="0"
+                                                        HorizontalAlignment="Left"
+                                                        HorizontalContentAlignment="Left"
+                                                        Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                        CommandParameter="{Binding .}">
+                                                    <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                </Button>
+                                            </StackPanel>
+
+                                            <Button Grid.Column="1"
+                                                    Content="{loc:Tr common.settings}"
+                                                    Padding="9,5"
+                                                    Classes="subtle compact"
+                                                    VerticalAlignment="Top"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
+                                                    CommandParameter="{Binding .}"/>
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                                            <Border Grid.Column="0" Classes="metric-card" Padding="9">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding FileCount}" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentStrongBrush}"/>
+                                                    <TextBlock Text="{loc:Tr dashboard.files}" Classes="caption"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <Border Grid.Column="1" Classes="metric-card" Padding="9">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding VersionCount}" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}"/>
+                                                    <TextBlock Text="{loc:Tr dashboard.versions}" Classes="caption"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <Border Grid.Column="2" Classes="metric-card" Padding="9">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding SizeDisplay}" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource VeyraSuccessBrush}" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{loc:Tr common.size}" Classes="caption"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+
+                                        <Border Grid.Row="2"
+                                                Classes="metric-card"
+                                                Padding="10"
+                                                BorderBrush="{DynamicResource VeyraWarningBrush}"
+                                                IsVisible="{Binding ShowUnavailableHint}">
+                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                                <TextBlock Text="{loc:Tr repo_relink.unavailable_title}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"/>
+                                                <Button Grid.Column="1"
+                                                        Content="{loc:Tr repo_relink.auto_button_short}"
+                                                        Classes="subtle compact"
+                                                        Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).AutoRelinkRepositoryCommand}"
+                                                        CommandParameter="{Binding .}"/>
+                                            </Grid>
+                                        </Border>
+
+                                        <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                            <Button Grid.Column="0"
+                                                    Content="{loc:Tr common.open}"
+                                                    Padding="11,6"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                    CommandParameter="{Binding .}"/>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding FormatsBadge}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding ShortPath}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center"
+                                                       ToolTip.Tip="{Binding DirectoryPath}"/>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ItemsControl ItemsSource="{Binding Repositories}"
+                                  IsVisible="{Binding IsListView}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:RepositoryCardViewModel">
+                                <Border Classes="card" Padding="12" Margin="0,0,0,8">
+                                    <Grid ColumnDefinitions="2*,Auto,Auto,Auto,Auto" ColumnSpacing="14" RowDefinitions="Auto,Auto" RowSpacing="6">
+                                        <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                                            <Button Classes="ghost"
+                                                    Padding="0"
+                                                    HorizontalAlignment="Left"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                    CommandParameter="{Binding .}">
+                                                <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            </Button>
+                                            <TextBlock Text="{Binding ShortPath}"
+                                                       Classes="muted"
+                                                       FontSize="11"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip.Tip="{Binding DirectoryPath}"/>
+                                        </StackPanel>
+
+                                        <Border Grid.Column="1" Grid.Row="0" Classes="badge" Padding="8,3" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding StatusText}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{Binding StatusColor}"/>
+                                        </Border>
+
+                                        <TextBlock Grid.Column="2" Grid.Row="0" Text="{Binding FileCount}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentStrongBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="3" Grid.Row="0" Text="{Binding VersionCount}" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource VeyraAccentBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="4" Grid.Row="0" Text="{Binding SizeDisplay}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource VeyraSuccessBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+
+                                        <StackPanel Grid.Column="0" Grid.ColumnSpan="5" Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Text="{Binding LastActivity}" Classes="muted" FontSize="11" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding FormatsBadge}" Classes="muted" FontSize="11" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding CloudSyncStatus}" Classes="muted" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding ShowCloudSection}"/>
+                                            <Button Content="{loc:Tr common.open}"
+                                                    Classes="compact"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositoryCommand}"
+                                                    CommandParameter="{Binding .}"/>
+                                            <Button Content="{loc:Tr common.settings}"
+                                                    Classes="subtle compact"
+                                                    Command="{Binding #Root.((vm:RepositoryDashboardViewModel)DataContext).OpenRepositorySettingsCommand}"
+                                                    CommandParameter="{Binding .}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
                     <StackPanel IsVisible="{Binding IsEmpty}"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 Spacing="8"
                                 Margin="0,40,0,0">
-                        <TextBlock Text="{loc:Tr dashboard.no_repositories}"
+                        <TextBlock Text="{Binding EmptyTitle}"
                                    FontSize="18"
                                    Opacity="0.8"
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="{loc:Tr dashboard.no_repositories_hint}"
+                        <TextBlock Text="{Binding EmptyHint}"
                                    Classes="muted"
+                                   TextWrapping="Wrap"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
                         </StackPanel>
@@ -293,15 +561,19 @@
                                   ResizeBehavior="PreviousAndNext"
                                   IsVisible="{Binding IsAdvancedFiltersVisible}"/>
 
+                    <Border Grid.Column="0"
+                            Background="#01000000"
+                            IsVisible="{Binding IsAdvancedFiltersVisible}"
+                            PointerPressed="OnAdvancedFiltersBackdropPressed"/>
+
                     <Border Grid.Column="2"
-                            Classes="filter-sheet"
+                            Classes="filter-sheet floating-panel"
                             Padding="14,14,14,10"
                             IsVisible="{Binding IsAdvancedFiltersVisible}">
                         <Grid RowDefinitions="Auto,*" RowSpacing="12">
                             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="{loc:Tr dashboard.advanced_filters}" Classes="section-title"/>
-                                    <TextBlock Text="{loc:Tr dashboard.filters_hint}" Classes="muted" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
 
                                 <Button Grid.Column="1"

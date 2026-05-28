@@ -115,12 +115,11 @@ public sealed class CreateRepositoryWithFormatsHandler(
                     p.Message));
             });
 
-            var scanResult = await scanner.ScanRepositoryAsync(
+            var scanResult = await InitialSnapshotCreation.RunWithBoundedRetryAsync(
+                scanner,
                 repo.Id,
                 scanProgress,
-                new RepositoryScanOptionsDto(
-                    SaveFileVersions: true,
-                    TriggerOverride: "initial_snapshot"),
+                log,
                 ct);
 
             request.Progress?.Report(new RepositoryCreationProgressDto(
@@ -139,7 +138,19 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 lastFilesTotal,
                 "Repository created"));
 
-            if (scanResult.HasBusyFiles)
+            var snapshotStatus = InitialSnapshotCreation.ResolveSnapshotStatus(scanResult);
+            if (InitialSnapshotCreation.RequiresUserRetry(scanResult))
+            {
+                log.LogWarning(
+                    "Repository created but initial snapshot requires retry. RepositoryId {RepositoryId}. Path {Path}. Files {Files}. NoChanges {NoChanges}. ScanInProgress {ScanInProgress}. BusyFiles {BusyFiles}",
+                    repo.Id,
+                    path,
+                    scanResult.FileEntries,
+                    scanResult.NoChangesDetected,
+                    scanResult.SkippedBecauseScanInProgress,
+                    scanResult.BusyFilesCount);
+            }
+            else if (scanResult.HasBusyFiles)
             {
                 log.LogWarning(
                     "Repository created with busy-file warnings. RepositoryId {RepositoryId}. BusyFiles {BusyFiles}",
@@ -151,10 +162,13 @@ public sealed class CreateRepositoryWithFormatsHandler(
                 log.LogInformation("Repository created successfully. RepositoryId {RepositoryId}", repo.Id);
             }
 
+            var summary = $"Repository created. Directory scan matched {scanResult.FileEntries} file(s) and {scanResult.DirectoryEntries} folder(s) using {formats.Count} selected format(s). Initial versioned snapshot {snapshotStatus}. Busy files: {scanResult.BusyFilesCount}.";
+
             return OperationResult<RepositoryCreationOutcomeDto>.Ok(
                 new RepositoryCreationOutcomeDto(
                     repo.Id,
-                    scanResult.BusyFilesSafe));
+                    scanResult.BusyFilesSafe),
+                summary);
         }
         catch (Exception ex)
         {

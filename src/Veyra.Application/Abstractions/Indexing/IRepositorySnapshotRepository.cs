@@ -13,6 +13,24 @@ public interface IRepositorySnapshotRepository
         string? snapshotTitle = null,
         IReadOnlyCollection<string>? snapshotTags = null,
         IProgress<RepositoryScanProgressDto>? progress = null,
+        CancellationToken ct = default,
+        bool forceSnapshotCreation = false);
+
+    Task<SnapshotSaveResultDto> ApplyWorkingSnapshotDeltaAsync(
+        int repositoryId,
+        string trigger,
+        DateTime scannedAtUtc,
+        IReadOnlyCollection<RepositoryScanEntryDto> upsertEntries,
+        IReadOnlyCollection<string> removedPaths,
+        CancellationToken ct = default);
+
+    Task<SnapshotSaveResultDto> ApplyVersionedSnapshotDeltaAsync(
+        int repositoryId,
+        string trigger,
+        DateTime scannedAtUtc,
+        IReadOnlyCollection<RepositoryScanEntryDto> entries,
+        IReadOnlyCollection<RepositoryScanEntryDto> upsertEntries,
+        IReadOnlyCollection<string> removedPaths,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<RepositoryScanEntryDto>> GetLatestEntriesAsync(
@@ -74,5 +92,10 @@ public interface IRepositorySnapshotRepository
         CancellationToken ct = default);
     Task<FileVersionRestoreDto?> GetFileVersionRestoreDataAsync(
         long fileVersionId,
+        CancellationToken ct = default);
+
+    Task<RepositorySnapshotRestoreDataDto?> GetSnapshotRestoreDataAsync(
+        int repositoryId,
+        long snapshotId,
         CancellationToken ct = default);
 }

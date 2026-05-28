@@ -9,10 +9,11 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Setup;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;
 using Veyra.Desktop.Services.Maintenance;
+using Veyra.Desktop.ViewModels;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
@@ -353,12 +354,13 @@ public sealed class SetupWizardViewModel : INotifyPropertyChanged
                 if (nextPercent < ProgressPercent)
                     nextPercent = ProgressPercent;
 
+                var message = RepositoryCreationProgressText.Format(p);
                 ProgressPercent = nextPercent;
-                ProgressMessage = p.Message;
+                ProgressMessage = message;
                 FilesProcessed = p.FilesProcessed;
                 FilesTotal = p.FilesTotal;
                 IsProgressIndeterminate = p.FilesTotal <= 0 && p.Percent < 100;
-                AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
+                AppendProgressLog(message, 0);
             });
 
             var result = await _mediator.Send(new SaveInitialSetupCommand(dirs, exts, repoName, progress));

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Setup;
@@ -11,6 +12,7 @@ public static partial class DependencyInjection
     {
         services.AddSingleton<INativeSetupApplier, NativeSetupApplier>();
         services.AddSingleton<INativeExecutionScheduler, NativeExecutionScheduler>();
+        services.AddSingleton<INativeRuntimeHealthService, NativeRuntimeHealthService>();
         return services;
     }
 }

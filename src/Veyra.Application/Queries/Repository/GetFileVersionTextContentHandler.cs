@@ -2,6 +2,7 @@ using System.Text;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 
@@ -13,13 +14,6 @@ public sealed class GetFileVersionTextContentHandler(
     ILogger<GetFileVersionTextContentHandler> log)
     : IRequestHandler<GetFileVersionTextContentQuery, OperationResult<FileVersionTextContentDto>>
 {
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
-        ".cs", ".js", ".ts", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
-        ".html", ".css", ".sql", ".xaml", ".axaml", ".svg"
-    };
-
     public async Task<OperationResult<FileVersionTextContentDto>> Handle(GetFileVersionTextContentQuery request, CancellationToken ct)
     {
         if (request.FileVersionId <= 0)
@@ -41,13 +35,13 @@ public sealed class GetFileVersionTextContentHandler(
                 return OperationResult<FileVersionTextContentDto>.Fail("Deletion version cannot be opened as text.");
 
             var extension = restoreData.Extension;
-            if (string.IsNullOrWhiteSpace(extension) || !TextExtensions.Contains(extension))
+            if (!KnownFileExtensions.IsTextContentExtension(extension))
                 return OperationResult<FileVersionTextContentDto>.Fail("Selected version is not a supported text format.");
 
             if (restoreData.Blocks.Count == 0 && restoreData.SizeBytes > 0)
                 return OperationResult<FileVersionTextContentDto>.Fail("Version blocks are missing.");
 
-            await contentStore.RestoreFileAsync(restoreData.Blocks, tempPath, overwriteExisting: true, ct);
+            await contentStore.RestoreFileAsync(restoreData.Blocks, tempPath, overwriteExisting: true, ct: ct);
 
             var fileInfo = new FileInfo(tempPath);
             var isTruncated = fileInfo.Length > maxBytes;

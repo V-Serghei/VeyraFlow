@@ -61,7 +61,7 @@ public sealed class UpdateRepositoryConfigurationCommandValidator
             .WithMessage("Retention storage mode is invalid.");
 
         RuleFor(x => x.RetentionPolicy)
-            .Must(policy => !TargetsManualSnapshots(policy) || policy.AllowManualSnapshotCleanup)
+            .Must(policy => !policy.HasLocalOverride || !TargetsManualSnapshots(policy) || policy.AllowManualSnapshotCleanup)
             .WithMessage("Manual snapshot cleanup requires an explicit unlock.");
 
         RuleFor(x => x.SyncConflictStrategy)

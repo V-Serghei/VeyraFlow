@@ -35,7 +35,12 @@ public sealed class SnapshotSchedulerSettingsStore : ISnapshotSchedulerSettingsS
                 model.Enabled,
                 Math.Clamp(model.IntervalMinutes, 1, 24 * 60),
                 Math.Clamp(model.QuietHoursStartHour, 0, 23),
-                Math.Clamp(model.QuietHoursEndHour, 0, 23));
+                Math.Clamp(model.QuietHoursEndHour, 0, 23),
+                model.PollSeconds is null ? null : Math.Clamp(model.PollSeconds.Value, 5, 600),
+                model.MaxReadBytesPerSecond is null ? null : Math.Max(0, model.MaxReadBytesPerSecond.Value),
+                model.MaxIoOperationsPerSecond is null ? null : Math.Max(0, model.MaxIoOperationsPerSecond.Value),
+                model.IntegrityEnabled,
+                model.IntegrityIntervalMinutes is null ? null : Math.Clamp(model.IntegrityIntervalMinutes.Value, 30, 7 * 24 * 60));
         }
         catch
         {
@@ -56,7 +61,12 @@ public sealed class SnapshotSchedulerSettingsStore : ISnapshotSchedulerSettingsS
             settings.Enabled,
             Math.Clamp(settings.IntervalMinutes, 1, 24 * 60),
             Math.Clamp(settings.QuietHoursStartHour, 0, 23),
-            Math.Clamp(settings.QuietHoursEndHour, 0, 23));
+            Math.Clamp(settings.QuietHoursEndHour, 0, 23),
+            settings.PollSeconds is null ? null : Math.Clamp(settings.PollSeconds.Value, 5, 600),
+            settings.MaxReadBytesPerSecond is null ? null : Math.Max(0, settings.MaxReadBytesPerSecond.Value),
+            settings.MaxIoOperationsPerSecond is null ? null : Math.Max(0, settings.MaxIoOperationsPerSecond.Value),
+            settings.IntegrityEnabled,
+            settings.IntegrityIntervalMinutes is null ? null : Math.Clamp(settings.IntegrityIntervalMinutes.Value, 30, 7 * 24 * 60));
 
         await using var stream = new FileStream(_settingsPath, FileMode.Create, FileAccess.Write, FileShare.None, 16 * 1024, FileOptions.Asynchronous);
         await JsonSerializer.SerializeAsync(stream, normalized, new JsonSerializerOptions { WriteIndented = true }, ct);

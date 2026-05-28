@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Veyra.Desktop.ViewModels.Windows;
 
 namespace Veyra.Desktop.Services.Preview;
 
@@ -13,6 +14,8 @@ internal sealed class InteractiveImageViewportController
 {
     private const double MinZoomPercent = 1d;
     private const double MaxZoomPercent = 500d;
+    private const double MinSplitPercent = ImageDiffPreviewDefaults.MinSplitPercent;
+    private const double MaxSplitPercent = ImageDiffPreviewDefaults.MaxSplitPercent;
 
     private readonly ScrollViewer _scrollViewer;
     private readonly Grid _viewportHost;
@@ -354,7 +357,7 @@ internal sealed class InteractiveImageViewportController
         if (availableWidth <= 1 || availableHeight <= 1)
             return 100d;
 
-        var scale = Math.Min(availableWidth / bitmapSize.Width, availableHeight / bitmapSize.Height);
+        var scale = availableWidth / bitmapSize.Width;
         return Math.Clamp(scale * 100d, MinZoomPercent, MaxZoomPercent);
     }
 
@@ -509,7 +512,7 @@ internal sealed class InteractiveImageViewportController
         if (imageWidth <= 1 || imageHeight <= 1)
             return;
 
-        var effectiveSplitPercent = splitPercent ?? _getSplitPercent();
+        var effectiveSplitPercent = Math.Clamp(splitPercent ?? _getSplitPercent(), MinSplitPercent, MaxSplitPercent);
         var splitWidth = Math.Clamp(imageWidth * (effectiveSplitPercent / 100d), 0d, imageWidth);
 
         _splitRevealHost.Width = splitWidth;
@@ -530,7 +533,7 @@ internal sealed class InteractiveImageViewportController
             return;
 
         var contentX = _scrollViewer.Offset.X + pointerPosition.X;
-        var nextPercent = Math.Clamp((contentX / imageWidth) * 100d, 0d, 100d);
+        var nextPercent = Math.Clamp((contentX / imageWidth) * 100d, MinSplitPercent, MaxSplitPercent);
 
         _displayedSplitPercent = nextPercent;
         UpdateSplitVisual(_displayedSplitPercent);

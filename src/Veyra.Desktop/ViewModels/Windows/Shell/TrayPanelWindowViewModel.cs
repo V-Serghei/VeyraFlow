@@ -10,6 +10,7 @@ namespace Veyra.Desktop.ViewModels.Windows;
 
 public sealed partial class TrayPanelWindowViewModel : ObservableObject
 {
+    private bool _suppressSelectedRepositoryChanged;
     private Func<Task>? _openAppAction;
     private Func<Task>? _openDashboardAction;
     private Func<Task>? _openSearchAction;
@@ -44,12 +45,23 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
     [ObservableProperty] private string _currentActivityAccentColor = "#6EA8FF";
     [ObservableProperty] private string _currentActivityBackgroundColor = "#1A6EA8FF";
     [ObservableProperty] private bool _showCurrentActivity;
+    [ObservableProperty] private string _processLoadText = string.Empty;
+    [ObservableProperty] private string _processLoadDetailText = string.Empty;
+    [ObservableProperty] private string _processLoadPeakText = string.Empty;
+    [ObservableProperty] private string _processLoadHistoryText = string.Empty;
+    [ObservableProperty] private string _processLoadAccentColor = "#6EA8FF";
+    [ObservableProperty] private string _processLoadBackgroundColor = "#1A6EA8FF";
+    [ObservableProperty] private bool _showProcessLoad;
     [ObservableProperty] private string _selectedRepositoryName = string.Empty;
     [ObservableProperty] private string _selectedRepositoryPath = string.Empty;
     [ObservableProperty] private string _selectedRepositoryMetricsText = string.Empty;
     [ObservableProperty] private string _selectedRepositoryLastSnapshotText = string.Empty;
     [ObservableProperty] private string _selectedRepositoryLastSnapshotGlyph = "\uE823";
     [ObservableProperty] private string _selectedRepositoryLastSnapshotAccentColor = "#6EA8FF";
+    [ObservableProperty] private string _selectedRepositoryLiveSyncText = string.Empty;
+    [ObservableProperty] private string _selectedRepositoryLiveSyncDetailText = string.Empty;
+    [ObservableProperty] private string _selectedRepositoryLiveSyncGlyph = "\uE895";
+    [ObservableProperty] private string _selectedRepositoryLiveSyncAccentColor = "#6EA8FF";
     [ObservableProperty] private string _selectedRepositoryCloudSyncText = string.Empty;
     [ObservableProperty] private string _selectedRepositoryCloudSyncGlyph = "\uE753";
     [ObservableProperty] private string _selectedRepositoryCloudSyncAccentColor = "#6EA8FF";
@@ -67,6 +79,7 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
     public bool HasRepositories => Repositories.Count > 0;
     public bool HasRecentActions => RecentActions.Count > 0;
     public bool HasIssueItems => IssueItems.Count > 0;
+    public bool HasSelectedRepositoryLiveSyncDetail => !string.IsNullOrWhiteSpace(SelectedRepositoryLiveSyncDetailText);
 
     public void ConfigureActions(
         Func<Task> openAppAction,
@@ -113,45 +126,68 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
         string? currentActivityText,
         string currentActivityAccentColor,
         string currentActivityBackgroundColor,
+        string? processLoadText,
+        string? processLoadDetailText,
+        string? processLoadPeakText,
+        string? processLoadHistoryText,
+        string processLoadAccentColor,
+        string processLoadBackgroundColor,
         TrayPanelRepositoryState? selectedRepositoryState,
         IReadOnlyList<TrayPanelRecentActionViewModel> recentActions,
         IReadOnlyList<TrayPanelIssueItemViewModel> issueItems)
     {
-        StatusText = statusText;
-        ConnectivityText = connectivityText;
-        ConnectivityAccentColor = connectivityAccentColor;
-        ConnectivityBackgroundColor = connectivityBackgroundColor;
-        CloudPauseButtonText = cloudPauseButtonText;
-        HasCloudAccess = hasCloudAccess;
-        CanRunCloudActions = canRunCloudActions;
-        CloudHintText = cloudHintText ?? string.Empty;
-        ShowCloudHint = !string.IsNullOrWhiteSpace(CloudHintText);
-        LastUpdatedText = lastUpdatedText;
-        CurrentActivityText = currentActivityText ?? string.Empty;
-        CurrentActivityAccentColor = currentActivityAccentColor;
-        CurrentActivityBackgroundColor = currentActivityBackgroundColor;
-        ShowCurrentActivity = !string.IsNullOrWhiteSpace(CurrentActivityText);
+        var previousSuppression = _suppressSelectedRepositoryChanged;
+        _suppressSelectedRepositoryChanged = true;
 
-        Repositories.Clear();
-        foreach (var repository in repositories)
-            Repositories.Add(repository);
+        try
+        {
+            StatusText = statusText;
+            ConnectivityText = connectivityText;
+            ConnectivityAccentColor = connectivityAccentColor;
+            ConnectivityBackgroundColor = connectivityBackgroundColor;
+            CloudPauseButtonText = cloudPauseButtonText;
+            HasCloudAccess = hasCloudAccess;
+            CanRunCloudActions = canRunCloudActions;
+            CloudHintText = cloudHintText ?? string.Empty;
+            ShowCloudHint = !string.IsNullOrWhiteSpace(CloudHintText);
+            LastUpdatedText = lastUpdatedText;
+            CurrentActivityText = currentActivityText ?? string.Empty;
+            CurrentActivityAccentColor = currentActivityAccentColor;
+            CurrentActivityBackgroundColor = currentActivityBackgroundColor;
+            ShowCurrentActivity = !string.IsNullOrWhiteSpace(CurrentActivityText);
+            ProcessLoadText = processLoadText ?? string.Empty;
+            ProcessLoadDetailText = processLoadDetailText ?? string.Empty;
+            ProcessLoadPeakText = processLoadPeakText ?? string.Empty;
+            ProcessLoadHistoryText = processLoadHistoryText ?? string.Empty;
+            ProcessLoadAccentColor = processLoadAccentColor;
+            ProcessLoadBackgroundColor = processLoadBackgroundColor;
+            ShowProcessLoad = !string.IsNullOrWhiteSpace(ProcessLoadText);
 
-        RecentActions.Clear();
-        foreach (var action in recentActions)
-            RecentActions.Add(action);
+            Repositories.Clear();
+            foreach (var repository in repositories)
+                Repositories.Add(repository);
 
-        IssueItems.Clear();
-        foreach (var issue in issueItems)
-            IssueItems.Add(issue);
+            RecentActions.Clear();
+            foreach (var action in recentActions)
+                RecentActions.Add(action);
 
-        SelectedRepository = Repositories.FirstOrDefault(r => r.Id == selectedRepositoryId)
-                             ?? Repositories.FirstOrDefault();
+            IssueItems.Clear();
+            foreach (var issue in issueItems)
+                IssueItems.Add(issue);
 
-        ApplySelectedRepositoryState(selectedRepositoryState);
+            SelectedRepository = Repositories.FirstOrDefault(r => r.Id == selectedRepositoryId)
+                                 ?? Repositories.FirstOrDefault();
 
-        OnPropertyChanged(nameof(HasRepositories));
-        OnPropertyChanged(nameof(HasRecentActions));
-        OnPropertyChanged(nameof(HasIssueItems));
+            ApplySelectedRepositoryState(selectedRepositoryState);
+
+            OnPropertyChanged(nameof(HasRepositories));
+            OnPropertyChanged(nameof(HasRecentActions));
+            OnPropertyChanged(nameof(HasIssueItems));
+        }
+        finally
+        {
+            _suppressSelectedRepositoryChanged = previousSuppression;
+        }
     }
 
     [RelayCommand]
@@ -252,6 +288,9 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
 
     partial void OnSelectedRepositoryChanged(TrayPanelRepositoryOptionViewModel? value)
     {
+        if (_suppressSelectedRepositoryChanged)
+            return;
+
         SelectedRepositoryChanged?.Invoke(value?.Id);
     }
 
@@ -265,6 +304,10 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
             SelectedRepositoryLastSnapshotText = string.Empty;
             SelectedRepositoryLastSnapshotGlyph = "\uE823";
             SelectedRepositoryLastSnapshotAccentColor = "#6EA8FF";
+            SelectedRepositoryLiveSyncText = string.Empty;
+            SelectedRepositoryLiveSyncDetailText = string.Empty;
+            SelectedRepositoryLiveSyncGlyph = "\uE895";
+            SelectedRepositoryLiveSyncAccentColor = "#6EA8FF";
             SelectedRepositoryCloudSyncText = string.Empty;
             SelectedRepositoryCloudSyncGlyph = "\uE753";
             SelectedRepositoryCloudSyncAccentColor = "#6EA8FF";
@@ -277,6 +320,7 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
             SelectedRepositoryProgressAccentColor = "#6EA8FF";
             ShowSelectedRepositoryProgress = false;
             HasSelectedRepository = false;
+            OnPropertyChanged(nameof(HasSelectedRepositoryLiveSyncDetail));
             return;
         }
 
@@ -286,6 +330,10 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
         SelectedRepositoryLastSnapshotText = state.LastSnapshotText;
         SelectedRepositoryLastSnapshotGlyph = state.LastSnapshotGlyph;
         SelectedRepositoryLastSnapshotAccentColor = state.LastSnapshotAccentColor;
+        SelectedRepositoryLiveSyncText = state.LiveSyncText;
+        SelectedRepositoryLiveSyncDetailText = state.LiveSyncDetailText;
+        SelectedRepositoryLiveSyncGlyph = state.LiveSyncGlyph;
+        SelectedRepositoryLiveSyncAccentColor = state.LiveSyncAccentColor;
         SelectedRepositoryCloudSyncText = state.CloudSyncText;
         SelectedRepositoryCloudSyncGlyph = state.CloudSyncGlyph;
         SelectedRepositoryCloudSyncAccentColor = state.CloudSyncAccentColor;
@@ -298,6 +346,7 @@ public sealed partial class TrayPanelWindowViewModel : ObservableObject
         SelectedRepositoryProgressAccentColor = state.ProgressAccentColor;
         ShowSelectedRepositoryProgress = state.ShowProgress;
         HasSelectedRepository = true;
+        OnPropertyChanged(nameof(HasSelectedRepositoryLiveSyncDetail));
     }
 
     private async Task ExecuteAndCloseAsync(Func<Task>? action)

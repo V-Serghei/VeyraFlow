@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.VisualTree;
 using Avalonia.Threading;
 using Avalonia;
+using Avalonia.Input;
 using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.ViewModels.Windows;
 using System.ComponentModel;
@@ -55,6 +56,14 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, WindowClosingEventArgs e)
         => _trayService?.HandleMainWindowClosing(this, e);
+
+    private void OnGlobalTagPickerBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.Search.CloseTagPickerCommand.Execute(null);
+
+        e.Handled = true;
+    }
 
     private void OnSizeChanged(object? sender, SizeChangedEventArgs e)
     {

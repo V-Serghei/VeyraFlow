@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
@@ -11,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
@@ -18,6 +20,7 @@ using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Storage;
+using Veyra.Desktop.ViewModels;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -32,11 +35,14 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     private int _stepIndex;
     private int _createdRepositoryId;
     private string? _lastProgressLogSignature;
+    private CancellationTokenSource? _activeOperationCancellation;
 
     public event Action? RequestClose;
 
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isCompleted;
+    [ObservableProperty] private bool _isCancelling;
+    [ObservableProperty] private bool _canCancelCurrentOperation;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasErrorMessage))]
@@ -45,6 +51,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     [ObservableProperty] private string _repositoryName = string.Empty;
     [ObservableProperty] private string? _description;
     [ObservableProperty] private string _directoryPath = string.Empty;
+    [ObservableProperty] private bool _isDirectoryPathLocked;
     [ObservableProperty] private string _customFormat = string.Empty;
 
     [ObservableProperty]
@@ -85,8 +92,12 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     public int SelectedFormatCount => Formats.Count(f => f.IsSelected);
     public int TrackedFolderCount => string.IsNullOrWhiteSpace(DirectoryPath) ? 0 : 1;
     public bool HasProgressLog => ProgressLogItems.Count > 0;
+    public bool CanBrowseDirectory => !IsBusy && !IsDirectoryPathLocked;
     public bool ShowDeterminateProgressValue => ProgressPercent > 0;
     public bool ShowAnimatedActivity => IsBusy;
+    public bool ShowCancelButton => !IsCompleted && (!IsBusy || CanCancelCurrentOperation);
+    public bool ShowBusyCancelButton => IsBusy && CanCancelCurrentOperation;
+    public bool CanCancelOperation => !IsCancelling && (!IsBusy || CanCancelCurrentOperation);
     public string ProgressDisplayText => ShowDeterminateProgressValue
         ? $"{ProgressPercent}%"
         : Loc.T("create_repo.in_progress");
@@ -124,7 +135,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         BackCommand = new RelayCommand(Back, CanBack);
         NextCommand = new AsyncRelayCommand(NextAsync, CanNext);
         CancelCommand = new RelayCommand(Cancel);
-        BrowseDirectoryCommand = new AsyncRelayCommand(BrowseDirectoryAsync, () => !IsBusy);
+        BrowseDirectoryCommand = new AsyncRelayCommand(BrowseDirectoryAsync, () => CanBrowseDirectory);
         AddCustomFormatCommand = new RelayCommand(AddCustomFormat, () => !IsBusy);
         ToggleFormatCategoryCommand = new RelayCommand<FormatCategoryItemViewModel?>(ToggleFormatCategory, _ => !IsBusy);
         RetryUnavailableFilesCommand = new AsyncRelayCommand(RetryUnavailableFilesAsync, CanRetryUnavailableFiles);
@@ -136,6 +147,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             OnPropertyChanged(nameof(Title));
             OnPropertyChanged(nameof(StepInfo));
             OnPropertyChanged(nameof(NextButtonText));
+            OnPropertyChanged(nameof(CancelButtonText));
         };
 
         AddDefaultFormats();
@@ -166,6 +178,10 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             return Loc.T("setup_wizard.next");
         }
     }
+
+    public string CancelButtonText => IsBusy
+        ? Loc.T("common.cancel")
+        : Loc.T("common.cancel");
 
     public IEnumerable<string> SelectedFormats => Formats
         .Where(f => f.IsSelected)
@@ -199,10 +215,56 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
     partial void OnIsBusyChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowAnimatedActivity));
+        OnPropertyChanged(nameof(CanBrowseDirectory));
+        OnPropertyChanged(nameof(CancelButtonText));
+        OnPropertyChanged(nameof(ShowCancelButton));
+        OnPropertyChanged(nameof(ShowBusyCancelButton));
+        OnPropertyChanged(nameof(CanCancelOperation));
         RefreshCommands();
     }
+
     partial void OnIsCompletedChanged(bool value)
-        => OnPropertyChanged(nameof(ShowCreateSuccessBanner));
+    {
+        OnPropertyChanged(nameof(ShowCreateSuccessBanner));
+        OnPropertyChanged(nameof(ShowCancelButton));
+    }
+
+    partial void OnIsCancellingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanCancelOperation));
+        RefreshCommands();
+    }
+
+    partial void OnCanCancelCurrentOperationChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowCancelButton));
+        OnPropertyChanged(nameof(ShowBusyCancelButton));
+        OnPropertyChanged(nameof(CanCancelOperation));
+        RefreshCommands();
+    }
+
+    partial void OnIsDirectoryPathLockedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanBrowseDirectory));
+        RefreshCommands();
+    }
+
+    public void ConfigureInitialDirectory(string directoryPath, bool lockDirectory = true)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+            return;
+
+        DirectoryPath = directoryPath;
+        IsDirectoryPathLocked = lockDirectory;
+
+        if (string.IsNullOrWhiteSpace(RepositoryName))
+        {
+            var suggestedName = Path.GetFileName(directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            RepositoryName = string.IsNullOrWhiteSpace(suggestedName)
+                ? directoryPath
+                : suggestedName;
+        }
+    }
     partial void OnCustomFormatChanged(string value) => RefreshCommands();
 
     private void RefreshCommands()
@@ -244,7 +306,34 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         RequestClose?.Invoke();
     }
 
-    private void Cancel() => RequestClose?.Invoke();
+    private void Cancel()
+    {
+        if (IsBusy)
+        {
+            if (!CanCancelCurrentOperation)
+                return;
+
+            if (IsCancelling)
+                return;
+
+            IsCancelling = true;
+            ProgressMessage = Loc.T("create_repo.cancel_requested");
+            AppendProgressLog(Loc.T("create_repo.cancel_requested"), 0);
+            _activeOperationCancellation?.Cancel();
+            return;
+        }
+
+        RequestClose?.Invoke();
+    }
+
+    public bool RequestWindowClose()
+    {
+        if (!IsBusy)
+            return true;
+
+        Cancel();
+        return false;
+    }
 
     private async Task BrowseDirectoryAsync()
     {
@@ -340,6 +429,8 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         {
             IsBusy = true;
             IsCompleted = false;
+            IsCancelling = false;
+            CanCancelCurrentOperation = true;
             ErrorMessage = null;
             _createdRepositoryId = 0;
             ProgressPercent = 0;
@@ -356,13 +447,17 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             AppendProgressLog(Loc.T("create_repo.progress_start"), 0);
             await Task.Yield();
 
+            using var operationCancellation = new CancellationTokenSource();
+            _activeOperationCancellation = operationCancellation;
+            var operationToken = operationCancellation.Token;
+
             ProgressMessage = Loc.T("create_repo.progress_counting_files");
-            var previewMetrics = await CountDirectoryMetricsAsync(DirectoryPath, SelectedFormats.ToArray());
+            var previewMetrics = await CountDirectoryMetricsAsync(DirectoryPath, SelectedFormats.ToArray(), operationToken);
             DirectoryFilesFound = previewMetrics.TotalFiles;
             TrackedFilesPreviewCount = previewMetrics.TrackedFiles;
             AppendProgressLog(
                 Loc.F("create_repo.progress_counting_files_result", previewMetrics.TotalFiles, previewMetrics.TrackedFiles),
-                previewMetrics.TotalFiles);
+                0);
 
             var progress = new Progress<RepositoryCreationProgressDto>(ApplyCreationProgress);
 
@@ -374,7 +469,9 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 progress);
 
             var result = await _scopeExecutor.ExecuteAsync<IMediator, Veyra.Application.Common.Results.OperationResult<RepositoryCreationOutcomeDto>>(
-                (mediator, token) => mediator.Send(command, token));
+                (mediator, token) => mediator.Send(command, token),
+                operationToken);
+            CanCancelCurrentOperation = false;
 
             if (!result.Success)
             {
@@ -395,7 +492,9 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             }
 
             _createdRepositoryId = result.Value.RepositoryId;
+            operationToken.ThrowIfCancellationRequested();
             await _retentionDefaultsApplier.ApplyToRepositoryAsync(_createdRepositoryId);
+            operationToken.ThrowIfCancellationRequested();
             SetRetryableBusyFiles(result.Value.BusyFilesSafe);
 
             ProgressPercent = 100;
@@ -411,6 +510,13 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 FilesFoundCount);
             RefreshCommands();
         }
+        catch (OperationCanceledException)
+        {
+            ErrorMessage = Loc.T("create_repo.cancelled");
+            ProgressMessage = Loc.T("create_repo.cancelled");
+            IsProgressIndeterminate = false;
+            AppendProgressLog(Loc.T("create_repo.cancelled"), 0);
+        }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to create repository in wizard");
@@ -421,7 +527,15 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
         finally
         {
+            if (_activeOperationCancellation is not null)
+            {
+                _activeOperationCancellation.Dispose();
+                _activeOperationCancellation = null;
+            }
+
             IsBusy = false;
+            IsCancelling = false;
+            CanCancelCurrentOperation = false;
             IsProgressIndeterminate = false;
             RefreshCommands();
         }
@@ -436,12 +550,18 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         {
             IsBusy = true;
             IsCompleted = false;
+            IsCancelling = false;
+            CanCancelCurrentOperation = true;
             ErrorMessage = null;
             ProgressPercent = 0;
             ProgressMessage = Loc.T("create_repo.retry_start");
             IsProgressIndeterminate = true;
             AppendProgressLog(Loc.T("create_repo.retry_start"), FilesFoundCount);
             await Task.Yield();
+
+            using var operationCancellation = new CancellationTokenSource();
+            _activeOperationCancellation = operationCancellation;
+            var operationToken = operationCancellation.Token;
 
             var progress = new Progress<RepositoryScanProgressDto>(p =>
                 ApplyCreationProgress(new RepositoryCreationProgressDto(
@@ -459,7 +579,9 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                     TriggerOverride: "retry_busy_files"));
 
             var result = await _scopeExecutor.ExecuteAsync<IMediator, Veyra.Application.Common.Results.OperationResult<RepositoryScanResultDto>>(
-                (mediator, token) => mediator.Send(command, token));
+                (mediator, token) => mediator.Send(command, token),
+                operationToken);
+            CanCancelCurrentOperation = false;
 
             if (!result.Success || result.Value is null)
             {
@@ -483,6 +605,13 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                     : Loc.T("create_repo.retry_success_progress_label"),
                 FilesFoundCount);
         }
+        catch (OperationCanceledException)
+        {
+            ErrorMessage = Loc.T("create_repo.cancelled");
+            ProgressMessage = Loc.T("create_repo.cancelled");
+            IsProgressIndeterminate = false;
+            AppendProgressLog(Loc.T("create_repo.cancelled"), 0);
+        }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to retry unavailable files for repository {RepositoryId}", _createdRepositoryId);
@@ -493,7 +622,15 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
         }
         finally
         {
+            if (_activeOperationCancellation is not null)
+            {
+                _activeOperationCancellation.Dispose();
+                _activeOperationCancellation = null;
+            }
+
             IsBusy = false;
+            IsCancelling = false;
+            CanCancelCurrentOperation = false;
             IsProgressIndeterminate = false;
             RefreshCommands();
         }
@@ -611,7 +748,8 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     private void ApplyCreationProgress(RepositoryCreationProgressDto p)
     {
-        ProgressMessage = p.Message;
+        var message = RepositoryCreationProgressText.Format(p);
+        ProgressMessage = message;
         FilesProcessed = p.FilesProcessed;
         FilesTotal = p.FilesTotal;
 
@@ -632,7 +770,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
             IsProgressIndeterminate = true;
         }
 
-        AppendProgressLog(p.Message, Math.Max(p.FilesProcessed, p.FilesTotal));
+        AppendProgressLog(message, 0);
     }
 
     private void SetRetryableBusyFiles(IReadOnlyCollection<RepositoryBusyFileDto> busyFiles)
@@ -665,7 +803,8 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
     private static async Task<(int TotalFiles, int TrackedFiles)> CountDirectoryMetricsAsync(
         string rootPath,
-        IReadOnlyCollection<string> selectedFormats)
+        IReadOnlyCollection<string> selectedFormats,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
             return (0, 0);
@@ -685,6 +824,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
             while (stack.Count > 0)
             {
+                ct.ThrowIfCancellationRequested();
                 var current = stack.Pop();
 
                 IEnumerable<DirectoryInfo> directories;
@@ -699,6 +839,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
                 foreach (var directory in directories)
                 {
+                    ct.ThrowIfCancellationRequested();
                     try
                     {
                         if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
@@ -724,15 +865,16 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
 
                 foreach (var file in files)
                 {
+                    ct.ThrowIfCancellationRequested();
                     totalFiles++;
-                    var ext = RepositoryFormatOptionViewModel.NormalizeFormat(file.Extension);
+                    var ext = KnownFileExtensions.NormalizeTrackedFileFormat(file.Extension);
                     if (trackedFormats.Count == 0 || trackedFormats.Contains(ext))
                         trackedFiles++;
                 }
             }
 
             return (totalFiles, trackedFiles);
-        });
+        }, ct);
     }
 
     private void AppendProgressLog(string? message, int filesFound)

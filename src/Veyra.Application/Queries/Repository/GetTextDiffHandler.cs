@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using System.Text;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Services.Diff;
@@ -15,13 +16,6 @@ public sealed class GetTextDiffHandler(
     ILogger<GetTextDiffHandler> log)
     : IRequestHandler<GetTextDiffQuery, OperationResult<TextDiffResultDto>>
 {
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
-        ".cs", ".js", ".ts", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
-        ".html", ".css", ".sql", ".xaml", ".axaml"
-    };
-
     public async Task<OperationResult<TextDiffResultDto>> Handle(GetTextDiffQuery request, CancellationToken ct)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "diff");
@@ -57,8 +51,8 @@ public sealed class GetTextDiffHandler(
             if ((left.Blocks.Count == 0 && left.SizeBytes > 0) || (right.Blocks.Count == 0 && right.SizeBytes > 0))
                 return OperationResult<TextDiffResultDto>.Fail("Blocks are missing for one of the selected versions.");
 
-            await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);
-            await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct);
+            await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct: ct);
+            await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct: ct);
 
             var computed = await BuildDiffAsync(leftTemp, rightTemp, extension, maxLines, ct);
 
@@ -144,7 +138,7 @@ public sealed class GetTextDiffHandler(
         if (string.IsNullOrWhiteSpace(extension))
             return false;
 
-        return TextExtensions.Contains(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
+        return KnownFileExtensions.IsTextDiffExtension(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
     }
 
     private static string? NormalizeExtension(string? extension)

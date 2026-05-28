@@ -1,14 +1,14 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
-using Microsoft.Extensions.Logging;
-using System.Data;
+﻿using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Application.Services.Diff;
 using Veyra.Domain.Entities;
@@ -16,7 +16,7 @@ using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Data.Preview;
 using Veyra.Infrastructure.Data.Setup.Models.Snapshots;
 
-namespace Veyra.Infrastructure.Data.Setup;
+namespace Veyra.Infrastructure.Data.Setup.Snapshots;
 
 public sealed class EfRepositorySnapshotRepository(
     VeyraDbContext db,
@@ -37,23 +37,6 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static readonly JsonSerializerOptions DiffJsonOptions = new();
 
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
-        ".cs", ".js", ".ts", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
-        ".html", ".css", ".sql", ".xaml", ".axaml"
-    };
-
-    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"
-    };
-
-    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".wav", ".mp3", ".aac", ".m4a", ".wma", ".aif", ".aiff"
-    };
-
     public async Task<SnapshotSaveResultDto> SaveSnapshotAsync(
         int repositoryId,
         string trigger,
@@ -63,7 +46,8 @@ public sealed class EfRepositorySnapshotRepository(
         string? snapshotTitle = null,
         IReadOnlyCollection<string>? snapshotTags = null,
         IProgress<RepositoryScanProgressDto>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool forceSnapshotCreation = false)
     {
         var overallTimer = Stopwatch.StartNew();
         var stageTimer = Stopwatch.StartNew();
@@ -128,7 +112,8 @@ public sealed class EfRepositorySnapshotRepository(
                         e.Extension,
                         e.SizeBytes,
                         e.LastWriteUtc,
-                        e.ContentHashSha256),
+                        e.ContentHashSha256,
+                        null),
                     StringComparer.OrdinalIgnoreCase,
                     ct);
         var previousFilesByPath = previousEntriesByPath.Values
@@ -183,7 +168,7 @@ public sealed class EfRepositorySnapshotRepository(
                 .ToList();
             var comparison = await snapshotComparison.CompareRepositoryPathsAsync(currentStates, baselineStates, 1, ct);
             var needsVersionMaterialization = await NeedsVersionMaterializationAsync(repositoryId, currentFilesByPath, ct);
-            if (comparison.ChangedFilesCount == 0 && !needsVersionMaterialization)
+            if (comparison.ChangedFilesCount == 0 && !needsVersionMaterialization && !forceSnapshotCreation)
             {
                 preparationMs = stageTimer.ElapsedMilliseconds;
                 repo.FileCount = fileEntries;
@@ -528,6 +513,30 @@ public sealed class EfRepositorySnapshotRepository(
         }
         versionBuildMs = stageTimer.ElapsedMilliseconds;
 
+        if (previousSnapshotId > 0 && newVersions.Count == 0 && busyFiles.Count == 0 && !forceSnapshotCreation)
+        {
+            repo.FileCount = fileEntries;
+            repo.TotalSizeBytes = totalFileBytes;
+            repo.LastScannedAt = scannedAtUtc;
+            repo.UpdatedAt = scannedAtUtc;
+
+            await DeleteSnapshotShellAsync(snapshot.Id, repositoryId, ct);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            log.LogInformation(
+                "Snapshot skipped after version planning because no tracked file versions changed. RepositoryId {RepositoryId}. Entries {Entries}. Files {Files}. Trigger {Trigger}. PreparationMs {PreparationMs}. VersionBuildMs {VersionBuildMs}. TotalMs {TotalMs}",
+                repositoryId,
+                totalEntries,
+                fileEntries,
+                safeTrigger,
+                preparationMs,
+                versionBuildMs,
+                overallTimer.ElapsedMilliseconds);
+
+            return SnapshotSaveResultDto.NoChanges();
+        }
+
         foreach (var pair in pendingBlocks)
         {
             var version = pair.Key;
@@ -619,6 +628,509 @@ public sealed class EfRepositorySnapshotRepository(
         return SnapshotSaveResultDto.Created(busyFiles);
     }
 
+    public async Task<SnapshotSaveResultDto> ApplyWorkingSnapshotDeltaAsync(
+        int repositoryId,
+        string trigger,
+        DateTime scannedAtUtc,
+        IReadOnlyCollection<RepositoryScanEntryDto> upsertEntries,
+        IReadOnlyCollection<string> removedPaths,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0)
+            return SnapshotSaveResultDto.Skipped();
+
+        var normalizedUpserts = upsertEntries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.RelativePath))
+            .GroupBy(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        var normalizedRemovedPaths = removedPaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path.Replace('\\', '/').Trim('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedUpserts.Count == 0 && normalizedRemovedPaths.Count == 0)
+            return SnapshotSaveResultDto.NoChanges();
+
+        db.ChangeTracker.Clear();
+
+        var repo = await db.Set<Repository>()
+            .Include(r => r.Directory)
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repo is null)
+            return SnapshotSaveResultDto.Skipped();
+
+        var safeTrigger = string.IsNullOrWhiteSpace(trigger)
+            ? "sync_live_watcher_incremental"
+            : trigger.Trim();
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        var latestSnapshot = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => new WorkingSnapshotSeed(
+                s.Id,
+                s.CreatedAt,
+                db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted)))
+            .FirstOrDefaultAsync(ct);
+
+        RepositorySnapshot targetSnapshot;
+        if (latestSnapshot is null)
+        {
+            targetSnapshot = await CreateWorkingSnapshotShellAsync(repositoryId, safeTrigger, scannedAtUtc, ct);
+        }
+        else if (latestSnapshot.HasFileLinks)
+        {
+            await DeleteWorkingSnapshotsAsync(repositoryId, ct);
+            targetSnapshot = await CreateWorkingSnapshotShellAsync(repositoryId, safeTrigger, scannedAtUtc, ct);
+            await CloneSnapshotEntriesAsync(latestSnapshot.SnapshotId, targetSnapshot.Id, repositoryId, scannedAtUtc, ct);
+        }
+        else
+        {
+            targetSnapshot = await db.Set<RepositorySnapshot>()
+                .FirstAsync(s => s.Id == latestSnapshot.SnapshotId, ct);
+        }
+
+        if (normalizedRemovedPaths.Count > 0)
+            await DeleteSnapshotEntriesByRootsAsync(targetSnapshot.Id, repositoryId, normalizedRemovedPaths, ct);
+
+        var exactPathsToDelete = normalizedUpserts.Keys
+            .Where(path => !normalizedRemovedPaths.Any(root => IsPathOrDescendant(path, root)))
+            .ToList();
+        if (exactPathsToDelete.Count > 0)
+            await DeleteSnapshotEntriesByExactPathsAsync(targetSnapshot.Id, repositoryId, exactPathsToDelete, ct);
+
+        if (normalizedUpserts.Count > 0)
+        {
+            await InsertSnapshotEntriesAsync(
+                targetSnapshot.Id,
+                repositoryId,
+                normalizedUpserts.Values.ToList(),
+                scannedAtUtc,
+                ct);
+        }
+
+        await UpdateWorkingSnapshotHeaderAsync(targetSnapshot, repo, safeTrigger, scannedAtUtc, ct);
+        await tx.CommitAsync(ct);
+
+        log.LogInformation(
+            "Working snapshot delta applied. RepositoryId {RepositoryId}. Upserts {Upserts}. RemovedRoots {RemovedRoots}. SnapshotId {SnapshotId}. Trigger {Trigger}",
+            repositoryId,
+            normalizedUpserts.Count,
+            normalizedRemovedPaths.Count,
+            targetSnapshot.Id,
+            safeTrigger);
+
+        return SnapshotSaveResultDto.Created();
+    }
+
+    public async Task<SnapshotSaveResultDto> ApplyVersionedSnapshotDeltaAsync(
+        int repositoryId,
+        string trigger,
+        DateTime scannedAtUtc,
+        IReadOnlyCollection<RepositoryScanEntryDto> entries,
+        IReadOnlyCollection<RepositoryScanEntryDto> upsertEntries,
+        IReadOnlyCollection<string> removedPaths,
+        CancellationToken ct = default)
+    {
+        if (repositoryId <= 0)
+            return SnapshotSaveResultDto.Skipped();
+
+        var normalizedEntries = entries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.RelativePath))
+            .GroupBy(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        var normalizedUpserts = upsertEntries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.RelativePath))
+            .GroupBy(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        var normalizedRemovedPaths = removedPaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path.Replace('\\', '/').Trim('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedUpserts.Count == 0 && normalizedRemovedPaths.Count == 0)
+            return SnapshotSaveResultDto.NoChanges();
+
+        db.ChangeTracker.Clear();
+
+        var repo = await db.Set<Repository>()
+            .Include(r => r.Directory)
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repo is null)
+            return SnapshotSaveResultDto.Skipped();
+
+        var previousSnapshotId = await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (previousSnapshotId == 0)
+            return SnapshotSaveResultDto.Skipped();
+
+        var safeTrigger = string.IsNullOrWhiteSpace(trigger)
+            ? "auto_snapshot_live_watcher_incremental"
+            : trigger.Trim();
+        var totalEntries = normalizedEntries.Count;
+        var fileEntries = normalizedEntries.Values.Count(static entry => !entry.IsDirectory);
+        var totalFileBytes = normalizedEntries.Values
+            .Where(static entry => !entry.IsDirectory)
+            .Sum(static entry => entry.SizeBytes);
+        var busyFiles = new List<RepositoryBusyFileDto>();
+
+        var previousFiles = await db.Set<RepositorySnapshotEntry>()
+            .Where(entry => entry.RepositoryId == repositoryId
+                            && entry.SnapshotId == previousSnapshotId
+                            && !entry.IsDirectory
+                            && !entry.IsDeleted)
+            .Select(entry => new SnapshotEntryLight(
+                entry.RelativePath,
+                entry.Name,
+                entry.SizeBytes,
+                entry.LastWriteUtc,
+                entry.ContentHashSha256))
+            .ToListAsync(ct);
+        var previousFilesByPath = previousFiles.ToDictionary(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase);
+        var currentFilesByPath = normalizedEntries.Values
+            .Where(static entry => !entry.IsDirectory)
+            .ToDictionary(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase);
+
+        var affectedPaths = normalizedUpserts.Values
+            .Where(static entry => !entry.IsDirectory)
+            .Select(static entry => entry.RelativePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var removalRoot in normalizedRemovedPaths)
+        {
+            foreach (var previousPath in previousFilesByPath.Keys.Where(path => IsPathOrDescendant(path, removalRoot)))
+                affectedPaths.Add(previousPath);
+        }
+
+        if (affectedPaths.Count == 0)
+        {
+            repo.FileCount = fileEntries;
+            repo.TotalSizeBytes = totalFileBytes;
+            repo.LastScannedAt = scannedAtUtc;
+            repo.UpdatedAt = scannedAtUtc;
+            await db.SaveChangesAsync(ct);
+
+            log.LogInformation(
+                "Versioned snapshot delta skipped because no tracked file changes were detected. RepositoryId {RepositoryId}. Entries {Entries}. Upserts {Upserts}. RemovedRoots {RemovedRoots}. Trigger {Trigger}",
+                repositoryId,
+                totalEntries,
+                normalizedUpserts.Count,
+                normalizedRemovedPaths.Count,
+                safeTrigger);
+
+            return SnapshotSaveResultDto.NoChanges();
+        }
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        var snapshot = new RepositorySnapshot
+        {
+            RepositoryId = repositoryId,
+            Trigger = safeTrigger,
+            Title = null,
+            TagsCsv = null,
+            CreatedAt = scannedAtUtc,
+            TotalEntries = totalEntries,
+            FileEntries = fileEntries,
+            DirectoryEntries = totalEntries - fileEntries,
+            TotalFileBytes = totalFileBytes,
+            IsDeleted = false,
+            DeletedAt = null
+        };
+
+        db.Add(snapshot);
+        await db.SaveChangesAsync(ct);
+
+        if (normalizedEntries.Count > 0)
+        {
+            await InsertSnapshotEntriesAsync(
+                snapshot.Id,
+                repositoryId,
+                normalizedEntries.Values.OrderBy(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase).ToList(),
+                scannedAtUtc,
+                ct);
+        }
+
+        await CloneSnapshotFileLinksAsync(previousSnapshotId, snapshot.Id, scannedAtUtc, ct);
+
+        var identityPaths = affectedPaths.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList();
+        var identitiesByPath = await db.Set<FileIdentity>()
+            .IgnoreQueryFilters()
+            .Where(identity => identity.RepositoryId == repositoryId && identityPaths.Contains(identity.RelativePath))
+            .ToDictionaryAsync(identity => identity.RelativePath, StringComparer.OrdinalIgnoreCase, ct);
+
+        foreach (var path in identityPaths)
+        {
+            if (identitiesByPath.ContainsKey(path))
+                continue;
+
+            currentFilesByPath.TryGetValue(path, out var current);
+            var identity = new FileIdentity
+            {
+                RepositoryId = repositoryId,
+                RelativePath = path,
+                Name = current?.Name ?? Path.GetFileName(path),
+                Extension = current?.Extension,
+                CreatedAt = scannedAtUtc,
+                IsDeleted = false,
+                DeletedAt = null,
+                UpdatedAt = scannedAtUtc
+            };
+
+            db.Add(identity);
+            identitiesByPath[path] = identity;
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        var identityIds = identitiesByPath.Values.Select(static identity => identity.Id).Distinct().ToList();
+        var latestVersions = identityIds.Count == 0
+            ? new List<FileVersion>()
+            : await db.Set<FileVersion>()
+                .Where(version => identityIds.Contains(version.FileIdentityId) && !version.IsDeleted)
+                .OrderByDescending(version => version.CreatedAt)
+                .ThenByDescending(version => version.Id)
+                .ToListAsync(ct);
+        var latestVersionsByIdentityId = latestVersions
+            .GroupBy(static version => version.FileIdentityId)
+            .ToDictionary(static group => group.Key, static group => group.First());
+        var latestVersionIds = latestVersionsByIdentityId.Values
+            .Select(static version => version.Id)
+            .Distinct()
+            .ToList();
+        var latestVersionIdsWithBlocks = latestVersionIds.Count == 0
+            ? new HashSet<long>()
+            : (await db.Set<FileVersionBlock>()
+                    .Where(block => latestVersionIds.Contains(block.FileVersionId) && !block.IsDeleted)
+                    .Select(block => block.FileVersionId)
+                    .Distinct()
+                    .ToListAsync(ct))
+                .ToHashSet();
+        var previousLinksByIdentityId = identityIds.Count == 0
+            ? new Dictionary<long, long>()
+            : await db.Set<SnapshotFileLink>()
+                .Where(link => link.SnapshotId == previousSnapshotId && identityIds.Contains(link.FileIdentityId) && !link.IsDeleted)
+                .ToDictionaryAsync(link => link.FileIdentityId, link => link.FileVersionId, ct);
+
+        var newVersions = new List<FileVersion>();
+        var pendingBlocks = new Dictionary<FileVersion, IReadOnlyList<StoredFileBlockDto>>();
+        var pendingLinks = new List<PendingSnapshotFileLink>();
+        var replacementIdentityIds = new HashSet<long>();
+        var pendingPrecomputedDiffs = new List<PendingTextDiffPrecompute>();
+
+        foreach (var path in identityPaths)
+        {
+            var identity = identitiesByPath[path];
+            currentFilesByPath.TryGetValue(path, out var current);
+            var hadPrevious = previousFilesByPath.TryGetValue(path, out var previous);
+            latestVersionsByIdentityId.TryGetValue(identity.Id, out var latestVersion);
+            FileVersion? selectedVersion = latestVersion;
+
+            if (current is not null)
+            {
+                identity.Name = current.Name;
+                identity.Extension = current.Extension;
+                identity.IsDeleted = false;
+                identity.DeletedAt = null;
+                identity.UpdatedAt = scannedAtUtc;
+
+                var previousHash = previous?.ContentHashSha256 ?? string.Empty;
+                var currentHash = current.ContentHashSha256 ?? string.Empty;
+                var changed = !hadPrevious
+                              || !string.Equals(previousHash, currentHash, StringComparison.OrdinalIgnoreCase)
+                              || previous?.SizeBytes != current.SizeBytes;
+                var hasLatest = latestVersion is not null;
+                var latestHasBlocks = hasLatest
+                                      && latestVersion is not null
+                                      && latestVersion.Id > 0
+                                      && (latestVersion.SizeBytes == 0 || latestVersionIdsWithBlocks.Contains(latestVersion.Id));
+                var latestMatchesCurrent = hasLatest
+                                           && latestVersion is not null
+                                           && !latestVersion.IsDeletionMarker
+                                           && latestVersion.SizeBytes == current.SizeBytes
+                                           && string.Equals(
+                                               latestVersion.ContentHashSha256 ?? string.Empty,
+                                               currentHash,
+                                               StringComparison.OrdinalIgnoreCase);
+                var previousVersionForDiff = hasLatest ? latestVersion : null;
+                var shouldCreateNewVersion = changed
+                                             || !hasLatest
+                                             || (hasLatest && latestVersion is not null && latestVersion.IsDeletionMarker)
+                                             || !latestHasBlocks
+                                             || !latestMatchesCurrent;
+
+                if (shouldCreateNewVersion)
+                {
+                    var newVersion = new FileVersion
+                    {
+                        FileIdentityId = identity.Id,
+                        ContentHashSha256 = current.ContentHashSha256 ?? "unknown",
+                        SizeBytes = current.SizeBytes,
+                        LastWriteUtc = current.LastWriteUtc,
+                        IsDeletionMarker = false,
+                        CreatedAt = scannedAtUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
+                    };
+
+                    var absolutePath = ToAbsolutePath(repo.Directory.Path, path);
+                    var storeResult = await TryStoreBlocksAsync(path, absolutePath, ct);
+                    if (storeResult.BusyFile is not null)
+                    {
+                        busyFiles.Add(storeResult.BusyFile);
+                        selectedVersion = null;
+                    }
+                    else
+                    {
+                        var stored = storeResult.StoredContent;
+                        if (stored is null || (current.SizeBytes > 0 && stored.Blocks.Count == 0))
+                            throw new InvalidOperationException($"Failed to store blocks for file {path}.");
+
+                        pendingBlocks[newVersion] = stored.Blocks;
+                        newVersions.Add(newVersion);
+                        latestVersionsByIdentityId[identity.Id] = newVersion;
+                        selectedVersion = newVersion;
+
+                        if (previousVersionForDiff is { Id: > 0, IsDeletionMarker: false }
+                            && latestHasBlocks
+                            && CanBuildTextDiff(current.Extension))
+                        {
+                            pendingPrecomputedDiffs.Add(new PendingTextDiffPrecompute(
+                                path,
+                                previousVersionForDiff.Id,
+                                newVersion));
+                        }
+                    }
+                }
+            }
+            else
+            {
+                identity.IsDeleted = true;
+                identity.DeletedAt = scannedAtUtc;
+                identity.UpdatedAt = scannedAtUtc;
+
+                var hasLatest = latestVersion is not null;
+                var shouldCreateDeletionMarker = !hasLatest || !(latestVersion?.IsDeletionMarker ?? false);
+                if (shouldCreateDeletionMarker)
+                {
+                    selectedVersion = new FileVersion
+                    {
+                        FileIdentityId = identity.Id,
+                        ContentHashSha256 = previous?.ContentHashSha256 ?? "deleted",
+                        SizeBytes = previous?.SizeBytes ?? 0,
+                        LastWriteUtc = scannedAtUtc,
+                        IsDeletionMarker = true,
+                        CreatedAt = scannedAtUtc,
+                        IsDeleted = false,
+                        DeletedAt = null
+                    };
+
+                    newVersions.Add(selectedVersion);
+                    latestVersionsByIdentityId[identity.Id] = selectedVersion;
+                }
+            }
+
+            if (selectedVersion is null)
+                continue;
+
+            if (!previousLinksByIdentityId.TryGetValue(identity.Id, out var previousLinkedVersionId)
+                || previousLinkedVersionId != selectedVersion.Id)
+            {
+                replacementIdentityIds.Add(identity.Id);
+                pendingLinks.Add(new PendingSnapshotFileLink(identity.Id, selectedVersion));
+            }
+        }
+
+        if (newVersions.Count == 0 && pendingLinks.Count == 0 && busyFiles.Count == 0)
+        {
+            repo.FileCount = fileEntries;
+            repo.TotalSizeBytes = totalFileBytes;
+            repo.LastScannedAt = scannedAtUtc;
+            repo.UpdatedAt = scannedAtUtc;
+
+            await DeleteSnapshotShellAsync(snapshot.Id, repositoryId, ct);
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+
+            log.LogInformation(
+                "Versioned snapshot delta skipped because affected paths produced no new tracked file versions. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Entries {Entries}. Files {Files}. AffectedPaths {AffectedPaths}. Trigger {Trigger}",
+                repositoryId,
+                snapshot.Id,
+                totalEntries,
+                fileEntries,
+                identityPaths.Count,
+                safeTrigger);
+
+            return SnapshotSaveResultDto.NoChanges();
+        }
+
+        foreach (var pair in pendingBlocks)
+        {
+            var version = pair.Key;
+            foreach (var block in pair.Value.OrderBy(static block => block.Sequence))
+            {
+                version.Blocks.Add(new FileVersionBlock
+                {
+                    Sequence = block.Sequence,
+                    BlockStorageKey = block.BlockStorageKey,
+                    LengthBytes = block.LengthBytes,
+                    StoredSizeBytes = block.StoredSizeBytes,
+                    CreatedAt = scannedAtUtc,
+                    IsDeleted = false,
+                    DeletedAt = null
+                });
+            }
+        }
+
+        if (newVersions.Count > 0)
+            db.AddRange(newVersions);
+
+        repo.FileCount = fileEntries;
+        repo.VersionCount += newVersions.Count;
+        repo.TotalSizeBytes = totalFileBytes;
+        repo.LastScannedAt = scannedAtUtc;
+        repo.UpdatedAt = scannedAtUtc;
+
+        await db.SaveChangesAsync(ct);
+
+        if (replacementIdentityIds.Count > 0)
+            await DeleteSnapshotFileLinksByIdentityIdsAsync(snapshot.Id, replacementIdentityIds, ct);
+
+        if (pendingLinks.Count > 0)
+            await InsertSnapshotFileLinksAsync(snapshot.Id, pendingLinks, scannedAtUtc, ct);
+
+        if (pendingPrecomputedDiffs.Count > 0)
+            await PrecomputeSnapshotDiffsAsync(pendingPrecomputedDiffs, ct);
+
+        await tx.CommitAsync(ct);
+
+        log.LogInformation(
+            "Versioned snapshot delta applied. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Entries {Entries}. Files {Files}. AffectedPaths {AffectedPaths}. NewVersions {NewVersions}. ReplacedLinks {ReplacedLinks}. BusyFiles {BusyFiles}. Trigger {Trigger}",
+            repositoryId,
+            snapshot.Id,
+            totalEntries,
+            fileEntries,
+            identityPaths.Count,
+            newVersions.Count,
+            pendingLinks.Count,
+            busyFiles.Count,
+            safeTrigger);
+
+        return SnapshotSaveResultDto.Created(busyFiles);
+    }
+
     private async Task InsertSnapshotEntriesAsync(
         long snapshotId,
         int repositoryId,
@@ -629,9 +1141,19 @@ public sealed class EfRepositorySnapshotRepository(
         if (entries.Count == 0)
             return;
 
+        var entryList = entries
+            .Where(static entry => !string.IsNullOrWhiteSpace(entry.RelativePath))
+            .Select(NormalizeSnapshotEntry)
+            .GroupBy(static entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(static group => group.Last())
+            .ToList();
+
+        if (entryList.Count == 0)
+            return;
+
         if (!db.Database.IsSqlite())
         {
-            var rows = entries.Select(e => new RepositorySnapshotEntry
+            var rows = entryList.Select(e => new RepositorySnapshotEntry
             {
                 SnapshotId = snapshotId,
                 RepositoryId = repositoryId,
@@ -657,7 +1179,6 @@ public sealed class EfRepositorySnapshotRepository(
             await connection.OpenAsync(ct);
 
         var transaction = db.Database.CurrentTransaction?.GetDbTransaction();
-        var entryList = entries as IList<RepositoryScanEntryDto> ?? entries.ToList();
 
         for (var offset = 0; offset < entryList.Count; offset += SnapshotEntryInsertBatchSize)
         {
@@ -696,6 +1217,21 @@ public sealed class EfRepositorySnapshotRepository(
                 });
                 sql.Append(')');
             }
+
+            sql.Append("""
+                 ON CONFLICT("SnapshotId", "RelativePath") DO UPDATE SET
+                    "ContentHashSha256" = excluded."ContentHashSha256",
+                    "CreatedAt" = excluded."CreatedAt",
+                    "DeletedAt" = NULL,
+                    "Extension" = excluded."Extension",
+                    "IsDirectory" = excluded."IsDirectory",
+                    "LastWriteUtc" = excluded."LastWriteUtc",
+                    "Name" = excluded."Name",
+                    "ParentRelativePath" = excluded."ParentRelativePath",
+                    "RepositoryId" = excluded."RepositoryId",
+                    "SizeBytes" = excluded."SizeBytes",
+                    "IsDeleted" = 0
+                """);
 
             command.CommandText = sql.ToString();
             await command.ExecuteNonQueryAsync(ct);
@@ -811,6 +1347,299 @@ public sealed class EfRepositorySnapshotRepository(
             .ExecuteDeleteAsync(ct);
     }
 
+    private async Task DeleteSnapshotShellAsync(long snapshotId, int repositoryId, CancellationToken ct)
+    {
+        if (snapshotId <= 0 || repositoryId <= 0)
+            return;
+
+        await db.Set<SnapshotFileLink>()
+            .Where(l => l.SnapshotId == snapshotId && !l.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+
+        await db.Set<RepositorySnapshotEntry>()
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshotId && !e.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+
+        await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && s.Id == snapshotId && !s.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+    }
+
+    private async Task<RepositorySnapshot> CreateWorkingSnapshotShellAsync(
+        int repositoryId,
+        string trigger,
+        DateTime createdAtUtc,
+        CancellationToken ct)
+    {
+        var snapshot = new RepositorySnapshot
+        {
+            RepositoryId = repositoryId,
+            Trigger = trigger,
+            Title = null,
+            TagsCsv = null,
+            CreatedAt = createdAtUtc,
+            TotalEntries = 0,
+            FileEntries = 0,
+            DirectoryEntries = 0,
+            TotalFileBytes = 0,
+            IsDeleted = false,
+            DeletedAt = null
+        };
+
+        db.Add(snapshot);
+        await db.SaveChangesAsync(ct);
+        return snapshot;
+    }
+
+    private async Task CloneSnapshotEntriesAsync(
+        long sourceSnapshotId,
+        long targetSnapshotId,
+        int repositoryId,
+        DateTime createdAtUtc,
+        CancellationToken ct)
+    {
+        if (sourceSnapshotId <= 0 || targetSnapshotId <= 0)
+            return;
+
+        if (!db.Database.IsSqlite())
+        {
+            var sourceEntries = await db.Set<RepositorySnapshotEntry>()
+                .Where(entry => entry.RepositoryId == repositoryId && entry.SnapshotId == sourceSnapshotId && !entry.IsDeleted)
+                .OrderBy(entry => entry.RelativePath)
+                .Select(entry => new RepositoryScanEntryDto(
+                    entry.RelativePath,
+                    entry.ParentRelativePath,
+                    entry.Name,
+                    entry.IsDirectory,
+                    entry.Extension,
+                    entry.SizeBytes,
+                    entry.LastWriteUtc,
+                    entry.ContentHashSha256,
+                    null))
+                .ToListAsync(ct);
+
+            await InsertSnapshotEntriesAsync(targetSnapshotId, repositoryId, sourceEntries, createdAtUtc, ct);
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(ct);
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandType = CommandType.Text;
+        command.CommandText = """
+            INSERT INTO "RepositorySnapshotEntries" (
+                "ContentHashSha256",
+                "CreatedAt",
+                "DeletedAt",
+                "Extension",
+                "IsDirectory",
+                "LastWriteUtc",
+                "Name",
+                "ParentRelativePath",
+                "RelativePath",
+                "RepositoryId",
+                "SizeBytes",
+                "SnapshotId",
+                "IsDeleted")
+            SELECT
+                "ContentHashSha256",
+                @createdAt,
+                NULL,
+                "Extension",
+                "IsDirectory",
+                "LastWriteUtc",
+                "Name",
+                "ParentRelativePath",
+                "RelativePath",
+                "RepositoryId",
+                "SizeBytes",
+                @targetSnapshotId,
+                0
+            FROM "RepositorySnapshotEntries"
+            WHERE "RepositoryId" = @repositoryId
+              AND "SnapshotId" = @sourceSnapshotId
+              AND "IsDeleted" = 0;
+            """;
+
+        AddParameter(command, "@createdAt", createdAtUtc);
+        AddParameter(command, "@targetSnapshotId", targetSnapshotId);
+        AddParameter(command, "@repositoryId", repositoryId);
+        AddParameter(command, "@sourceSnapshotId", sourceSnapshotId);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private async Task CloneSnapshotFileLinksAsync(
+        long sourceSnapshotId,
+        long targetSnapshotId,
+        DateTime createdAtUtc,
+        CancellationToken ct)
+    {
+        if (sourceSnapshotId <= 0 || targetSnapshotId <= 0)
+            return;
+
+        if (!db.Database.IsSqlite())
+        {
+            var rows = await db.Set<SnapshotFileLink>()
+                .Where(link => link.SnapshotId == sourceSnapshotId && !link.IsDeleted)
+                .Select(link => new SnapshotFileLink
+                {
+                    SnapshotId = targetSnapshotId,
+                    FileIdentityId = link.FileIdentityId,
+                    FileVersionId = link.FileVersionId,
+                    CreatedAt = createdAtUtc,
+                    IsDeleted = false,
+                    DeletedAt = null
+                })
+                .ToListAsync(ct);
+
+            if (rows.Count > 0)
+                db.AddRange(rows);
+
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(ct);
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandType = CommandType.Text;
+        command.CommandText = """
+            INSERT INTO "SnapshotFileLinks" (
+                "CreatedAt",
+                "DeletedAt",
+                "FileIdentityId",
+                "FileVersionId",
+                "IsDeleted",
+                "SnapshotId")
+            SELECT
+                @createdAt,
+                NULL,
+                "FileIdentityId",
+                "FileVersionId",
+                0,
+                @targetSnapshotId
+            FROM "SnapshotFileLinks"
+            WHERE "SnapshotId" = @sourceSnapshotId
+              AND "IsDeleted" = 0;
+            """;
+
+        AddParameter(command, "@createdAt", createdAtUtc);
+        AddParameter(command, "@targetSnapshotId", targetSnapshotId);
+        AddParameter(command, "@sourceSnapshotId", sourceSnapshotId);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private async Task DeleteSnapshotEntriesByRootsAsync(
+        long snapshotId,
+        int repositoryId,
+        IReadOnlyCollection<string> removalRoots,
+        CancellationToken ct)
+    {
+        foreach (var root in removalRoots)
+        {
+            var normalizedRoot = root.Replace('\\', '/').Trim('/');
+            if (string.IsNullOrWhiteSpace(normalizedRoot))
+                continue;
+
+            var normalizedRootLower = normalizedRoot.ToLowerInvariant();
+            var normalizedPrefixLower = (normalizedRoot + "/").ToLowerInvariant();
+
+            await db.Set<RepositorySnapshotEntry>()
+                .Where(entry => entry.RepositoryId == repositoryId && entry.SnapshotId == snapshotId && !entry.IsDeleted)
+                .Where(entry =>
+                    entry.RelativePath.ToLower() == normalizedRootLower
+                    || entry.RelativePath.ToLower().StartsWith(normalizedPrefixLower))
+                .ExecuteDeleteAsync(ct);
+        }
+    }
+
+    private async Task DeleteSnapshotEntriesByExactPathsAsync(
+        long snapshotId,
+        int repositoryId,
+        IReadOnlyCollection<string> exactPaths,
+        CancellationToken ct)
+    {
+        var normalizedPaths = exactPaths
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Select(static path => path.Replace('\\', '/').Trim('/').ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (normalizedPaths.Count == 0)
+            return;
+
+        await db.Set<RepositorySnapshotEntry>()
+            .Where(entry => entry.RepositoryId == repositoryId && entry.SnapshotId == snapshotId && !entry.IsDeleted)
+            .Where(entry => normalizedPaths.Contains(entry.RelativePath.ToLower()))
+            .ExecuteDeleteAsync(ct);
+    }
+
+    private async Task DeleteSnapshotFileLinksByIdentityIdsAsync(
+        long snapshotId,
+        IReadOnlyCollection<long> identityIds,
+        CancellationToken ct)
+    {
+        var normalizedIdentityIds = identityIds
+            .Where(static id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (normalizedIdentityIds.Count == 0)
+            return;
+
+        await db.Set<SnapshotFileLink>()
+            .Where(link => link.SnapshotId == snapshotId && normalizedIdentityIds.Contains(link.FileIdentityId) && !link.IsDeleted)
+            .ExecuteDeleteAsync(ct);
+    }
+
+    private async Task UpdateWorkingSnapshotHeaderAsync(
+        RepositorySnapshot snapshot,
+        Repository repository,
+        string trigger,
+        DateTime scannedAtUtc,
+        CancellationToken ct)
+    {
+        var totals = await db.Set<RepositorySnapshotEntry>()
+            .Where(entry => entry.RepositoryId == repository.Id && entry.SnapshotId == snapshot.Id && !entry.IsDeleted)
+            .GroupBy(static _ => 1)
+            .Select(group => new
+            {
+                TotalEntries = group.Count(),
+                FileEntries = group.Count(entry => !entry.IsDirectory),
+                TotalFileBytes = group.Where(entry => !entry.IsDirectory).Sum(entry => (long?)entry.SizeBytes) ?? 0
+            })
+            .FirstOrDefaultAsync(ct);
+
+        var totalEntries = totals?.TotalEntries ?? 0;
+        var fileEntries = totals?.FileEntries ?? 0;
+        var totalFileBytes = totals?.TotalFileBytes ?? 0;
+
+        snapshot.Trigger = trigger;
+        snapshot.Title = null;
+        snapshot.TagsCsv = null;
+        snapshot.CreatedAt = scannedAtUtc;
+        snapshot.TotalEntries = totalEntries;
+        snapshot.FileEntries = fileEntries;
+        snapshot.DirectoryEntries = totalEntries - fileEntries;
+        snapshot.TotalFileBytes = totalFileBytes;
+
+        repository.FileCount = fileEntries;
+        repository.TotalSizeBytes = totalFileBytes;
+        repository.LastScannedAt = scannedAtUtc;
+        repository.UpdatedAt = scannedAtUtc;
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static bool IsPathOrDescendant(string path, string ancestor)
+        => string.Equals(path, ancestor, StringComparison.OrdinalIgnoreCase)
+           || path.StartsWith(ancestor + "/", StringComparison.OrdinalIgnoreCase);
+
     private static bool HasMeaningfulEntryChanges(
         IReadOnlyDictionary<string, RepositoryScanEntryDto> currentEntriesByPath,
         IReadOnlyDictionary<string, RepositoryScanEntryDto> previousEntriesByPath)
@@ -883,7 +1712,16 @@ public sealed class EfRepositorySnapshotRepository(
                 e.Extension,
                 e.SizeBytes,
                 e.LastWriteUtc,
-                e.ContentHashSha256))
+                e.ContentHashSha256,
+                db.Set<SnapshotFileLink>()
+                    .Where(l => l.SnapshotId == snapshotId
+                                && !l.IsDeleted
+                                && l.FileIdentity.RepositoryId == repositoryId
+                                && l.FileIdentity.RelativePath == e.RelativePath
+                                && !l.FileIdentity.IsDeleted
+                                && !l.FileVersion.IsDeleted)
+                    .Select(l => (DateTime?)l.FileVersion.CreatedAt)
+                    .FirstOrDefault()))
             .ToListAsync(ct);
     }
 
@@ -925,11 +1763,23 @@ public sealed class EfRepositorySnapshotRepository(
                     e.Extension,
                     e.SizeBytes,
                     e.LastWriteUtc,
-                    e.ContentHashSha256
+                    e.ContentHashSha256,
+                    fv.CreatedAt AS IndexedAtUtc
                 FROM RepositorySnapshotEntries AS e
                 INNER JOIN ranked_snapshots AS rs
                     ON rs.RepositoryId = e.RepositoryId
                    AND rs.SnapshotId = e.SnapshotId
+                LEFT JOIN FileIdentities AS fi
+                    ON fi.RepositoryId = e.RepositoryId
+                   AND fi.RelativePath = e.RelativePath
+                   AND fi.IsDeleted = 0
+                LEFT JOIN SnapshotFileLinks AS l
+                    ON l.SnapshotId = e.SnapshotId
+                   AND l.FileIdentityId = fi.Id
+                   AND l.IsDeleted = 0
+                LEFT JOIN FileVersions AS fv
+                    ON fv.Id = l.FileVersionId
+                   AND fv.IsDeleted = 0
                 WHERE rs.RowNumber = 1
                   AND e.IsDeleted = 0
                 ORDER BY e.RepositoryId, e.RelativePath;
@@ -945,6 +1795,7 @@ public sealed class EfRepositorySnapshotRepository(
             var sizeBytesOrdinal = reader.GetOrdinal("SizeBytes");
             var lastWriteUtcOrdinal = reader.GetOrdinal("LastWriteUtc");
             var contentHashOrdinal = reader.GetOrdinal("ContentHashSha256");
+            var indexedAtUtcOrdinal = reader.GetOrdinal("IndexedAtUtc");
 
             var entriesByRepository = new Dictionary<int, List<RepositoryScanEntryDto>>();
             while (await reader.ReadAsync(ct))
@@ -964,7 +1815,8 @@ public sealed class EfRepositorySnapshotRepository(
                     ReadNullableString(reader, extensionOrdinal),
                     reader.GetInt64(sizeBytesOrdinal),
                     ReadDateTime(reader, lastWriteUtcOrdinal),
-                    ReadNullableString(reader, contentHashOrdinal)));
+                    ReadNullableString(reader, contentHashOrdinal),
+                    reader.IsDBNull(indexedAtUtcOrdinal) ? null : ReadDateTime(reader, indexedAtUtcOrdinal)));
             }
 
             foreach (var pair in entriesByRepository)
@@ -1482,7 +2334,7 @@ public sealed class EfRepositorySnapshotRepository(
                     }
                     else
                     {
-                        await contentStore.RestoreFileAsync(baselineBlocks, baselineTemp, true, ct);
+                        await contentStore.RestoreFileAsync(baselineBlocks, baselineTemp, true, ct: ct);
                     }
 
                     var computed = await BuildDiffForPreviewAsync(
@@ -1517,6 +2369,42 @@ public sealed class EfRepositorySnapshotRepository(
                 baselineBlocks,
                 currentDigest);
 
+            if (IsArchiveExtension(extension))
+            {
+                var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-archive-preview");
+                Directory.CreateDirectory(tempDir);
+
+                var baselineExt = GetSafeTempExtension(extension);
+                var baselineTempArchive = Path.Combine(tempDir, $"{Guid.NewGuid():N}.baseline{baselineExt}");
+                tempFilesToCleanup.Add(baselineTempArchive);
+
+                if (baselineVersion.SizeBytes > 0)
+                {
+                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempArchive, true, ct: ct);
+                }
+                else
+                {
+                    await File.WriteAllBytesAsync(baselineTempArchive, [], ct);
+                }
+
+                var archivePreview = await ArchiveDiffPreviewBuilder.TryBuildZipAsync(baselineTempArchive, absolutePath, ct);
+                if (archivePreview is not null)
+                {
+                    var byteSimilarity = await ComputeByteSimilarityAsync(baselineTempArchive, absolutePath, ct);
+                    binarySummary = binarySummary with { ByteSimilarityRatio = byteSimilarity };
+                    var archiveMessage = BuildArchivePreviewMessage(normalizedPath, archivePreview);
+                    tempFilesToCleanup.Clear();
+                    return PendingFileDiffPreviewDto.FromArchive(
+                        relativePath: normalizedPath,
+                        message: archiveMessage,
+                        binarySummary: binarySummary,
+                        archivePreview: archivePreview);
+                }
+
+                TryDelete(baselineTempArchive);
+                tempFilesToCleanup.Remove(baselineTempArchive);
+            }
+
             if (IsImageExtension(extension))
             {
                 var tempDir = Path.Combine(Path.GetTempPath(), "VeyraFlow", "pending-image-preview");
@@ -1528,7 +2416,7 @@ public sealed class EfRepositorySnapshotRepository(
 
                 if (baselineVersion.SizeBytes > 0)
                 {
-                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempImage, true, ct);
+                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempImage, true, ct: ct);
                 }
                 else
                 {
@@ -1593,7 +2481,7 @@ public sealed class EfRepositorySnapshotRepository(
 
                 if (baselineVersion.SizeBytes > 0)
                 {
-                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempAudio, true, ct);
+                    await contentStore.RestoreFileAsync(baselineBlocks, baselineTempAudio, true, ct: ct);
                 }
                 else
                 {
@@ -1750,6 +2638,19 @@ public sealed class EfRepositorySnapshotRepository(
 
             var binarySummary = BuildVersionBinarySummary(left, right)
                 with { ByteSimilarityRatio = byteSimilarity };
+
+            if (IsArchiveExtension(extension))
+            {
+                var archivePreview = await ArchiveDiffPreviewBuilder.TryBuildZipAsync(leftTemp, rightTemp, ct);
+                if (archivePreview is not null)
+                {
+                    return PendingFileDiffPreviewDto.FromArchive(
+                        relativePath: left.RelativePath,
+                        message: BuildArchivePreviewMessage(left.RelativePath, archivePreview),
+                        binarySummary: binarySummary,
+                        archivePreview: archivePreview);
+                }
+            }
 
             if (IsImageExtension(extension))
             {
@@ -2223,6 +3124,105 @@ public sealed class EfRepositorySnapshotRepository(
             blocks);
     }
 
+    public async Task<RepositorySnapshotRestoreDataDto?> GetSnapshotRestoreDataAsync(
+        int repositoryId,
+        long snapshotId,
+        CancellationToken ct = default)
+    {
+        var snapshot = await db.Set<RepositorySnapshot>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == snapshotId && s.RepositoryId == repositoryId && !s.IsDeleted, ct);
+
+        if (snapshot is null)
+            return null;
+
+        var entries = await db.Set<RepositorySnapshotEntry>()
+            .AsNoTracking()
+            .Where(e => e.RepositoryId == repositoryId && e.SnapshotId == snapshotId && !e.IsDeleted)
+            .OrderBy(e => e.RelativePath)
+            .Select(e => new RepositoryScanEntryDto(
+                e.RelativePath,
+                e.ParentRelativePath,
+                e.Name,
+                e.IsDirectory,
+                e.Extension,
+                e.SizeBytes,
+                e.LastWriteUtc,
+                e.ContentHashSha256,
+                null))
+            .ToListAsync(ct);
+
+        var linkedVersions = await db.Set<SnapshotFileLink>()
+            .AsNoTracking()
+            .Where(l => l.SnapshotId == snapshotId
+                        && !l.IsDeleted
+                        && l.FileIdentity.RepositoryId == repositoryId
+                        && !l.FileIdentity.IsDeleted
+                        && !l.FileVersion.IsDeleted)
+            .Select(l => new
+            {
+                l.FileVersion.Id,
+                l.FileIdentity.RepositoryId,
+                l.FileIdentity.RelativePath,
+                l.FileIdentity.Extension,
+                l.FileVersion.SizeBytes,
+                l.FileVersion.IsDeletionMarker,
+                l.FileVersion.ContentHashSha256
+            })
+            .ToListAsync(ct);
+
+        var versionIds = linkedVersions
+            .Select(v => v.Id)
+            .Distinct()
+            .ToList();
+
+        var blocksByVersion = versionIds.Count == 0
+            ? new Dictionary<long, List<StoredFileBlockDto>>()
+            : (await db.Set<FileVersionBlock>()
+                    .AsNoTracking()
+                    .Where(b => versionIds.Contains(b.FileVersionId) && !b.IsDeleted)
+                    .OrderBy(b => b.Sequence)
+                    .Select(b => new
+                    {
+                        b.FileVersionId,
+                        Block = new StoredFileBlockDto(
+                            b.Sequence,
+                            b.BlockStorageKey,
+                            b.LengthBytes,
+                            b.StoredSizeBytes)
+                    })
+                    .ToListAsync(ct))
+                .GroupBy(x => x.FileVersionId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(x => x.Block).ToList());
+
+        var versions = linkedVersions
+            .OrderBy(v => v.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .Select(v => new FileVersionRestoreDto(
+                v.Id,
+                v.RepositoryId,
+                v.RelativePath,
+                v.Extension,
+                v.SizeBytes,
+                v.IsDeletionMarker,
+                v.ContentHashSha256,
+                blocksByVersion.GetValueOrDefault(v.Id) ?? []))
+            .ToList();
+
+        var item = new RepositorySnapshotHistoryItemDto(
+            snapshot.Id,
+            snapshot.Title,
+            snapshot.CreatedAt,
+            RepositorySnapshotTriggerClassifier.GetKind(snapshot.Trigger),
+            snapshot.IsArchived,
+            snapshot.Trigger,
+            0,
+            ParseSnapshotTags(snapshot.TagsCsv));
+
+        return new RepositorySnapshotRestoreDataDto(item, entries, versions);
+    }
+
     private static bool IsTextDiffUniqueConflict(DbUpdateException ex)
         => ex.InnerException?.Message.Contains(
                "UNIQUE constraint failed: FileVersionTextDiffs.LeftFileVersionId, FileVersionTextDiffs.RightFileVersionId, FileVersionTextDiffs.MaxLines",
@@ -2262,8 +3262,8 @@ public sealed class EfRepositorySnapshotRepository(
 
                 try
                 {
-                    await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct);
-                    await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct);
+                    await contentStore.RestoreFileAsync(left.Blocks, leftTemp, true, ct: ct);
+                    await contentStore.RestoreFileAsync(right.Blocks, rightTemp, true, ct: ct);
 
                     var extension = NormalizeExtension(right.Extension) ?? NormalizeExtension(left.Extension);
                     var computed = await BuildDiffForPreviewAsync(leftTemp, rightTemp, extension, PrecomputedDiffMaxLines, ct);
@@ -2303,50 +3303,26 @@ public sealed class EfRepositorySnapshotRepository(
 
     private static bool CanBuildTextDiff(string? extension)
     {
-        return IsTextExtension(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
+        return KnownFileExtensions.IsTextDiffExtension(extension) || WordSemanticProjection.IsWordOoxmlExtension(extension);
     }
 
     private static bool IsTextExtension(string? extension)
-    {
-        var normalized = NormalizeExtension(extension);
-        return normalized is not null && TextExtensions.Contains(normalized);
-    }
+        => KnownFileExtensions.IsTextDiffExtension(extension);
+
+    private static bool IsArchiveExtension(string? extension)
+        => KnownFileExtensions.IsArchiveDiffExtension(extension);
 
     private static bool IsImageExtension(string? extension)
-    {
-        var normalized = NormalizeExtension(extension);
-        return normalized is not null && ImageExtensions.Contains(normalized);
-    }
+        => KnownFileExtensions.IsImageDiffExtension(extension);
 
     private static bool IsAudioExtension(string? extension)
-    {
-        var normalized = NormalizeExtension(extension);
-        return normalized is not null && AudioExtensions.Contains(normalized);
-    }
+        => KnownFileExtensions.IsAudioDiffExtension(extension);
 
     private static bool IsOfficeDocumentExtension(string? extension)
-    {
-        var normalized = NormalizeExtension(extension);
-        if (normalized is null)
-            return false;
-
-        return string.Equals(normalized, ".doc", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(normalized, ".docx", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(normalized, ".rtf", StringComparison.OrdinalIgnoreCase)
-               || string.Equals(normalized, ".odt", StringComparison.OrdinalIgnoreCase);
-    }
+        => KnownFileExtensions.IsOfficeBinaryHintExtension(extension);
 
     private static string? NormalizeExtension(string? extension)
-    {
-        if (string.IsNullOrWhiteSpace(extension))
-            return null;
-
-        var normalized = extension.Trim();
-        if (!normalized.StartsWith('.'))
-            normalized = "." + normalized;
-
-        return normalized;
-    }
+        => KnownFileExtensions.NormalizeExtension(extension);
 
     private static SemaphoreSlim GetTextDiffSaveStripe(long leftFileVersionId, long rightFileVersionId, int maxLines)
     {
@@ -2381,7 +3357,7 @@ public sealed class EfRepositorySnapshotRepository(
         if (version.Blocks.Count == 0)
             throw new InvalidOperationException("Blocks are missing for selected version.");
 
-        await contentStore.RestoreFileAsync(version.Blocks, tempPath, true, ct);
+        await contentStore.RestoreFileAsync(version.Blocks, tempPath, true, ct: ct);
     }
 
     private async Task<TextDiffComputationDto> BuildDiffForPreviewAsync(
@@ -3019,6 +3995,14 @@ public sealed class EfRepositorySnapshotRepository(
         return $"{relativePath}   audio   {sizeLabel}   {durationLabel}   {similarityLabel}, {spectralLabel}, {changedLabel}";
     }
 
+    private static string BuildArchivePreviewMessage(
+        string relativePath,
+        PendingArchiveDiffPreviewDto preview)
+    {
+        return $"{relativePath}   +{preview.AddedEntryCount} / -{preview.RemovedEntryCount} / ~{preview.ChangedEntryCount}"
+               + (preview.UnchangedEntryCount > 0 ? $"  (= {preview.UnchangedEntryCount})" : string.Empty);
+    }
+
     private static PendingAudioDiffPreviewDto CreatePendingAudioPreviewDto(
         string baselineAudioPath,
         bool isBaselineTempFile,
@@ -3195,6 +4179,9 @@ public sealed class EfRepositorySnapshotRepository(
                     : statesBySnapshot.GetValueOrDefault(pair.previous.SnapshotId, EmptySnapshotLinkStates);
 
                 var comparison = await snapshotComparison.CompareSnapshotLinksAsync(currentStates, previousStates, ct);
+                if (pair.previous is not null && comparison.ChangedFilesCount == 0)
+                    return;
+
                 result[pair.index] = new RepositorySnapshotHistoryItemDto(
                     pair.current.SnapshotId,
                     pair.current.Title,
@@ -3330,6 +4317,21 @@ public sealed class EfRepositorySnapshotRepository(
     private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/');
 
+    private static RepositoryScanEntryDto NormalizeSnapshotEntry(RepositoryScanEntryDto entry)
+    {
+        var relativePath = NormalizeRelativePath(entry.RelativePath).Trim('/');
+        var parentRelativePath = string.IsNullOrWhiteSpace(entry.ParentRelativePath)
+            ? null
+            : NormalizeRelativePath(entry.ParentRelativePath).Trim('/');
+
+        return entry with
+        {
+            RelativePath = relativePath,
+            ParentRelativePath = string.IsNullOrWhiteSpace(parentRelativePath) ? null : parentRelativePath,
+            Extension = entry.IsDirectory ? null : KnownFileExtensions.NormalizeTrackedFileFormat(entry.Extension)
+        };
+    }
+
     private static string ToAbsolutePath(string rootPath, string relativePath)
     {
         var rel = relativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -3461,8 +4463,15 @@ public sealed class EfRepositorySnapshotRepository(
         }
     }
 
+    private sealed record WorkingSnapshotSeed(
+        long SnapshotId,
+        DateTime CreatedAt,
+        bool HasFileLinks);
+
     private sealed record BlockStorageAttemptResult(
         StoredFileContentDto? StoredContent,
         RepositoryBusyFileDto? BusyFile);
 
 }
+
+

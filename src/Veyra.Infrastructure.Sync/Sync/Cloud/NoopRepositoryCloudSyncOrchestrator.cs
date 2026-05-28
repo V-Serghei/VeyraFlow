@@ -11,6 +11,15 @@ public sealed class NoopRepositoryCloudSyncOrchestrator : IRepositoryCloudSyncOr
     public Task<int> RestoreRepositoriesFromCloudAsync(string? targetRootDirectory = null, CancellationToken ct = default)
         => Task.FromResult(0);
 
+    public Task<bool> RestoreRepositoryFromCloudAsync(
+        int cloudRepositoryId,
+        string? targetRootDirectory = null,
+        bool restoreFullHistory = false,
+        bool restoreToAnotherFolder = false,
+        bool restoreMetadataOnly = false,
+        CancellationToken ct = default)
+        => Task.FromResult(false);
+
     public Task ProcessPendingQueueAsync(CancellationToken ct = default)
         => Task.CompletedTask;
 

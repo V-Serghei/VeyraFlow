@@ -40,5 +40,11 @@ public partial class CreateRepositoryWindow : Window
             if (DataContext is CreateRepositoryWindowViewModel vm)
                 vm.RequestClose -= Close;
         };
+
+        Closing += (_, args) =>
+        {
+            if (DataContext is CreateRepositoryWindowViewModel vm && !vm.RequestWindowClose())
+                args.Cancel = true;
+        };
     }
 }

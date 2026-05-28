@@ -1,5 +1,6 @@
 ﻿using System;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Application.Common.Files;
 
 namespace Veyra.Desktop.ViewModels.Pages.SetupWizard;
 
@@ -22,10 +23,7 @@ public sealed partial class FileExtensionOption : ObservableObject
 
     private static string Normalize(string e)
     {
-        if (string.IsNullOrWhiteSpace(e)) return string.Empty;
-        e = e.Trim();
-        if (!e.StartsWith(".")) e = "." + e;
-        return e.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeExtension(e) ?? string.Empty;
     }
 
     public override bool Equals(object? obj)

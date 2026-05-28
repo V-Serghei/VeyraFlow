@@ -116,6 +116,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
         entity.AutoCaptureFileVersions = autoCaptureFileVersions;
         entity.ProtectCloudMetadata = protectCloudMetadata;
         entity.ExclusionPatternsJson = SerializeExclusionPatterns(excludedPatterns);
+        entity.RetentionPolicyOverrideEnabled = retentionPolicy.HasLocalOverride;
         entity.RetentionEnabled = retentionPolicy.Enabled;
         entity.RetentionMaxAgeDays = NormalizePositive(retentionPolicy.MaxAgeDays);
         entity.RetentionMaxSnapshots = NormalizePositive(retentionPolicy.MaxSnapshots);
@@ -407,6 +408,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             })
             .FirstOrDefaultAsync(ct);
 
+        var changedVersionCounts = await BuildChangedVersionCountsByRepositoryAsync([repo.Id], ct);
+
         return new RepositoryDto(
             repo.Id,
             repo.Name,
@@ -435,7 +438,8 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                 runningProgress?.CreatedAt,
                 runningProgress?.UpdatedAt),
             repo.AutoCaptureFileVersions,
-            repo.ProtectCloudMetadata);
+            repo.ProtectCloudMetadata,
+            changedVersionCounts.GetValueOrDefault(repo.Id));
     }
 
     public async Task<IReadOnlyList<RepositoryDto>> GetAllRepositoriesAsync(CancellationToken ct = default)
@@ -459,6 +463,7 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Pattern).OrderBy(p => p).ToList());
 
         var repoIds = repos.Select(r => r.Id).ToList();
+        var changedVersionCounts = await BuildChangedVersionCountsByRepositoryAsync(repoIds, ct);
         var queueStatsByRepo = repoIds.Count == 0
             ? new Dictionary<int, (int Pending, int Conflict, int Running, int Retry, int DeadLetter, int Failed, int Completed)>()
             : await db.Set<RepositorySyncQueueItem>()
@@ -551,8 +556,99 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
                     progress == default ? null : progress.CreatedAt,
                     progress == default ? null : progress.UpdatedAt),
                 r.AutoCaptureFileVersions,
-                r.ProtectCloudMetadata);
+                r.ProtectCloudMetadata,
+                changedVersionCounts.GetValueOrDefault(r.Id));
         }).ToList();
+    }
+
+    private async Task<Dictionary<int, int>> BuildChangedVersionCountsByRepositoryAsync(
+        IReadOnlyCollection<int> repositoryIds,
+        CancellationToken ct)
+    {
+        var normalizedRepositoryIds = repositoryIds
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+
+        if (normalizedRepositoryIds.Count == 0)
+            return [];
+
+        var snapshots = await db.Set<RepositorySnapshot>()
+            .AsNoTracking()
+            .Where(s => normalizedRepositoryIds.Contains(s.RepositoryId) && !s.IsDeleted)
+            .Where(s => db.Set<SnapshotFileLink>().Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+            .Select(s => new
+            {
+                s.Id,
+                s.RepositoryId,
+                s.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        var baselineSnapshotsByRepository = snapshots
+            .GroupBy(s => s.RepositoryId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(s => s.CreatedAt).ThenBy(s => s.Id).First());
+
+        if (baselineSnapshotsByRepository.Count == 0)
+            return normalizedRepositoryIds.ToDictionary(id => id, _ => 0);
+
+        var baselineSnapshotIds = baselineSnapshotsByRepository.Values
+            .Select(s => s.Id)
+            .ToList();
+
+        var baselineVersionIdsByRepository = (await db.Set<SnapshotFileLink>()
+                .AsNoTracking()
+                .Where(l => baselineSnapshotIds.Contains(l.SnapshotId)
+                            && !l.IsDeleted
+                            && !l.FileVersion.IsDeleted
+                            && !l.Snapshot.IsDeleted)
+                .Select(l => new
+                {
+                    l.Snapshot.RepositoryId,
+                    l.FileVersionId
+                })
+                .ToListAsync(ct))
+            .GroupBy(x => x.RepositoryId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(x => x.FileVersionId).ToHashSet());
+
+        var changedVersionRows = await db.Set<SnapshotFileLink>()
+            .AsNoTracking()
+            .Where(l => normalizedRepositoryIds.Contains(l.Snapshot.RepositoryId)
+                        && !l.IsDeleted
+                        && !l.FileVersion.IsDeleted
+                        && !l.Snapshot.IsDeleted)
+            .Select(l => new
+            {
+                l.Snapshot.RepositoryId,
+                SnapshotId = l.SnapshotId,
+                SnapshotCreatedAt = l.Snapshot.CreatedAt,
+                l.FileVersionId
+            })
+            .ToListAsync(ct);
+
+        var result = normalizedRepositoryIds.ToDictionary(id => id, _ => 0);
+
+        foreach (var group in changedVersionRows.GroupBy(x => x.RepositoryId))
+        {
+            if (!baselineSnapshotsByRepository.TryGetValue(group.Key, out var baseline))
+                continue;
+
+            baselineVersionIdsByRepository.TryGetValue(group.Key, out var baselineVersionIds);
+            baselineVersionIds ??= [];
+
+            result[group.Key] = group
+                .Where(x => x.SnapshotCreatedAt > baseline.CreatedAt
+                            || (x.SnapshotCreatedAt == baseline.CreatedAt && x.SnapshotId > baseline.Id))
+                .Select(x => x.FileVersionId)
+                .Distinct()
+                .Count(versionId => !baselineVersionIds.Contains(versionId));
+        }
+
+        return result;
     }
 
     public async Task EnsureRepositoriesForAllDirectoriesAsync(CancellationToken ct = default)
@@ -663,7 +759,12 @@ public sealed class EfRepositoryRepository(VeyraDbContext db) : IRepositoryRepos
             repository.RetentionStorageMode,
             repository.RetentionAllowManualSnapshotCleanup,
             repository.RetentionAutomaticCompactionEnabled,
-            repository.RetentionAutomaticCompactionWindowHours);
+            repository.RetentionAutomaticCompactionWindowHours,
+            repository.RetentionPolicyOverrideEnabled,
+            repository.RetentionPolicyOverrideEnabled
+                ? RepositoryRetentionPolicySources.Repository
+                : RepositoryRetentionPolicySources.None,
+            repository.RetentionPolicyOverrideEnabled ? repository.Id : null);
     }
 
     private static RepositoryCloudSyncStatusDto MapCloudSyncStatus(

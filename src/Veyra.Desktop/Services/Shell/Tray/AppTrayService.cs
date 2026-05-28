@@ -14,17 +14,20 @@ using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.Execution;
+using Veyra.Desktop.Services.Monitoring;
+using Veyra.Desktop.Services.Monitoring.Models;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.ViewModels.Pages.Settings;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views;
 using Veyra.Desktop.Views.Windows;
+using Veyra.Desktop.Services.Repositories;
 using Veyra.Desktop.Services.Sync.Runtime;
 using AvaloniaApplication = Avalonia.Application;
 
@@ -36,6 +39,8 @@ public sealed class AppTrayService(
     IServiceScopeExecutor scopeExecutor,
     IConnectivityStatusService connectivity,
     ICloudSyncRuntimeControlService cloudSyncRuntime,
+    IProcessResourceStatusStore processResourceStatusStore,
+    IRepositoryLiveSyncStatusStore liveSyncStatusStore,
     ILogger<AppTrayService> log)
     : IAppTrayService
 {
@@ -57,6 +62,7 @@ public sealed class AppTrayService(
     private int? _currentActivityRepositoryId;
     private string _currentActivityAccentColor = "#6EA8FF";
     private string _currentActivityBackgroundColor = "#1A6EA8FF";
+    private ProcessResourceSnapshotDto? _processResourceSnapshot = processResourceStatusStore.Snapshot;
 
     public bool IsInitialized => _trayIcon is not null;
     public bool IsExitRequested { get; private set; }
@@ -85,6 +91,8 @@ public sealed class AppTrayService(
 
         connectivity.StatusChanged += OnConnectivityStatusChanged;
         cloudSyncRuntime.StateChanged += OnCloudSyncRuntimeStateChanged;
+        processResourceStatusStore.StatusChanged += OnProcessResourceStatusChanged;
+        liveSyncStatusStore.StatusChanged += OnLiveSyncStatusChanged;
 
         _ = RefreshMenuAsync();
         log.LogInformation("Application tray icon initialized");
@@ -143,9 +151,27 @@ public sealed class AppTrayService(
         _ = RefreshMenuAsync();
     }
 
-    private void OnCloudSyncRuntimeStateChanged(Veyra.Desktop.Services.Sync.Runtime.Models.CloudSyncRuntimeSnapshot snapshot)
+    private void OnCloudSyncRuntimeStateChanged(CloudSyncRuntimeSnapshot snapshot)
     {
         _ = RefreshMenuAsync();
+    }
+
+    private void OnProcessResourceStatusChanged(object? sender, ProcessResourceStatusChangedEventArgs e)
+    {
+        _processResourceSnapshot = e.Snapshot;
+
+        if (Dispatcher.UIThread.CheckAccess())
+            UpdateTrayPanelState(GetSnapshotRepositories(_lastRepositories));
+        else
+            Dispatcher.UIThread.Post(() => UpdateTrayPanelState(GetSnapshotRepositories(_lastRepositories)));
+    }
+
+    private void OnLiveSyncStatusChanged(object? sender, RepositoryLiveSyncStatusChangedEventArgs e)
+    {
+        if (Dispatcher.UIThread.CheckAccess())
+            UpdateTrayPanelState(GetSnapshotRepositories(_lastRepositories));
+        else
+            Dispatcher.UIThread.Post(() => UpdateTrayPanelState(GetSnapshotRepositories(_lastRepositories)));
     }
 
     private async Task RefreshMenuAsync()
@@ -366,6 +392,8 @@ public sealed class AppTrayService(
             .Select(repository => new TrayPanelRepositoryOptionViewModel(repository.Id, repository.Name))
             .ToArray();
 
+        var currentActivity = ResolveCurrentActivity(repositories);
+
         _trayPanelViewModel.ApplyState(
             _lastStatusText,
             BuildConnectivityStatusText(),
@@ -380,9 +408,15 @@ public sealed class AppTrayService(
             repositoryOptions,
             _selectedTrayRepositoryId,
             FormatRelativeTime(_lastStatusUpdatedAtUtc),
-            ResolveCurrentActivityText(repositories),
-            _currentActivityAccentColor,
-            _currentActivityBackgroundColor,
+            currentActivity.Text,
+            currentActivity.AccentColor,
+            currentActivity.BackgroundColor,
+            FormatProcessLoadSummary(_processResourceSnapshot),
+            FormatProcessLoadDetail(_processResourceSnapshot),
+            ProcessResourceStatusPresenter.FormatPeakSummary(processResourceStatusStore.History),
+            ProcessResourceStatusPresenter.FormatRecentHistory(processResourceStatusStore.History),
+            DescribeProcessLoadVisuals(_processResourceSnapshot).AccentColor,
+            DescribeProcessLoadVisuals(_processResourceSnapshot).BackgroundColor,
             BuildSelectedRepositoryState(repositories),
             BuildRecentActions(),
             BuildIssueItems(repositories));
@@ -412,6 +446,48 @@ public sealed class AppTrayService(
         };
     }
 
+    private string? FormatProcessLoadSummary(ProcessResourceSnapshotDto? snapshot)
+    {
+        if (snapshot is null)
+            return null;
+
+        return snapshot.CpuPercent.HasValue
+            ? Loc.F(
+                "tray.panel_process_summary",
+                snapshot.CpuPercent.Value.ToString("0.#", CultureInfo.CurrentCulture),
+                FormatSize(snapshot.WorkingSetBytes))
+            : Loc.F("tray.panel_process_summary_cpu_pending", FormatSize(snapshot.WorkingSetBytes));
+    }
+
+    private string? FormatProcessLoadDetail(ProcessResourceSnapshotDto? snapshot)
+    {
+        if (snapshot is null)
+            return null;
+
+        return Loc.F(
+            "tray.panel_process_detail",
+            FormatSize(snapshot.PrivateMemoryBytes),
+            FormatSize(snapshot.ManagedHeapBytes),
+            snapshot.ThreadCount,
+            snapshot.HandleCount,
+            snapshot.CapturedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    private static (string AccentColor, string BackgroundColor) DescribeProcessLoadVisuals(ProcessResourceSnapshotDto? snapshot)
+    {
+        if (snapshot is null)
+            return ("#6EA8FF", "#1A6EA8FF");
+
+        var cpu = snapshot.CpuPercent ?? 0;
+        if (cpu >= 75 || snapshot.WorkingSetBytes >= 1024L * 1024 * 1024)
+            return ("#F97316", "#1AF97316");
+
+        if (cpu >= 40 || snapshot.WorkingSetBytes >= 700L * 1024 * 1024)
+            return ("#F59E0B", "#1AF59E0B");
+
+        return ("#4ADE80", "#164ADE80");
+    }
+
     private async Task CreateSnapshotFromTraySelectionAsync(int? repositoryId)
     {
         var repository = GetSnapshotRepositories(_lastRepositories)
@@ -432,6 +508,9 @@ public sealed class AppTrayService(
 
     private void OnTrayPanelSelectedRepositoryChanged(int? repositoryId)
     {
+        if (_selectedTrayRepositoryId == repositoryId)
+            return;
+
         _selectedTrayRepositoryId = repositoryId;
         UpdateTrayPanelState(GetSnapshotRepositories(_lastRepositories));
     }
@@ -745,18 +824,40 @@ public sealed class AppTrayService(
         return 0;
     }
 
-    private string? ResolveCurrentActivityText(IReadOnlyList<RepositoryDto> repositories)
+    private (string? Text, string AccentColor, string BackgroundColor) ResolveCurrentActivity(IReadOnlyList<RepositoryDto> repositories)
     {
         if (!string.IsNullOrWhiteSpace(_currentActivityText))
-            return _currentActivityText;
+        {
+            return (_currentActivityText, _currentActivityAccentColor, _currentActivityBackgroundColor);
+        }
+
+        var liveSyncActivity = repositories
+            .Select(repository => new
+            {
+                Repository = repository,
+                Status = liveSyncStatusStore.Get(repository.Id)
+            })
+            .Where(item => RepositoryLiveSyncStatusPresenter.IsBusy(item.Status))
+            .OrderByDescending(item => RepositoryLiveSyncStatusPresenter.GetActivityPriority(item.Status))
+            .ThenByDescending(item => item.Status?.QueueTotalCount ?? 0)
+            .FirstOrDefault();
+
+        if (liveSyncActivity?.Status is not null)
+        {
+            var visuals = RepositoryLiveSyncStatusPresenter.DescribeVisualState(liveSyncActivity.Status);
+            return (
+                RepositoryLiveSyncStatusPresenter.FormatTrayActivityText(liveSyncActivity.Repository.Name, liveSyncActivity.Status),
+                visuals.AccentColor,
+                visuals.BackgroundColor);
+        }
 
         var activeUploadRepository = repositories.FirstOrDefault(repository =>
             (repository.CloudSync?.UploadProgressTotal ?? 0) > 0 ||
             (repository.CloudSync?.RunningQueueCount ?? 0) > 0);
 
         return activeUploadRepository is null
-            ? null
-            : Loc.F("tray.activity_cloud_running", activeUploadRepository.Name);
+            ? (null, "#6EA8FF", "#1A6EA8FF")
+            : (Loc.F("tray.activity_cloud_running", activeUploadRepository.Name), "#38BDF8", "#1638BDF8");
     }
 
     private void SetCurrentActivity(
@@ -803,13 +904,23 @@ public sealed class AppTrayService(
         var metricsText = Loc.F(
             "tray.panel_repository_metrics",
             repository.FileCount,
-            repository.VersionCount,
+            repository.ChangedVersionCount,
             FormatSize(repository.TotalSizeBytes));
 
         var lastSnapshotText = repository.LastScannedAt is { } lastScannedAt
             ? Loc.F("tray.panel_repository_last_snapshot_value", FormatRelativeTime(lastScannedAt))
             : Loc.T("tray.panel_repository_last_snapshot_empty");
         var (snapshotGlyph, snapshotAccent) = ResolveSnapshotVisualState(repository);
+        var liveSyncStatus = liveSyncStatusStore.Get(repository.Id);
+        var (liveSyncAccent, _, liveSyncGlyph) = RepositoryLiveSyncStatusPresenter.DescribeVisualState(liveSyncStatus);
+        var liveSyncText = string.Concat(
+            RepositoryLiveSyncStatusPresenter.FormatStateText(liveSyncStatus),
+            ". ",
+            RepositoryLiveSyncStatusPresenter.FormatSummaryText(liveSyncStatus));
+        var liveSyncDetail = string.Concat(
+            RepositoryLiveSyncStatusPresenter.FormatModeText(liveSyncStatus),
+            ". ",
+            RepositoryLiveSyncStatusPresenter.FormatDetailText(liveSyncStatus));
 
         var lastCloudSyncText = BuildCloudSyncSummary(cloudSync);
         var (cloudGlyph, cloudAccent) = ResolveCloudSyncVisualState(cloudSync);
@@ -837,6 +948,10 @@ public sealed class AppTrayService(
             lastSnapshotText,
             snapshotGlyph,
             snapshotAccent,
+            liveSyncText,
+            liveSyncGlyph,
+            liveSyncAccent,
+            liveSyncDetail,
             lastCloudSyncText,
             cloudGlyph,
             cloudAccent,

@@ -14,8 +14,6 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using Veyra.Infrastructure.Data.Preview;
-using Veyra.Infrastructure.Native;
 
 namespace Veyra.Desktop.Services.Preview;
 
@@ -28,7 +26,7 @@ internal static class InteractiveImageDiffRenderer
     private static readonly object NativeGate = new();
     private static readonly object CacheGate = new();
     private static readonly Dictionary<string, CachedRenderFrame> FrameCache = [];
-    private static bool _nativeImageDiffAvailable = NativeRuntimeHealth.Probe().SupportsImageDiff;
+    private static bool _nativeImageDiffAvailable = ProbeNativeImageDiffSupport();
 
     public static async Task<InteractiveImageDiffRenderResult?> TryRenderAsync(
         string baselinePath,
@@ -519,7 +517,7 @@ internal static class InteractiveImageDiffRenderer
 
         try
         {
-            var payloadJson = NativeImageDiffInterop.RenderImageDiffJson(
+            var payloadJson = TryRenderNativeImageDiffJson(
                 baselinePath,
                 currentPath,
                 (int)Math.Round(sensitivityPercent),
@@ -539,18 +537,15 @@ internal static class InteractiveImageDiffRenderer
                 payload.ChangedPixelCount,
                 payload.ChangedPixelRatio,
                 payload.ChangedRegionCount);
-            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.ImageDiff);
             return result;
         }
         catch (Exception ex) when (IsNativeUnavailable(ex))
         {
-            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.ImageDiff);
             DisableNativeImageDiff();
             return null;
         }
         catch
         {
-            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.ImageDiff);
             return null;
         }
     }
@@ -572,14 +567,47 @@ internal static class InteractiveImageDiffRenderer
         if (ex is EntryPointNotFoundException or DllNotFoundException or BadImageFormatException)
             return true;
 
-        if (ex is InvalidOperationException ioe)
-        {
-            return ioe.Message.Contains("entry point", StringComparison.OrdinalIgnoreCase)
+            if (ex is InvalidOperationException ioe)
+            {
+                return ioe.Message.Contains("entry point", StringComparison.OrdinalIgnoreCase)
                    || ioe.Message.Contains("Unable to load DLL", StringComparison.OrdinalIgnoreCase)
                    || ioe.Message.Contains("Native image diff", StringComparison.OrdinalIgnoreCase);
         }
 
         return false;
+    }
+
+    private static bool ProbeNativeImageDiffSupport()
+    {
+        try
+        {
+            var healthType = Type.GetType("Veyra.Infrastructure.Native.NativeRuntimeHealth, Veyra.Infrastructure.Native");
+            var probe = healthType?.GetMethod("Probe", []);
+            var report = probe?.Invoke(null, null);
+            var property = report?.GetType().GetProperty("SupportsImageDiff");
+            return property?.GetValue(report) is true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string TryRenderNativeImageDiffJson(
+        string baselinePath,
+        string currentPath,
+        int sensitivityPercent,
+        int mode,
+        int splitPercent,
+        bool showRegionBoxes)
+    {
+        var interopType = Type.GetType("Veyra.Infrastructure.Native.NativeImageDiffInterop, Veyra.Infrastructure.Native");
+        var method = interopType?.GetMethod(
+            "RenderImageDiffJson",
+            [typeof(string), typeof(string), typeof(int), typeof(int), typeof(int), typeof(bool)]);
+        var result = method?.Invoke(null, [baselinePath, currentPath, sensitivityPercent, mode, splitPercent, showRegionBoxes]);
+        return result as string
+               ?? throw new InvalidOperationException("Native image diff entry point is unavailable.");
     }
 
     private static string BuildCacheKey(

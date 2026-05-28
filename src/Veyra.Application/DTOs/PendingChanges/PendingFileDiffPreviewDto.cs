@@ -16,6 +16,7 @@ public sealed record PendingFileDiffPreviewDto
     public PendingBinaryDiffSummaryDto? BinarySummary { get; init; }
     public PendingImageDiffPreviewDto? ImagePreview { get; init; }
     public PendingAudioDiffPreviewDto? AudioPreview { get; init; }
+    public PendingArchiveDiffPreviewDto? ArchivePreview { get; init; }
 
     public static PendingFileDiffPreviewDto Unavailable(string relativePath, string message)
         => new()
@@ -88,5 +89,20 @@ public sealed record PendingFileDiffPreviewDto
             Kind = PendingDiffPreviewKind.Audio,
             BinarySummary = binarySummary,
             AudioPreview = audioPreview
+        };
+
+    public static PendingFileDiffPreviewDto FromArchive(
+        string relativePath,
+        string message,
+        PendingBinaryDiffSummaryDto binarySummary,
+        PendingArchiveDiffPreviewDto archivePreview)
+        => new()
+        {
+            RelativePath = relativePath,
+            IsAvailable = true,
+            Message = message,
+            Kind = PendingDiffPreviewKind.Archive,
+            BinarySummary = binarySummary,
+            ArchivePreview = archivePreview
         };
 }

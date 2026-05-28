@@ -32,18 +32,35 @@ public sealed class AddDirectoryAndCreateRepositoryHandler(
             if (!string.IsNullOrWhiteSpace(request.RepositoryName))
                 await repo.UpdateRepositoryAsync(match.Id, request.RepositoryName, null, ct);
 
-            await scanner.ScanRepositoryAsync(
+            var scanResult = await InitialSnapshotCreation.RunWithBoundedRetryAsync(
+                scanner,
                 match.Id,
                 null,
-                new RepositoryScanOptionsDto(
-                    SaveFileVersions: true,
-                    TriggerOverride: "initial_snapshot"),
+                log,
                 ct);
 
             await native.ApplySetupAsync(ct);
 
-            log.LogInformation("Added directory and created repository for {Path}", request.DirectoryPath);
-            return OperationResult<int>.Ok(match.Id);
+            var snapshotStatus = InitialSnapshotCreation.ResolveSnapshotStatus(scanResult);
+            if (InitialSnapshotCreation.RequiresUserRetry(scanResult))
+            {
+                log.LogWarning(
+                    "Repository created but initial snapshot requires retry. RepositoryId {RepositoryId}. Path {Path}. Files {Files}. NoChanges {NoChanges}. ScanInProgress {ScanInProgress}. BusyFiles {BusyFiles}",
+                    match.Id,
+                    request.DirectoryPath,
+                    scanResult.FileEntries,
+                    scanResult.NoChangesDetected,
+                    scanResult.SkippedBecauseScanInProgress,
+                    scanResult.BusyFilesCount);
+            }
+
+            log.LogInformation(
+                "Added directory and created repository for {Path}. InitialSnapshotStatus {InitialSnapshotStatus}",
+                request.DirectoryPath,
+                snapshotStatus);
+            return OperationResult<int>.Ok(
+                match.Id,
+                $"Repository created. Directory scan matched {scanResult.FileEntries} file(s) and {scanResult.DirectoryEntries} folder(s) using {match.LinkedFormats.Count} selected format(s). Initial versioned snapshot {snapshotStatus}. Busy files: {scanResult.BusyFilesCount}.");
         }
         catch (Exception ex)
         {

@@ -9,6 +9,7 @@ using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using Veyra.Desktop.Services.Scanning;
 using System.Linq;
 
 
@@ -17,6 +18,7 @@ namespace Veyra.Desktop.Services.Scheduling;
 public sealed class SnapshotSchedulerService(
     IServiceScopeFactory scopeFactory,
     SnapshotSchedulerOptions options,
+    IRepositoryScanStatusService scanStatus,
     ILogger<SnapshotSchedulerService> log)
     : ISnapshotScheduler
 {
@@ -250,20 +252,36 @@ public sealed class SnapshotSchedulerService(
     {
         var totalAttempts = Math.Clamp(options.RetryCount, 0, 10) + 1;
         var delay = TimeSpan.FromSeconds(Math.Clamp(options.RetryDelaySeconds, 1, 300));
+        const string trigger = "scheduled_sync_requested";
 
         for (var attempt = 1; attempt <= totalAttempts; attempt++)
         {
             try
             {
+                if (scanStatus.GetSnapshot(repositoryId) is { IsActive: true })
+                    return;
+
+                scanStatus.Begin(repositoryId, trigger, "Scheduled scan is starting");
+                var progress = new Progress<RepositoryScanProgressDto>(p =>
+                    scanStatus.Report(repositoryId, trigger, p));
+
                 var result = await scanner.ScanRepositoryAsync(
                     repositoryId,
-                    null,
+                    progress,
                     new RepositoryScanOptionsDto(
                         IsScheduled: true,
                         MaxReadBytesPerSecond: Math.Max(0, options.MaxReadBytesPerSecond),
                         MaxIoOperationsPerSecond: Math.Max(0, options.MaxIoOperationsPerSecond),
                         SaveFileVersions: autoCaptureFileVersions),
                     ct);
+
+                scanStatus.Complete(
+                    repositoryId,
+                    trigger,
+                    success: !result.SkippedBecauseScanInProgress,
+                    message: result.SkippedBecauseScanInProgress
+                        ? "Scan is already running"
+                        : "Scheduled scan completed");
 
                 if (autoCaptureFileVersions && result.SnapshotCreated && !result.HasBusyFiles)
                     await cloudSync.TryPushLatestSnapshotAsync(repositoryId, ct);
@@ -287,6 +305,7 @@ public sealed class SnapshotSchedulerService(
                         "Scheduled scan failed. RepositoryId {RepositoryId}. Attempts {Attempts}",
                         repositoryId,
                         totalAttempts);
+                    scanStatus.Complete(repositoryId, trigger, success: false, message: "Scheduled scan failed");
                     return;
                 }
 
@@ -296,6 +315,7 @@ public sealed class SnapshotSchedulerService(
                     attempt,
                     totalAttempts);
 
+                scanStatus.Complete(repositoryId, trigger, success: false, message: "Scheduled scan will retry");
                 await Task.Delay(delay, ct);
             }
         }

@@ -37,7 +37,6 @@
                         <Button.Content>
                             <StackPanel Classes="button-content">
                                 <TextBlock Classes="button-icon" Text="-"/>
-                                <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_out}"/>
                             </StackPanel>
                         </Button.Content>
                     </Button>
@@ -71,7 +70,6 @@
                         <Button.Content>
                             <StackPanel Classes="button-content">
                                 <TextBlock Classes="button-icon" Text="+"/>
-                                <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_in}"/>
                             </StackPanel>
                         </Button.Content>
                     </Button>
@@ -83,17 +81,6 @@
                             <StackPanel Classes="button-content">
                                 <TextBlock Classes="button-icon" Text="&#xE9A6;"/>
                                 <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_fit}"/>
-                            </StackPanel>
-                        </Button.Content>
-                    </Button>
-
-                    <Button Classes="subtle compact responsive-icon"
-                            Click="OnResetToHundredClicked"
-                            Margin="0,0,8,8">
-                        <Button.Content>
-                            <StackPanel Classes="button-content">
-                                <TextBlock Classes="button-icon" Text="100"/>
-                                <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_reset}"/>
                             </StackPanel>
                         </Button.Content>
                     </Button>

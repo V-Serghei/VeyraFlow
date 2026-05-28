@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Veyra.Application.Common.Repository;
 
 namespace Veyra.Infrastructure.Native.Scanning;
 
@@ -6,11 +7,17 @@ internal static class RepositoryScanExclusionMatcher
 {
     public static bool IsExcluded(string? relativePath, IReadOnlyCollection<string> patterns)
     {
-        if (string.IsNullOrWhiteSpace(relativePath) || patterns.Count == 0)
+        if (string.IsNullOrWhiteSpace(relativePath))
             return false;
 
         var normalizedPath = NormalizePath(relativePath);
         if (string.IsNullOrWhiteSpace(normalizedPath))
+            return false;
+
+        if (RepositoryInternalPathFilter.ShouldIgnoreForSnapshotRestore(normalizedPath))
+            return true;
+
+        if (patterns.Count == 0)
             return false;
 
         var fileName = Path.GetFileName(normalizedPath);

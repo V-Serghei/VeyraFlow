@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Veyra.Application.Common.Files;
 
 namespace Veyra.Desktop.Models.TrackedFormats;
 
@@ -9,26 +10,26 @@ public static class TrackedFormatCategoryCatalog
         new(
             "documents",
             "format_category.documents",
-            [".doc", ".docx", ".pdf", ".txt", ".rtf", ".odt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"]),
+            KnownFileExtensions.TrackedDocumentFormats),
         new(
             "images",
             "format_category.images",
-            [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".svg"]),
+            KnownFileExtensions.TrackedImageFormats),
         new(
             "audio",
             "format_category.audio",
-            [".wav", ".mp3", ".aac", ".m4a", ".flac", ".ogg", ".wma", ".aiff"]),
+            KnownFileExtensions.TrackedAudioFormats),
         new(
             "video",
             "format_category.video",
-            [".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm"]),
+            KnownFileExtensions.TrackedVideoFormats),
         new(
             "code",
             "format_category.code",
-            [".cs", ".js", ".ts", ".tsx", ".jsx", ".java", ".py", ".go", ".rs", ".cpp", ".h", ".json", ".xml", ".yaml", ".yml", ".md"]),
+            KnownFileExtensions.TrackedCodeFormats),
         new(
             "archives",
             "format_category.archives",
-            [".zip", ".7z", ".rar", ".tar", ".gz"])
+            KnownFileExtensions.TrackedArchiveFormats)
     ];
 }

@@ -216,6 +216,10 @@ The current codebase implements the following architectural mechanisms:
 - operation journal and diagnostics export
 - cloud batch block upload and remote storage metrics
 
+## Retention and cleanup rules
+
+Repository history cleanup is documented in [`docs/retention-policies.md`](docs/retention-policies.md). In short: retention is disabled by default, office mode explains it as old-version cleanup, manual history is protected unless explicitly unlocked, and snapshots marked with protective tags such as `#keep`, `#protected`, `#no-delete`, `#never-delete`, `#не_удалять`, or `#навсегда` must never be selected for cleanup.
+
 ## Status of gRPC support
 
 The repository contains a proto definition and an experimental sync agent, but this path should currently be treated as **prototype-level**. If documentation or academic text describes gRPC as a core active transport, that should be updated or explicitly marked as a prepared extension rather than the primary runtime path.

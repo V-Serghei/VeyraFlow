@@ -72,6 +72,32 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public bool CanGuidedTourGoBack => _guidedTourIndex > 0;
     public bool ShowShellSyncCenterAction => HasCloudAccessInShell;
+    public bool ShowShellBackButton => !ReferenceEquals(CurrentPage, Dashboard);
+    public bool ShowShellBrandBadge => !ShowShellBackButton;
+    public bool HasShellSubtitle => !string.IsNullOrWhiteSpace(ShellSubtitle);
+    public string ShellTitle => CurrentPage switch
+    {
+        var page when ReferenceEquals(page, Dashboard) => Loc.T("main.product_name"),
+        var page when ReferenceEquals(page, Explorer) => Loc.T("main.repository_explorer_title"),
+        var page when ReferenceEquals(page, Settings) => Loc.T("repo_settings.title"),
+        var page when ReferenceEquals(page, Search) => Loc.T("search.title"),
+        var page when ReferenceEquals(page, AppSettings) => Loc.T("app_settings.title"),
+        _ => Loc.T("main.product_name")
+    };
+    public string ShellSubtitle => CurrentPage switch
+    {
+        var page when ReferenceEquals(page, Dashboard) => Loc.T("main.product_subtitle"),
+        var page when ReferenceEquals(page, Explorer) => Explorer.RepositoryName,
+        var page when ReferenceEquals(page, Settings) => Settings.RepositoryName,
+        var page when ReferenceEquals(page, Search) => Loc.T("search.subtitle"),
+        _ => string.Empty
+    };
+    public string ShellSubtitleTooltip => CurrentPage switch
+    {
+        var page when ReferenceEquals(page, Explorer) => Explorer.RepositoryPath,
+        var page when ReferenceEquals(page, Settings) => Settings.DirectoryPath,
+        _ => ShellSubtitle
+    };
     public string ConnectivityBannerAccentColor => _connectivity.Snapshot.State switch
     {
         ConnectivityState.InternetUnavailable => "#F59E0B",
@@ -126,12 +152,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Search.OpenRepositorySettingsRequested += OpenRepositorySettingsAsync;
         Search.OpenEntryRequested += OpenRepositoryEntryFromSearchAsync;
         Search.OpenSnapshotRequested += OpenRepositorySnapshotFromSearchAsync;
+        Search.SnapshotTagSelectedRequested += OpenGlobalSearchForTagAsync;
 
         AppSettings.BackRequested += ShowDashboard;
         AppSettings.OpenRepositorySettingsRequested += OpenRepositorySettingsFromAppSettingsAsync;
         AppSettings.ExperienceModeRefreshRequested += OnExperienceModeRefreshRequestedAsync;
         Dashboard.PropertyChanged += OnChildCloudAccessChanged;
-        Settings.PropertyChanged += OnChildCloudAccessChanged;
+        Explorer.PropertyChanged += OnChildShellStateChanged;
+        Settings.PropertyChanged += OnChildShellStateChanged;
         AppSettings.PropertyChanged += OnChildCloudAccessChanged;
         _theme.ThemeChanged += OnThemeChanged;
         _localization.LanguageChanged += OnLanguageChanged;
@@ -147,6 +175,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
     partial void OnCurrentPageChanged(object? value)
     {
         RefreshConnectivityState();
+        NotifyShellHeaderStateChanged();
+    }
+
+    [RelayCommand]
+    private void ShellBack()
+    {
+        if (ReferenceEquals(CurrentPage, Explorer)
+            || ReferenceEquals(CurrentPage, Settings)
+            || ReferenceEquals(CurrentPage, AppSettings))
+        {
+            ShowDashboard();
+            return;
+        }
+
+        if (ReferenceEquals(CurrentPage, Search))
+            ReturnFromSearch();
     }
 
     [RelayCommand]
@@ -169,15 +213,52 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _pageBeforeSearch = CurrentPage;
         _log.LogInformation("Opening global search page");
-        await RunShellBusyActionAsync(
-            "search.loading_title",
-            "search.loading_detail",
-            async () =>
+        CurrentPage = Search;
+        await WaitForUiFrameAsync();
+        await Search.LoadAsync(forceRefresh: !Search.HasLoadedData);
+    }
+
+    [RelayCommand]
+    private async Task OpenHelpCenterAsync()
+    {
+        _log.LogInformation("Opening help center");
+        var owner = _windows.GetActiveWindow();
+        var help = _windows.Create<InfoWindow>();
+
+        if (help.DataContext is InfoWindowViewModel viewModel)
+            viewModel.DeepLinkRequested += OpenHelpDeepLinkAsync;
+
+        if (owner is null)
+            _windows.Show(help);
+        else
+            await _windows.ShowDialogAsync(help, owner);
+    }
+
+    [RelayCommand]
+    private async Task OpenCloudInformationAsync()
+    {
+        _log.LogInformation("Opening cloud information window");
+        var owner = _windows.GetActiveWindow();
+        var window = _windows.Create<CloudInformationWindow>();
+
+        if (owner is null)
+            _windows.Show(window);
+        else
+            await _windows.ShowDialogAsync(window, owner);
+    }
+
+    public async Task OpenHelpDeepLinkAsync(string link)
+    {
+        var normalized = link.Trim().ToLowerInvariant();
+        if (normalized.StartsWith("settings.", StringComparison.Ordinal))
+        {
+            await OpenGlobalSettingsAsync();
+            AppSettings.SelectTabByKey(normalized switch
             {
-                CurrentPage = Search;
-                await WaitForUiFrameAsync();
-                await Search.LoadAsync(forceRefresh: !Search.HasLoadedData);
+                "settings.cloud.encryption" => "sync",
+                _ => "automation"
             });
+        }
     }
 
     [RelayCommand]
@@ -244,6 +325,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public Task ShowRepositorySettingsPageAsync(int repositoryId)
         => OpenRepositorySettingsAsync(repositoryId);
+
+    [RelayCommand]
+    private async Task ToggleGlobalTagPickerAsync()
+    {
+        await Search.LoadAsync(forceRefresh: true);
+        Search.ToggleTagPickerCommand.Execute(null);
+    }
+
+    private async Task OpenGlobalSearchForTagAsync(string tag)
+    {
+        _pageBeforeSearch = CurrentPage;
+        CurrentPage = Search;
+        await WaitForUiFrameAsync();
+        await Search.LoadAsync(forceRefresh: !Search.HasLoadedData);
+    }
 
     private async Task OpenRepositoryAsync(int repositoryId)
     {
@@ -454,6 +550,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         LanguageToggleLabel = string.IsNullOrWhiteSpace(code)
             ? "EN"
             : code.ToUpperInvariant();
+        NotifyShellHeaderStateChanged();
     }
 
     private void RefreshConnectivityState()
@@ -715,6 +812,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private bool ShouldShowShellConnectivityBanner => false;
 
+    private void OnChildShellStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(RepositoryExplorerViewModel.RepositoryName)
+            or nameof(RepositoryExplorerViewModel.RepositoryPath)
+            or nameof(RepositorySettingsViewModel.RepositoryName)
+            or nameof(RepositorySettingsViewModel.DirectoryPath))
+        {
+            Dispatcher.UIThread.Post(NotifyShellHeaderStateChanged);
+        }
+
+        OnChildCloudAccessChanged(sender, e);
+    }
+
     private void OnChildCloudAccessChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is not nameof(RepositoryDashboardViewModel.HasCloudAccess)
@@ -729,6 +839,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
             RefreshConnectivityState();
             OnPropertyChanged(nameof(ShowShellSyncCenterAction));
         });
+    }
+
+    private void NotifyShellHeaderStateChanged()
+    {
+        OnPropertyChanged(nameof(ShowShellBackButton));
+        OnPropertyChanged(nameof(ShowShellBrandBadge));
+        OnPropertyChanged(nameof(ShellTitle));
+        OnPropertyChanged(nameof(ShellSubtitle));
+        OnPropertyChanged(nameof(HasShellSubtitle));
+        OnPropertyChanged(nameof(ShellSubtitleTooltip));
     }
 
     private async Task RunShellBusyActionAsync(string titleKey, string detailKey, Func<Task> action)

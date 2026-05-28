@@ -16,4 +16,5 @@ public sealed record RepositoryDto(
     RepositoryRetentionPolicyDto RetentionPolicy,
     RepositoryCloudSyncStatusDto? CloudSync = null,
     bool AutoCaptureFileVersions = false,
-    bool ProtectCloudMetadata = true);
+    bool ProtectCloudMetadata = true,
+    int ChangedVersionCount = 0);

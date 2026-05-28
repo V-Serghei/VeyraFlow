@@ -36,25 +36,31 @@ public static partial class DependencyInjection
         services.AddVeyraLogging(cfg, runtimeObservability: runtimeObservability);
 
         services.AddApplication();
-        services.AddInfrastructureData(connectionString);
         services.AddInfrastructureSync(cfg);
+        services.AddInfrastructureData(connectionString);
         services.AddInfrastructureNative(cfg);
         services.AddDesktopInfrastructureOverrides();
 
         var schedulerOptions = new SnapshotSchedulerOptions
         {
             Enabled = schedulerOverrides?.Enabled ?? (cfg.GetValue<bool?>("SnapshotScheduler:Enabled") ?? true),
-            PollSeconds = cfg.GetValue<int?>("SnapshotScheduler:PollSeconds") ?? 30,
-            IntervalMinutes = schedulerOverrides?.IntervalMinutes ?? (cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? 15),
+            PollSeconds = schedulerOverrides?.PollSeconds
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:PollSeconds") ?? SnapshotSchedulerOptions.RecommendedPollSeconds),
+            IntervalMinutes = schedulerOverrides?.IntervalMinutes
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:IntervalMinutes") ?? SnapshotSchedulerOptions.RecommendedIntervalMinutes),
             QuietHoursStartHour = schedulerOverrides?.QuietHoursStartHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursStartHour") ?? 0),
             QuietHoursEndHour = schedulerOverrides?.QuietHoursEndHour ?? (cfg.GetValue<int?>("SnapshotScheduler:QuietHoursEndHour") ?? 0),
             MaxConcurrentScans = Math.Clamp(cfg.GetValue<int?>("SnapshotScheduler:MaxConcurrentScans") ?? 2, 1, 8),
-            MaxReadBytesPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? 0,
-            MaxIoOperationsPerSecond = cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? 0,
+            MaxReadBytesPerSecond = schedulerOverrides?.MaxReadBytesPerSecond
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:MaxReadBytesPerSecond") ?? SnapshotSchedulerOptions.RecommendedMaxReadBytesPerSecond),
+            MaxIoOperationsPerSecond = schedulerOverrides?.MaxIoOperationsPerSecond
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:MaxIoOperationsPerSecond") ?? SnapshotSchedulerOptions.RecommendedMaxIoOperationsPerSecond),
             RetryCount = cfg.GetValue<int?>("SnapshotScheduler:RetryCount") ?? 2,
             RetryDelaySeconds = cfg.GetValue<int?>("SnapshotScheduler:RetryDelaySeconds") ?? 10,
-            IntegrityEnabled = cfg.GetValue<bool?>("SnapshotScheduler:IntegrityEnabled") ?? true,
-            IntegrityIntervalMinutes = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIntervalMinutes") ?? 180,
+            IntegrityEnabled = schedulerOverrides?.IntegrityEnabled
+                ?? (cfg.GetValue<bool?>("SnapshotScheduler:IntegrityEnabled") ?? true),
+            IntegrityIntervalMinutes = schedulerOverrides?.IntegrityIntervalMinutes
+                ?? (cfg.GetValue<int?>("SnapshotScheduler:IntegrityIntervalMinutes") ?? SnapshotSchedulerOptions.RecommendedIntegrityIntervalMinutes),
             IntegrityRepairFromCloud = cfg.GetValue<bool?>("SnapshotScheduler:IntegrityRepairFromCloud") ?? false,
             IntegrityIssueSampleLimit = cfg.GetValue<int?>("SnapshotScheduler:IntegrityIssueSampleLimit") ?? 200
         };

@@ -6,5 +6,6 @@ public enum PendingDiffPreviewKind
     Text = 1,
     Binary = 2,
     Image = 3,
-    Audio = 4
+    Audio = 4,
+    Archive = 5
 }

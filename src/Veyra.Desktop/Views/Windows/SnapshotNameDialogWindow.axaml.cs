@@ -209,6 +209,25 @@ public partial class SnapshotNameDialogWindow : Window
         detachedWindow.Show();
     }
 
+    private void OnSnapshotTagInputKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+            return;
+
+        if (GetViewModel()?.AddSnapshotTagCommand.CanExecute(null) == true)
+        {
+            GetViewModel()?.AddSnapshotTagCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void OnTagInputLostFocus(object? sender, RoutedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(
+            () => GetViewModel()?.ClearTagSuggestions(),
+            DispatcherPriority.Background);
+    }
+
     private void OnLeftDiffScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         if (sender is not ScrollViewer source)
@@ -329,6 +348,12 @@ public partial class SnapshotNameDialogWindow : Window
 
     private void OnOverlayImagePointerPressed(object? sender, PointerPressedEventArgs e)
         => _overlayViewportController?.HandlePointerPressed(e);
+
+    private void OnImageDiffSettingsBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        GetViewModel()?.HideImageDiffSettingsPane();
+        e.Handled = true;
+    }
 
     private void OnOverlayImagePointerMoved(object? sender, PointerEventArgs e)
         => _overlayViewportController?.HandlePointerMoved(e);

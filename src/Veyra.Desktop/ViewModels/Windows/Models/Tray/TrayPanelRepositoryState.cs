@@ -9,6 +9,10 @@ public sealed class TrayPanelRepositoryState
         string lastSnapshotText,
         string lastSnapshotGlyph,
         string lastSnapshotAccentColor,
+        string liveSyncText,
+        string liveSyncGlyph,
+        string liveSyncAccentColor,
+        string liveSyncDetailText,
         string cloudSyncText,
         string cloudSyncGlyph,
         string cloudSyncAccentColor,
@@ -27,6 +31,10 @@ public sealed class TrayPanelRepositoryState
         LastSnapshotText = lastSnapshotText;
         LastSnapshotGlyph = lastSnapshotGlyph;
         LastSnapshotAccentColor = lastSnapshotAccentColor;
+        LiveSyncText = liveSyncText;
+        LiveSyncGlyph = liveSyncGlyph;
+        LiveSyncAccentColor = liveSyncAccentColor;
+        LiveSyncDetailText = liveSyncDetailText;
         CloudSyncText = cloudSyncText;
         CloudSyncGlyph = cloudSyncGlyph;
         CloudSyncAccentColor = cloudSyncAccentColor;
@@ -46,6 +54,10 @@ public sealed class TrayPanelRepositoryState
     public string LastSnapshotText { get; }
     public string LastSnapshotGlyph { get; }
     public string LastSnapshotAccentColor { get; }
+    public string LiveSyncText { get; }
+    public string LiveSyncGlyph { get; }
+    public string LiveSyncAccentColor { get; }
+    public string LiveSyncDetailText { get; }
     public string CloudSyncText { get; }
     public string CloudSyncGlyph { get; }
     public string CloudSyncAccentColor { get; }

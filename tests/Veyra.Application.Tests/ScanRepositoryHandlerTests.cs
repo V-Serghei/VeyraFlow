@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Sync;
@@ -22,7 +23,7 @@ public sealed class ScanRepositoryHandlerTests
                 NoChangesDetected: true)
         };
         var cloudSync = new FakeRepositoryCloudSyncOrchestrator();
-        var handler = new ScanRepositoryHandler(scanner, cloudSync, NullLogger<ScanRepositoryHandler>.Instance);
+        var handler = new ScanRepositoryHandler(scanner, CreateScopeFactory(cloudSync), NullLogger<ScanRepositoryHandler>.Instance);
 
         var result = await handler.Handle(
             new ScanRepositoryCommand(
@@ -49,7 +50,7 @@ public sealed class ScanRepositoryHandlerTests
                 NoChangesDetected: false)
         };
         var cloudSync = new FakeRepositoryCloudSyncOrchestrator();
-        var handler = new ScanRepositoryHandler(scanner, cloudSync, NullLogger<ScanRepositoryHandler>.Instance);
+        var handler = new ScanRepositoryHandler(scanner, CreateScopeFactory(cloudSync), NullLogger<ScanRepositoryHandler>.Instance);
 
         var result = await handler.Handle(
             new ScanRepositoryCommand(
@@ -58,8 +59,18 @@ public sealed class ScanRepositoryHandlerTests
                 new RepositoryScanOptionsDto(SaveFileVersions: true, TriggerOverride: "manual_snapshot")),
             CancellationToken.None);
 
+        await cloudSync.WaitForPushAsync(TimeSpan.FromSeconds(2));
+
         Assert.True(result.Success);
         Assert.Equal(1, cloudSync.TryPushLatestSnapshotCalls);
+    }
+
+    private static IServiceScopeFactory CreateScopeFactory(IRepositoryCloudSyncOrchestrator cloudSync)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(cloudSync);
+
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
     private sealed class FakeRepositoryScanner : IRepositoryScanner
@@ -79,16 +90,34 @@ public sealed class ScanRepositoryHandlerTests
 
     private sealed class FakeRepositoryCloudSyncOrchestrator : IRepositoryCloudSyncOrchestrator
     {
+        private readonly TaskCompletionSource<bool> _pushTaskSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int TryPushLatestSnapshotCalls { get; private set; }
 
         public Task TryPushLatestSnapshotAsync(int repositoryId, CancellationToken ct = default)
         {
             TryPushLatestSnapshotCalls++;
+            _pushTaskSource.TrySetResult(true);
             return Task.CompletedTask;
+        }
+
+        public async Task WaitForPushAsync(TimeSpan timeout)
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            await _pushTaskSource.Task.WaitAsync(cts.Token);
         }
 
         public Task<int> RestoreRepositoriesFromCloudAsync(string? targetRootDirectory = null, CancellationToken ct = default)
             => Task.FromResult(0);
+
+        public Task<bool> RestoreRepositoryFromCloudAsync(
+            int cloudRepositoryId,
+            string? targetRootDirectory = null,
+            bool restoreFullHistory = false,
+            bool restoreToAnotherFolder = false,
+            bool restoreMetadataOnly = false,
+            CancellationToken ct = default)
+            => Task.FromResult(false);
 
         public Task ProcessPendingQueueAsync(CancellationToken ct = default)
             => Task.CompletedTask;

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Files;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;
 
@@ -83,11 +84,13 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var existing = await dbContext.Set<WatchedDirectory>()
             .IgnoreQueryFilters()
             .ToListAsync(ct);
-        var map = existing.ToDictionary(x => x.Path, StringComparer.OrdinalIgnoreCase);
+        var map = existing
+            .GroupBy(x => NormalizePathKey(x.Path), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
 
         foreach (var p in normalized)
         {
-            if (map.TryGetValue(p, out var e))
+            if (map.TryGetValue(NormalizePathKey(p), out var e))
             {
                 e.Path = p;
                 e.IsDeleted = false;
@@ -111,10 +114,12 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             }
         }
 
-        var keep = normalized.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var keep = normalized
+            .Select(NormalizePathKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var e in existing)
         {
-            if (!keep.Contains(e.Path) && !e.IsDeleted)
+            if (!keep.Contains(NormalizePathKey(e.Path)) && !e.IsDeleted)
             {
                 e.IsDeleted = true;
                 e.DeletedAt = now;
@@ -144,8 +149,10 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
 
         var now = DateTime.UtcNow;
 
+        var lookup = BuildPathLookupCandidates(normalized);
+
         var ids = await dbContext.Set<WatchedDirectory>()
-            .Where(x => !x.IsDeleted && normalized.Contains(x.Path))
+            .Where(x => !x.IsDeleted && lookup.Contains(x.Path))
             .Select(x => x.Id)
             .ToListAsync(ct);
 
@@ -266,12 +273,15 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var p = normalized[0];
         var now = DateTime.UtcNow;
 
+        var lookup = BuildPathLookupCandidates(normalized);
+
         var existing = await dbContext.Set<WatchedDirectory>()
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(x => x.Path == p, ct);
+            .FirstOrDefaultAsync(x => lookup.Contains(x.Path), ct);
 
         if (existing is not null)
         {
+            existing.Path = p;
             existing.IsDeleted = false;
             existing.DeletedAt = null;
             existing.IsEnabled = true;
@@ -303,8 +313,10 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
 
         var now = DateTime.UtcNow;
 
+        var oldLookup = BuildPathLookupCandidates(normalizedOld);
+
         var entity = await dbContext.Set<WatchedDirectory>()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Path == normalizedOld[0], ct);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && oldLookup.Contains(x.Path), ct);
 
         if (entity is null) return;
 
@@ -395,10 +407,10 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         if (normalizedPath.Count == 0 || normalizedExts.Count == 0) return;
 
         var now = DateTime.UtcNow;
-        var path = normalizedPath[0];
+        var pathLookup = BuildPathLookupCandidates(normalizedPath);
 
         var dir = await dbContext.Set<WatchedDirectory>()
-            .FirstOrDefaultAsync(x => !x.IsDeleted && x.Path == path, ct);
+            .FirstOrDefaultAsync(x => !x.IsDeleted && pathLookup.Contains(x.Path), ct);
         if (dir is null) return;
 
         var fmtIds = await dbContext.Set<D_WatchedFormat>()
@@ -446,10 +458,10 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         if (normalizedPath.Count == 0 || normalizedExts.Count == 0) return;
 
         var now = DateTime.UtcNow;
-        var path = normalizedPath[0];
+        var pathLookup = BuildPathLookupCandidates(normalizedPath);
 
         var dirId = await dbContext.Set<WatchedDirectory>()
-            .Where(x => !x.IsDeleted && x.Path == path)
+            .Where(x => !x.IsDeleted && pathLookup.Contains(x.Path))
             .Select(x => x.Id)
             .FirstOrDefaultAsync(ct);
         if (dirId == 0) return;
@@ -473,10 +485,10 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         var normalizedPath = NormalizePathsForLookup(new[] { directoryPath });
         if (normalizedPath.Count == 0) return Array.Empty<string>();
 
-        var path = normalizedPath[0];
+        var pathLookup = BuildPathLookupCandidates(normalizedPath);
 
         return await dbContext.Set<WatchedDirectoryFormat>()
-            .Where(x => !x.IsDeleted && x.Directory.Path == path && !x.Directory.IsDeleted)
+            .Where(x => !x.IsDeleted && pathLookup.Contains(x.Directory.Path) && !x.Directory.IsDeleted)
             .Select(x => x.Format.Pattern)
             .OrderBy(x => x)
             .ToListAsync(ct);
@@ -513,6 +525,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p.Trim().Replace('/', '\\'))
             .Select(TryFullPath)
+            .Select(TrimPathForLookup)
             .Where(p => p is not null && Directory.Exists(p))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList()!;
@@ -524,6 +537,7 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p.Trim().Replace('/', '\\'))
             .Select(TryFullPath)
+            .Select(TrimPathForLookup)
             .Where(p => p is not null)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList()!;
@@ -535,13 +549,47 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
         catch { return null; }
     }
 
+    private static string NormalizePathKey(string path)
+        => TrimPathForLookup(path.Trim().Replace('/', '\\')) ?? path.Trim().Replace('/', '\\');
+
+    private static string? TrimPathForLookup(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(path);
+        }
+        catch
+        {
+            return path.TrimEnd('\\', '/');
+        }
+    }
+
+    private static List<string> BuildPathLookupCandidates(IEnumerable<string> normalizedPaths)
+    {
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in normalizedPaths.Where(static path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var key = NormalizePathKey(path);
+            candidates.Add(key);
+
+            if (!Path.EndsInDirectorySeparator(key))
+                candidates.Add(key + Path.DirectorySeparatorChar);
+        }
+
+        return candidates.ToList();
+    }
+
     private static List<string> NormalizeExtensionsForStore(IEnumerable<string> extensions)
     {
         return extensions
             .Where(e => !string.IsNullOrWhiteSpace(e))
-            .Select(e => e.Trim())
-            .Select(e => e.StartsWith(".") ? e : "." + e)
-            .Select(e => e.ToLowerInvariant())
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -550,9 +598,9 @@ public sealed class EfSetupRepository(VeyraDbContext dbContext) : ISetupReposito
     {
         return extensions
             .Where(e => !string.IsNullOrWhiteSpace(e))
-            .Select(e => e.Trim())
-            .Select(e => e.StartsWith(".") ? e : "." + e)
-            .Select(e => e.ToLowerInvariant())
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

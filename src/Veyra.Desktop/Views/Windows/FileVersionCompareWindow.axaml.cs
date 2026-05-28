@@ -51,7 +51,7 @@ public partial class FileVersionCompareWindow : Window
                 ownerWindow,
                 maximizeToWorkingArea: false,
                 frameMarginDip: 8d,
-                minWidthDip: 780d,
+                minWidthDip: 980d,
                 minHeightDip: 560d);
 
             Dispatcher.UIThread.Post(() =>
@@ -60,7 +60,7 @@ public partial class FileVersionCompareWindow : Window
                     ownerWindow,
                     maximizeToWorkingArea: false,
                     frameMarginDip: 8d,
-                    minWidthDip: 780d,
+                    minWidthDip: 980d,
                     minHeightDip: 560d),
                 DispatcherPriority.Background);
 

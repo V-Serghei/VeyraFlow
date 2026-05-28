@@ -72,8 +72,56 @@ public partial class RepositoryExplorerView : UserControl
 
     private void OnExplorerFiltersBackdropPressed(object? sender, PointerPressedEventArgs e)
     {
+        CloseExplorerFiltersAndRestoreFocus();
+        e.Handled = true;
+    }
+
+    private void OnExplorerFiltersCloseClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        CloseExplorerFiltersAndRestoreFocus();
+        e.Handled = true;
+    }
+
+    private void OnRootKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape)
+            return;
+
+        if (DataContext is not RepositoryExplorerViewModel { IsExplorerFiltersVisible: true })
+            return;
+
+        CloseExplorerFiltersAndRestoreFocus();
+        e.Handled = true;
+    }
+
+    private void CloseExplorerFiltersAndRestoreFocus()
+    {
         if (DataContext is RepositoryExplorerViewModel vm)
             vm.IsExplorerFiltersVisible = false;
+
+        Dispatcher.UIThread.Post(
+            () => ExplorerFiltersButton.Focus(),
+            DispatcherPriority.Background);
+    }
+
+    private void OnFileHistoryBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, sender))
+            return;
+
+        if (DataContext is RepositoryExplorerViewModel vm)
+            vm.IsFileHistoryMenuOpen = false;
+
+        e.Handled = true;
+    }
+
+    private void OnDiffPreviewBackdropPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, sender))
+            return;
+
+        if (DataContext is RepositoryExplorerViewModel vm)
+            vm.IsDiffPreviewMenuOpen = false;
 
         e.Handled = true;
     }
@@ -97,37 +145,21 @@ public partial class RepositoryExplorerView : UserControl
     {
         if (width < NarrowWidth)
         {
-            ExplorerHeroGrid.ColumnDefinitions = new ColumnDefinitions("Auto,*");
-            ExplorerHeroGrid.RowDefinitions = new RowDefinitions("Auto,Auto");
-
-            Grid.SetColumn(ExplorerBackButton, 0);
-            Grid.SetRow(ExplorerBackButton, 0);
-
-            Grid.SetColumn(ExplorerHeroContent, 1);
-            Grid.SetRow(ExplorerHeroContent, 0);
-
+            ExplorerHeroGrid.ColumnDefinitions = new ColumnDefinitions("*");
+            ExplorerHeroGrid.RowDefinitions = new RowDefinitions("Auto");
             Grid.SetColumn(ExplorerHeroActionsPanel, 0);
-            Grid.SetRow(ExplorerHeroActionsPanel, 1);
-            Grid.SetColumnSpan(ExplorerHeroActionsPanel, 2);
+            Grid.SetRow(ExplorerHeroActionsPanel, 0);
+            Grid.SetColumnSpan(ExplorerHeroActionsPanel, 1);
             ExplorerHeroActionsPanel.HorizontalAlignment = HorizontalAlignment.Left;
-            ExplorerHeroTitle.FontSize = 18;
             return;
         }
 
-        ExplorerHeroGrid.ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto");
+        ExplorerHeroGrid.ColumnDefinitions = new ColumnDefinitions("*,Auto");
         ExplorerHeroGrid.RowDefinitions = new RowDefinitions("Auto");
-
-        Grid.SetColumn(ExplorerBackButton, 0);
-        Grid.SetRow(ExplorerBackButton, 0);
-
-        Grid.SetColumn(ExplorerHeroContent, 1);
-        Grid.SetRow(ExplorerHeroContent, 0);
-
-        Grid.SetColumn(ExplorerHeroActionsPanel, 2);
+        Grid.SetColumn(ExplorerHeroActionsPanel, 1);
         Grid.SetRow(ExplorerHeroActionsPanel, 0);
         Grid.SetColumnSpan(ExplorerHeroActionsPanel, 1);
         ExplorerHeroActionsPanel.HorizontalAlignment = HorizontalAlignment.Right;
-        ExplorerHeroTitle.FontSize = width < CompactWidth ? 20 : 22;
     }
 
     private void ApplyExplorerPanelsLayout(double width)
@@ -162,6 +194,7 @@ public partial class RepositoryExplorerView : UserControl
         ExplorerLayoutGrid.ColumnDefinitions = width < CompactWidth
             ? new ColumnDefinitions("0.72*,4,1.34*,4,1.12*")
             : new ColumnDefinitions("0.78*,4,1.56*,4,1.14*");
+        ApplyExplorerColumnMinimums(width);
 
         Grid.SetColumn(ExplorerTreePanel, 0);
         Grid.SetRow(ExplorerTreePanel, 0);
@@ -182,13 +215,31 @@ public partial class RepositoryExplorerView : UserControl
     private void ApplyExplorerItemGridLayout(double width)
     {
         var columnDefinitions = width < NarrowWidth
-            ? "32,2.25*,0.9*,0.78*,0"
+            ? "32,2.1*,0.8*,0.74*,0,40"
             : width < CompactWidth
-                ? "32,2.45*,0.95*,0.78*,0.9*"
-                : "36,3.2*,1*,0.9*,1*";
+                ? "32,2.35*,0.85*,0.74*,0.82*,42"
+                : "36,2.7*,0.9*,0.8*,0.95*,44";
 
         foreach (var grid in this.GetVisualDescendants().OfType<Grid>().Where(static g => g.Classes.Contains("explorer-file-grid")))
             grid.ColumnDefinitions = new ColumnDefinitions(columnDefinitions);
+    }
+
+    private void ApplyExplorerColumnMinimums(double width)
+    {
+        if (ExplorerLayoutGrid.ColumnDefinitions.Count < 5)
+            return;
+
+        if (width < CompactWidth)
+        {
+            ExplorerLayoutGrid.ColumnDefinitions[0].MinWidth = 210;
+            ExplorerLayoutGrid.ColumnDefinitions[2].MinWidth = 420;
+            ExplorerLayoutGrid.ColumnDefinitions[4].MinWidth = 320;
+            return;
+        }
+
+        ExplorerLayoutGrid.ColumnDefinitions[0].MinWidth = 240;
+        ExplorerLayoutGrid.ColumnDefinitions[2].MinWidth = 460;
+        ExplorerLayoutGrid.ColumnDefinitions[4].MinWidth = 340;
     }
 
     private void ToggleRootClass(string className, bool enabled)

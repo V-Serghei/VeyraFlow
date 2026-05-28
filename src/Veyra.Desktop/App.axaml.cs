@@ -10,21 +10,19 @@ using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using FluentAvalonia.Styling;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Observability;
+using Veyra.Application.DTOs;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
+using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Navigation;
-using Veyra.Desktop.Services.Persistence;
 using Veyra.Desktop.Services.Scheduling;
 using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.Styling;
-using Veyra.Domain.Entities;
-using Veyra.Domain.Entities.Watched;
-using Veyra.Infrastructure.Data.Persistence;
-using Veyra.Infrastructure.Native;
+using Veyra.Desktop.ViewModels.Windows;
 using AvaloniaApplication = Avalonia.Application;
 using DependencyInjection = Veyra.Desktop.CompositionRoot.DependencyInjection;
 
@@ -104,7 +102,7 @@ public partial class App : AvaloniaApplication
 
             try
             {
-                var iconUri = new Uri("avares://Veyra.Desktop/Assets/avalonia-logo.ico");
+                var iconUri = new Uri("avares://Veyra.Desktop/Assets/veyraFlowLogo.ico");
                 using var stream = AssetLoader.Open(iconUri);
                 var icon = CreateWindowIcon(stream);
                 if (icon is not null)
@@ -202,10 +200,12 @@ public partial class App : AvaloniaApplication
         try
         {
             await using var scope = _serviceProvider.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
+            var databaseStartup = scope.ServiceProvider.GetRequiredService<IDatabaseStartupService>();
             var userProfiles = scope.ServiceProvider.GetRequiredService<IUserProfileRepository>();
             var tokenPolicy = scope.ServiceProvider.GetRequiredService<IAccessTokenPolicyService>();
             var setup = scope.ServiceProvider.GetRequiredService<ISetupRepository>();
+            var repositories = scope.ServiceProvider.GetRequiredService<IRepositoryRepository>();
+            var nativeRuntime = scope.ServiceProvider.GetRequiredService<INativeRuntimeHealthService>();
             var syncOrchestrator = scope.ServiceProvider.GetService<IRepositoryCloudSyncOrchestrator>();
             var recovery = scope.ServiceProvider.GetService<IRepositoryRecoveryService>();
             string? activeUsername;
@@ -216,11 +216,11 @@ public partial class App : AvaloniaApplication
 
             if (!_databaseInitialized)
             {
-                DatabaseStartupBootstrapper.Initialize(db);
+                databaseStartup.Initialize();
                 _databaseInitialized = true;
             }
 
-            var nativeHealth = NativeRuntimeHealth.Probe();
+            var nativeHealth = nativeRuntime.Probe();
             if (nativeHealth.IsHealthy)
             {
                 Log.Information(
@@ -236,25 +236,118 @@ public partial class App : AvaloniaApplication
                     string.Join(", ", nativeHealth.MissingEntrypoints));
             }
 
-            activeUsername = await db.Set<UserProfile>()
-                .AsNoTracking()
-                .Where(u => u.IsActive)
-                .OrderByDescending(u => u.LastLoginAt)
-                .Select(u => u.Username)
-                .FirstOrDefaultAsync();
-            watchedDirectoryCount = await db.Set<WatchedDirectory>()
-                .AsNoTracking()
-                .CountAsync(x => !x.IsDeleted && x.IsEnabled);
-            trackedExtensionCount = await db.Set<D_WatchedFormat>()
-                .AsNoTracking()
-                .CountAsync(x => !x.IsDeleted && x.IsEnabled);
-            localRepositoryCount = await db.Set<Repository>()
-                .AsNoTracking()
-                .CountAsync(x => !x.IsDeleted);
+            activeUsername = await userProfiles.GetActiveUsernameAsync();
+
+            var connectivityService = _serviceProvider.GetRequiredService<IConnectivityStatusService>();
+            connectivityService.SetCloudProbeEnabled(!string.IsNullOrWhiteSpace(activeUsername));
+            watchedDirectoryCount = (await setup.GetWatchedDirectoriesAsync()).Count;
+            trackedExtensionCount = (await setup.GetTrackedExtensionsAsync()).Count;
+            localRepositoryCount = (await repositories.GetAllRepositoriesAsync()).Count;
 
             var hasLocalBootstrap = localRepositoryCount > 0 || (watchedDirectoryCount > 0 && trackedExtensionCount > 0);
 
-            if (hasLocalBootstrap)
+            // Validate cloud token against server BEFORE deciding whether to show main window.
+            // needsReAuth = true only when the user had a cloud account and the server explicitly
+            // rejected the refresh (401). Network errors are treated as offline — no forced logout.
+            var canUseCloudSync = false;
+            var needsReAuth = false;
+            AccessTokenPolicyEvaluationDto? tokenState = null;
+
+            if (!string.IsNullOrWhiteSpace(activeUsername))
+            {
+                var profile = await userProfiles.GetActiveProfileAsync();
+                tokenState = tokenPolicy.Evaluate(profile?.AccessToken);
+                canUseCloudSync = tokenState.CanUseForSync;
+
+                if (profile?.RefreshToken is { Length: > 0 } refreshToken)
+                {
+                    // Always attempt refresh when a refresh token exists — even if the access token
+                    // is already locally expired. The access token may have been issued by a different
+                    // server instance (e.g. switched from localhost to Railway), so local expiry
+                    // checks are not sufficient.
+                    var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+                    try
+                    {
+                        var refreshed = await authService.RefreshAsync(refreshToken);
+                        if (refreshed is not null)
+                        {
+                            await userProfiles.SaveOrUpdateProfileAsync(
+                                refreshed.Username,
+                                refreshed.CloudUserId,
+                                refreshed.AccessToken,
+                                refreshed.Email,
+                                refreshed.CloudSessionId,
+                                refreshed.RefreshToken,
+                                refreshed.AccessTokenExpiresAtUtc,
+                                refreshed.RefreshTokenExpiresAtUtc);
+                            canUseCloudSync = true;
+                            Log.Information("Startup token refresh succeeded. User {Username}", activeUsername);
+                        }
+                        else
+                        {
+                            canUseCloudSync = false;
+                        }
+                    }
+                    catch (CloudAuthRefreshRejectedException ex)
+                    {
+                        Log.Warning(ex, "Startup token refresh rejected by server. Signing out user {Username}", activeUsername);
+                        canUseCloudSync = false;
+                        needsReAuth = true;
+                        await userProfiles.SignOutActiveAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Startup token refresh failed (network or server unavailable). Cloud sync skipped. User {Username}", activeUsername);
+                        canUseCloudSync = false;
+                    }
+                }
+                else if (!canUseCloudSync)
+                {
+                    // No refresh token and access token is also invalid — profile exists but all
+                    // credentials are gone (e.g. after manual DB clear or server switch).
+                    // Force re-auth so the user can log in again.
+                    Log.Warning("No usable tokens found for user {Username}. Requiring re-authentication.", activeUsername);
+                    needsReAuth = true;
+                    await userProfiles.SignOutActiveAsync();
+                }
+            }
+
+            // No active cloud profile but has local repos: check if they ever had a cloud account.
+            // If yes (profile record exists but was signed out) → require re-auth.
+            // If no history at all (pure local/guest user) → open main window silently.
+            if (!needsReAuth && string.IsNullOrWhiteSpace(activeUsername) && hasLocalBootstrap)
+            {
+                var allProfiles = await userProfiles.GetProfilesAsync();
+                if (allProfiles.Count > 0)
+                {
+                    Log.Information("Local repos found but cloud profile is signed out. Requiring re-authentication.");
+                    needsReAuth = true;
+                }
+            }
+
+            // Re-auth: navigate the existing WelcomeWindow directly to login (skip onboarding intro).
+            // Pure guest-mode users (no cloud history, no active profile) are not affected.
+            if (needsReAuth)
+            {
+                Log.Information("Startup re-authentication required. Navigating to login. User {Username}", activeUsername);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try
+                    {
+                        var windows = _serviceProvider.GetRequiredService<IWindowService>();
+                        if (windows.GetActiveWindow()?.DataContext is WelcomeWindowViewModel welcomeVm)
+                            welcomeVm.NavigateToLoginDirectly();
+                        else
+                            _serviceProvider.GetRequiredService<INavigationService>().ShowLogin();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Failed to navigate to login after startup token rejection");
+                    }
+                });
+                // WelcomeWindow handles navigation to main after successful login — don't GoToMain here.
+            }
+            else if (hasLocalBootstrap)
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -278,21 +371,17 @@ public partial class App : AvaloniaApplication
                 localRepositoryCount,
                 watchedDirectoryCount,
                 trackedExtensionCount,
-                isMainShellActive ? "main" : "welcome");
+                needsReAuth ? "login" : isMainShellActive ? "main" : "welcome");
 
-            if (!string.IsNullOrWhiteSpace(activeUsername))
+            if (!string.IsNullOrWhiteSpace(activeUsername) && !needsReAuth)
             {
-                var profile = await userProfiles.GetActiveProfileAsync();
-                var tokenState = tokenPolicy.Evaluate(profile?.AccessToken);
-                var canUseCloudSync = tokenState.CanUseForSync;
-
                 if (!canUseCloudSync)
                 {
                     Log.Information(
                         "Skipping deferred cloud startup sync for user {Username}. TokenState {TokenState}. Reason {Reason}",
                         activeUsername,
-                        tokenState.State,
-                        tokenState.Description);
+                        tokenState?.State,
+                        tokenState?.Description);
                 }
                 else
                 {
@@ -392,8 +481,8 @@ public partial class App : AvaloniaApplication
         try
         {
             using var scope = _serviceProvider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<VeyraDbContext>();
-            DatabaseStartupBootstrapper.Initialize(db);
+            var databaseStartup = scope.ServiceProvider.GetRequiredService<IDatabaseStartupService>();
+            databaseStartup.Initialize();
             _databaseInitialized = true;
             Log.Information("Database schema is ready before shell initialization.");
         }

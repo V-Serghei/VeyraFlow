@@ -34,11 +34,16 @@ public sealed class AuthHttpService : IAuthService
 
         if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.BadRequest)
         {
+            var responseBody = await ReadResponseBodySafeAsync(resp, ct);
             _log.LogWarning(
                 "Cloud auth refresh rejected. StatusCode {StatusCode}. ResponseBody {ResponseBody}",
                 (int)resp.StatusCode,
-                await ReadResponseBodySafeAsync(resp, ct));
-            return null;
+                responseBody);
+
+            throw new CloudAuthRefreshRejectedException(
+                resp.StatusCode,
+                TryExtractUserMessage(responseBody),
+                responseBody);
         }
 
         await EnsureSuccessAsync(resp, "refresh", ct);

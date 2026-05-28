@@ -3,8 +3,8 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql/driver"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -41,14 +41,14 @@ type pushSnapshotRequest struct {
 }
 
 type pushSnapshotResponse struct {
-	Ok                bool     `json:"ok"`
+	Ok                 bool     `json:"ok"`
 	MissingBlockHashes []string `json:"missingBlockHashes"`
 }
 
 type putBlocksBatchResponse struct {
-	Ok           bool `json:"ok"`
-	StoredBlocks int  `json:"storedBlocks"`
-	SkippedBlocks int `json:"skippedBlocks"`
+	Ok            bool `json:"ok"`
+	StoredBlocks  int  `json:"storedBlocks"`
+	SkippedBlocks int  `json:"skippedBlocks"`
 }
 
 type syncRepositoryMeta struct {
@@ -58,26 +58,26 @@ type syncRepositoryMeta struct {
 }
 
 type syncSnapshotMeta struct {
-	ID              int64     `json:"id"`
-	Title           string    `json:"title"`
-	Trigger         string    `json:"trigger"`
-	CreatedAt       syncTimestamp `json:"createdAt"`
-	TotalEntries    int       `json:"totalEntries"`
-	FileEntries     int       `json:"fileEntries"`
-	DirectoryEntries int      `json:"directoryEntries"`
-	TotalFileBytes  int64     `json:"totalFileBytes"`
-	PayloadSHA256   string    `json:"payloadSha256"`
+	ID               int64         `json:"id"`
+	Title            string        `json:"title"`
+	Trigger          string        `json:"trigger"`
+	CreatedAt        syncTimestamp `json:"createdAt"`
+	TotalEntries     int           `json:"totalEntries"`
+	FileEntries      int           `json:"fileEntries"`
+	DirectoryEntries int           `json:"directoryEntries"`
+	TotalFileBytes   int64         `json:"totalFileBytes"`
+	PayloadSHA256    string        `json:"payloadSha256"`
 }
 
 type syncSnapshotEntry struct {
-	RelativePath       string    `json:"relativePath"`
-	ParentRelativePath string    `json:"parentRelativePath"`
-	Name               string    `json:"name"`
-	IsDirectory        bool      `json:"isDirectory"`
-	Extension          string    `json:"extension"`
-	SizeBytes          int64     `json:"sizeBytes"`
+	RelativePath       string        `json:"relativePath"`
+	ParentRelativePath string        `json:"parentRelativePath"`
+	Name               string        `json:"name"`
+	IsDirectory        bool          `json:"isDirectory"`
+	Extension          string        `json:"extension"`
+	SizeBytes          int64         `json:"sizeBytes"`
 	LastWriteUTC       syncTimestamp `json:"lastWriteUtc"`
-	ContentHashSHA256  string    `json:"contentHashSha256"`
+	ContentHashSHA256  string        `json:"contentHashSha256"`
 }
 
 type syncFileVersion struct {
@@ -103,6 +103,11 @@ type latestSnapshotResponse struct {
 	Snapshot     syncSnapshotMeta    `json:"snapshot"`
 	Entries      []syncSnapshotEntry `json:"entries"`
 	FileVersions []syncFileVersion   `json:"fileVersions"`
+}
+
+type repositorySnapshotsResponse struct {
+	Ok        bool                     `json:"ok"`
+	Snapshots []latestSnapshotResponse `json:"snapshots"`
 }
 
 const (
@@ -285,6 +290,91 @@ ORDER BY r.updated_at DESC, r.id DESC;
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":           true,
 		"repositories": result,
+	})
+}
+
+func (h *Handler) DeleteRepository(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
+	auth, ok := getAuthUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
+		return
+	}
+
+	repositoryID, err := parsePathInt(r, "repositoryId")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid repository id"})
+		return
+	}
+
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "transaction begin failed"})
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var cloudRepoID int64
+	var snapshotCount int
+	err = tx.QueryRow(r.Context(), `
+SELECT r.id, COUNT(s.id)
+FROM repositories r
+LEFT JOIN snapshots s ON s.repository_id = r.id
+WHERE r.user_id = $1 AND r.external_repository_id = $2
+GROUP BY r.id
+LIMIT 1;
+`, auth.UserID, repositoryID).Scan(&cloudRepoID, &snapshotCount)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "repository not found"})
+			return
+		}
+
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "repository lookup failed"})
+		return
+	}
+
+	if _, err = tx.Exec(r.Context(), `
+DELETE FROM snapshot_entries
+WHERE snapshot_id IN (SELECT id FROM snapshots WHERE repository_id = $1);
+`, cloudRepoID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "delete entries failed"})
+		return
+	}
+
+	if _, err = tx.Exec(r.Context(), `
+DELETE FROM snapshot_file_versions
+WHERE snapshot_id IN (SELECT id FROM snapshots WHERE repository_id = $1);
+`, cloudRepoID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "delete versions failed"})
+		return
+	}
+
+	if _, err = tx.Exec(r.Context(), `DELETE FROM snapshots WHERE repository_id = $1;`, cloudRepoID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "delete snapshots failed"})
+		return
+	}
+
+	if _, err = tx.Exec(r.Context(), `DELETE FROM repositories WHERE id = $1 AND user_id = $2;`, cloudRepoID, auth.UserID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "delete repository failed"})
+		return
+	}
+
+	if err = tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "transaction commit failed"})
+		return
+	}
+
+	logHTTPRequestEvent(r, "warning", "delete_repository", "cloud repository metadata deleted",
+		"user_id="+fmt.Sprintf("%d", auth.UserID),
+		"repository_id="+fmt.Sprintf("%d", repositoryID),
+		"snapshots="+fmt.Sprintf("%d", snapshotCount))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":               true,
+		"deletedSnapshots": snapshotCount,
 	})
 }
 
@@ -652,7 +742,7 @@ WHERE block_hash = ANY($1)
 	}
 
 	response := pushSnapshotResponse{
-		Ok:                true,
+		Ok:                 true,
 		MissingBlockHashes: missing,
 	}
 
@@ -860,6 +950,209 @@ ORDER BY relative_path, file_version_id;
 	})
 }
 
+func (h *Handler) ListRepositorySnapshots(w http.ResponseWriter, r *http.Request) {
+	if !ensureSyncProtocol(w, r) {
+		return
+	}
+
+	auth, ok := getAuthUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "unauthorized"})
+		return
+	}
+
+	repositoryID, err := parsePathInt(r, "repositoryId")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "invalid repository id"})
+		return
+	}
+
+	var cloudRepoID int64
+	var name string
+	var description string
+	err = h.db.QueryRow(r.Context(), `
+SELECT id, name, COALESCE(description, '')
+FROM repositories
+WHERE user_id = $1 AND external_repository_id = $2
+LIMIT 1;
+`, auth.UserID, repositoryID).Scan(&cloudRepoID, &name, &description)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "repository not found"})
+		return
+	}
+
+	snapshotRows, err := h.db.Query(r.Context(), `
+SELECT
+    id,
+    external_snapshot_id,
+    COALESCE(title, ''),
+    trigger,
+    created_at,
+    total_entries,
+    file_entries,
+    directory_entries,
+    total_file_bytes,
+    COALESCE(payload_sha256, '')
+FROM snapshots
+WHERE repository_id = $1
+  AND EXISTS (
+      SELECT 1
+      FROM snapshot_file_versions sfv
+      WHERE sfv.snapshot_id = snapshots.id)
+ORDER BY created_at ASC, id ASC;
+`, cloudRepoID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "snapshots query failed"})
+		return
+	}
+	defer snapshotRows.Close()
+
+	type snapshotHeader struct {
+		rowID    int64
+		snapshot syncSnapshotMeta
+	}
+	headers := make([]snapshotHeader, 0, 16)
+	for snapshotRows.Next() {
+		var header snapshotHeader
+		if scanErr := snapshotRows.Scan(
+			&header.rowID,
+			&header.snapshot.ID,
+			&header.snapshot.Title,
+			&header.snapshot.Trigger,
+			&header.snapshot.CreatedAt,
+			&header.snapshot.TotalEntries,
+			&header.snapshot.FileEntries,
+			&header.snapshot.DirectoryEntries,
+			&header.snapshot.TotalFileBytes,
+			&header.snapshot.PayloadSHA256,
+		); scanErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "snapshot scan failed"})
+			return
+		}
+		headers = append(headers, header)
+	}
+
+	snapshots := make([]latestSnapshotResponse, 0, len(headers))
+	for _, header := range headers {
+		entries, entryErr := h.loadSnapshotEntries(r.Context(), header.rowID)
+		if entryErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "entries query failed"})
+			return
+		}
+
+		versions, versionErr := h.loadSnapshotFileVersions(r.Context(), header.rowID)
+		if versionErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "versions query failed"})
+			return
+		}
+
+		snapshots = append(snapshots, latestSnapshotResponse{
+			Ok: true,
+			Repository: syncRepositoryMeta{
+				ID:          repositoryID,
+				Name:        name,
+				Description: description,
+			},
+			Snapshot:     header.snapshot,
+			Entries:      entries,
+			FileVersions: versions,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, repositorySnapshotsResponse{
+		Ok:        true,
+		Snapshots: snapshots,
+	})
+}
+
+func (h *Handler) loadSnapshotEntries(ctx context.Context, snapshotRowID int64) ([]syncSnapshotEntry, error) {
+	entryRows, err := h.db.Query(ctx, `
+SELECT
+    relative_path,
+    COALESCE(parent_relative_path, ''),
+    name,
+    is_directory,
+    COALESCE(extension, ''),
+    size_bytes,
+    last_write_utc,
+    COALESCE(content_hash_sha256, '')
+FROM snapshot_entries
+WHERE snapshot_id = $1
+ORDER BY relative_path;
+`, snapshotRowID)
+	if err != nil {
+		return nil, err
+	}
+	defer entryRows.Close()
+
+	entries := make([]syncSnapshotEntry, 0, 1024)
+	for entryRows.Next() {
+		var entry syncSnapshotEntry
+		if err := entryRows.Scan(
+			&entry.RelativePath,
+			&entry.ParentRelativePath,
+			&entry.Name,
+			&entry.IsDirectory,
+			&entry.Extension,
+			&entry.SizeBytes,
+			&entry.LastWriteUTC,
+			&entry.ContentHashSHA256,
+		); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, entryRows.Err()
+}
+
+func (h *Handler) loadSnapshotFileVersions(ctx context.Context, snapshotRowID int64) ([]syncFileVersion, error) {
+	versionRows, err := h.db.Query(ctx, `
+SELECT
+    relative_path,
+    file_version_id,
+    content_hash_sha256,
+    size_bytes,
+    is_deletion_marker,
+    created_at,
+    blocks_json
+FROM snapshot_file_versions
+WHERE snapshot_id = $1
+ORDER BY relative_path, file_version_id;
+`, snapshotRowID)
+	if err != nil {
+		return nil, err
+	}
+	defer versionRows.Close()
+
+	versions := make([]syncFileVersion, 0, 1024)
+	for versionRows.Next() {
+		var version syncFileVersion
+		var blocksJSON []byte
+		if err := versionRows.Scan(
+			&version.RelativePath,
+			&version.FileVersionID,
+			&version.ContentHashSHA256,
+			&version.SizeBytes,
+			&version.IsDeletionMarker,
+			&version.CreatedAt,
+			&blocksJSON,
+		); err != nil {
+			return nil, err
+		}
+
+		if len(blocksJSON) > 0 {
+			if err = json.Unmarshal(blocksJSON, &version.Blocks); err != nil {
+				return nil, err
+			}
+		}
+
+		versions = append(versions, version)
+	}
+
+	return versions, versionRows.Err()
+}
+
 func (h *Handler) HeadBlock(w http.ResponseWriter, r *http.Request) {
 	if !ensureSyncProtocol(w, r) {
 		return
@@ -980,7 +1273,11 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err = h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
+		logHTTPRequestEvent(r, "error", "put_block", "failed to persist block payload",
+			"block_hash="+quoteLogValue(hash),
+			"size_bytes="+fmt.Sprintf("%d", sizeBytes),
+			"error="+quoteLogValue(err.Error()))
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload", "blockHash": hash})
 		return
 	}
 
@@ -1125,7 +1422,13 @@ func (h *Handler) PutBlocksBatch(w http.ResponseWriter, r *http.Request) {
 		storeErr := h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes)
 		_ = os.Remove(stagedPath)
 		if storeErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
+			logHTTPRequestEvent(r, "error", "put_blocks_batch", "failed to persist block payload",
+				"block_hash="+quoteLogValue(hash),
+				"size_bytes="+fmt.Sprintf("%d", sizeBytes),
+				"stored_blocks="+fmt.Sprintf("%d", storedBlocks),
+				"skipped_blocks="+fmt.Sprintf("%d", skippedBlocks),
+				"error="+quoteLogValue(storeErr.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload", "blockHash": hash})
 			return
 		}
 
@@ -1238,10 +1541,10 @@ func ensureSyncProtocol(w http.ResponseWriter, r *http.Request) bool {
 		"required_protocol="+quoteLogValue(supportedSyncProtocol))
 	w.Header().Set("X-Veyra-Sync-Protocol-Supported", supportedSyncProtocol)
 	writeJSON(w, http.StatusPreconditionFailed, map[string]any{
-		"ok":                false,
-		"message":           "sync protocol mismatch",
-		"requiredProtocol":  supportedSyncProtocol,
-		"providedProtocol":  clientVersion,
+		"ok":               false,
+		"message":          "sync protocol mismatch",
+		"requiredProtocol": supportedSyncProtocol,
+		"providedProtocol": clientVersion,
 	})
 	return false
 }
@@ -1376,4 +1679,3 @@ func isValidBlockHash(hash string) bool {
 	}
 	return true
 }
-

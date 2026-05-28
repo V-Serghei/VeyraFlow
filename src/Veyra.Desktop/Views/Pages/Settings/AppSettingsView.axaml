@@ -244,6 +244,52 @@
                                 <TextBlock Text="{loc:Tr app_settings.monitoring_tools_title}" FontSize="16" FontWeight="SemiBold"/>
                                 <TextBlock Text="{loc:Tr app_settings.monitoring_tools_hint}" Classes="muted" TextWrapping="Wrap"/>
 
+                                <Border Classes="filter-sheet" Padding="12" IsVisible="{Binding IsMonitoringEnabled}">
+                                    <StackPanel Spacing="8">
+                                        <CheckBox IsChecked="{Binding IsMonitoringEnabled}"
+                                                  Content="{loc:Tr app_settings.monitoring_enable_checkbox}"/>
+                                        <TextBlock Text="{Binding MonitoringStateText}"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding MonitoringHelpText}"
+                                                   Classes="muted"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding MonitoringMessage}"
+                                                   Classes="muted"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding MonitoringMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Classes="metric-card"
+                                        IsVisible="{Binding ShowMonitoringProcessLoad}"
+                                        Background="{Binding MonitoringProcessLoadBackgroundColor}"
+                                        BorderBrush="{Binding MonitoringProcessLoadAccentColor}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{loc:Tr dashboard.process_load_title}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{Binding MonitoringProcessLoadAccentColor}"/>
+                                        <TextBlock Text="{Binding MonitoringProcessLoadSummaryText}"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding MonitoringProcessLoadDetailText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding MonitoringProcessLoadPeakText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasMonitoringProcessHistory}"/>
+                                        <TextBlock Text="{Binding MonitoringProcessLoadHistoryText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasMonitoringProcessHistory}"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Border Classes="filter-sheet" Padding="12">
                                     <StackPanel Spacing="10">
                                         <TextBlock Text="{loc:Tr app_settings.runtime_observability_title}" FontWeight="SemiBold"/>
@@ -296,7 +342,7 @@
                                     </StackPanel>
                                 </Border>
 
-                                <WrapPanel Orientation="Horizontal">
+                                <WrapPanel Orientation="Horizontal" IsVisible="{Binding IsMonitoringEnabled}">
                                     <Button Command="{Binding OpenOperationMonitorCommand}"
                                             Classes="primary compact responsive-icon"
                                             Margin="0,0,8,8">
@@ -318,9 +364,396 @@
                                         </Button.Content>
                                     </Button>
                                 </WrapPanel>
+
+                                <!-- Operation Journal -->
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <Grid x:Name="AppSettingsOperationJournalHeader" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                            <Button x:Name="AppSettingsOperationJournalButton"
+                                                    Grid.Column="1"
+                                                    Command="{Binding ShowOperationJournalCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    VerticalAlignment="Top">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8A5;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.operation_journal_show_all}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </Grid>
+
+                                        <ItemsControl ItemsSource="{Binding OperationJournalItems}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="settings:AppOperationJournalItemViewModel">
+                                                    <Border Classes="card" Padding="8" Margin="0,0,0,6">
+                                                        <StackPanel Spacing="6">
+                                                            <WrapPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding TimestampText}" Classes="muted" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding Level}" FontWeight="SemiBold" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding Category}" Classes="muted" Margin="0,0,10,4"/>
+                                                                <TextBlock Text="{Binding ScopeText}" Classes="muted" Margin="0,0,0,4"/>
+                                                            </WrapPanel>
+                                                            <TextBlock Text="{Binding Action}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Classes="muted"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <TextBlock Text="{loc:Tr operation_journal.empty}"
+                                                   Classes="muted"
+                                                   IsVisible="{Binding HasOperationJournalItems, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
 
+                        <!-- ── Automation tab ─────────────────────────────────────── -->
+                        <Border Classes="card" Padding="12" IsVisible="{Binding IsAutomationTabSelected}">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{loc:Tr app_settings.automation_title}" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="{loc:Tr app_settings.automation_subtitle}" Opacity="0.75" TextWrapping="Wrap"/>
+
+                                <!-- Auto Snapshots — full config -->
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.auto_snapshots_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.auto_snapshots_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <CheckBox Content="{loc:Tr app_settings.auto_snapshots_checkbox}"
+                                                  IsChecked="{Binding IsAutomaticSnapshotsEnabled, Mode=TwoWay}"/>
+
+                                        <TextBlock Text="{Binding AutomaticSnapshotsSummaryText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.auto_snapshots_interval_label}" Opacity="0.8"/>
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding AutomaticSnapshotIntervalOptions}"
+                                                      SelectedItem="{Binding SelectedAutomaticSnapshotIntervalMinutes, Mode=TwoWay}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:Int32">
+                                                        <TextBlock Text="{Binding StringFormat='{}{0} min'}"/>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="170,*,Auto,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.auto_snapshots_quiet_hours_label}" Opacity="0.8"/>
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding QuietHourOptions}"
+                                                      SelectedItem="{Binding SelectedAutomaticSnapshotQuietStartHour, Mode=TwoWay}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:Int32">
+                                                        <TextBlock Text="{Binding StringFormat='{}{0:00}:00'}"/>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                            <TextBlock Grid.Column="2" Text="-" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                            <ComboBox Grid.Column="3"
+                                                      ItemsSource="{Binding QuietHourOptions}"
+                                                      SelectedItem="{Binding SelectedAutomaticSnapshotQuietEndHour, Mode=TwoWay}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:Int32">
+                                                        <TextBlock Text="{Binding StringFormat='{}{0:00}:00'}"/>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </Grid>
+
+                                        <WrapPanel Orientation="Horizontal">
+                                            <Button Command="{Binding SaveAutomaticSnapshotsSettingsCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsAutomaticSnapshotsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE70F;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.auto_snapshots_apply_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding ApplyReducedBackgroundLoadPresetCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsAutomaticSnapshotsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE823;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.auto_snapshots_low_impact_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsAutomaticSnapshotsBusy}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{loc:Tr app_settings.auto_snapshots_running}" FontWeight="SemiBold"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="{Binding AutomaticSnapshotsMessage}"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding AutomaticSnapshotsMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Global Retention -->
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.global_retention_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.global_retention_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <CheckBox Content="{loc:Tr app_settings.global_retention_checkbox}"
+                                                  IsChecked="{Binding GlobalRetentionEnabled, Mode=TwoWay}"/>
+
+                                        <TextBlock Text="{Binding GlobalRetentionSummaryText}"
+                                                   Classes="muted"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_age_label}" Opacity="0.8"/>
+                                            <TextBox Grid.Column="1"
+                                                     Watermark="{loc:Tr common.not_available_short}"
+                                                     Text="{Binding GlobalRetentionMaxAgeDays, Mode=TwoWay}"/>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_snapshots_label}" Opacity="0.8"/>
+                                            <TextBox Grid.Column="1"
+                                                     Watermark="{loc:Tr common.not_available_short}"
+                                                     Text="{Binding GlobalRetentionMaxSnapshots, Mode=TwoWay}"/>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_total_size_label}" Opacity="0.8"/>
+                                            <TextBox Grid.Column="1"
+                                                     Watermark="{loc:Tr common.not_available_short}"
+                                                     Text="{Binding GlobalRetentionMaxTotalSizeMb, Mode=TwoWay}"/>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_trigger_filter_label}" Opacity="0.8"/>
+                                            <ComboBox Grid.Column="1"
+                                                      SelectedIndex="{Binding SelectedGlobalRetentionTriggerPresetIndex, Mode=TwoWay}">
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_working}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_manual}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_working_only}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_working}"/>
+                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_all}"/>
+                                            </ComboBox>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_run_interval_label}" Opacity="0.8"/>
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding AutomaticSnapshotIntervalOptions}"
+                                                      SelectedItem="{Binding GlobalRetentionRunIntervalMinutes, Mode=TwoWay}">
+                                                <ComboBox.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:Int32">
+                                                        <TextBlock Text="{Binding StringFormat='{}{0} min'}"/>
+                                                    </DataTemplate>
+                                                </ComboBox.ItemTemplate>
+                                            </ComboBox>
+                                        </Grid>
+
+                                        <WrapPanel Orientation="Horizontal">
+                                            <Button Command="{Binding SaveGlobalRetentionDefaultsCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE70F;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_save_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding ApplyGlobalRetentionDefaultsToAllCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8A5;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_apply_all_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding RunGlobalRetentionCleanupNowCommand}"
+                                                    Classes="primary compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE9CE;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_cleanup_now_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsGlobalRetentionBusy}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{loc:Tr app_settings.global_retention_running}" FontWeight="SemiBold"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="{Binding GlobalRetentionMessage}"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding GlobalRetentionMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Transient Cache Cleanup -->
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <Button Command="{Binding ClearTransientStateCacheCommand}"
+                                                Classes="subtle compact responsive-icon"
+                                                HorizontalAlignment="Left"
+                                                IsEnabled="{Binding IsTransientCacheCleanupBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE74D;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr app_settings.transient_cache_cleanup_button}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsTransientCacheCleanupBusy}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_running}" FontWeight="SemiBold"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="{Binding TransientCacheCleanupMessage}"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding TransientCacheCleanupMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Artifact Encryption — only if feature is enabled in config -->
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                        IsVisible="{Binding IsArtifactEncryptionEnabled}">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="{loc:Tr app_settings.artifact_encryption_title}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{loc:Tr app_settings.artifact_encryption_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
+
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_status_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionStatusText}" FontWeight="SemiBold"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_active_key_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionActiveKeyText}" TextWrapping="Wrap"/>
+                                        </Grid>
+                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
+                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_updated_label}" Opacity="0.8"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionUpdatedText}" TextWrapping="Wrap"/>
+                                        </Grid>
+
+                                        <WrapPanel Orientation="Horizontal">
+                                            <Button Command="{Binding RefreshArtifactEncryptionCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE72C;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding RotateArtifactKeyCommand}"
+                                                    Classes="primary compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8AC;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_encryption_rotate_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                            <Button Command="{Binding OpenArtifactKeyManagementCommand}"
+                                                    Classes="subtle compact responsive-icon"
+                                                    Margin="0,0,8,8"
+                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
+                                                <Button.Content>
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE943;"/>
+                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_key_management_button}"/>
+                                                    </StackPanel>
+                                                </Button.Content>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <Border Classes="metric-card" IsVisible="{Binding IsArtifactEncryptionBusy}">
+                                            <StackPanel Classes="loading-state">
+                                                <TextBlock Text="{loc:Tr app_settings.artifact_encryption_running}" FontWeight="SemiBold"/>
+                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <ItemsControl ItemsSource="{Binding ArtifactKeys}" IsVisible="{Binding HasArtifactKeys}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="settings:AppArtifactKeyItemViewModel">
+                                                    <Border Classes="metric-card" Margin="0,0,0,8">
+                                                        <StackPanel Spacing="6">
+                                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                                    <TextBlock Text="{Binding KeyId}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Text="{Binding StatusText}" Classes="muted"/>
+                                                                </StackPanel>
+                                                                <Button Grid.Column="1"
+                                                                        Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).RevokeArtifactKeyCommand}"
+                                                                        CommandParameter="{Binding .}"
+                                                                        Classes="subtle compact"
+                                                                        IsVisible="{Binding CanRevoke}">
+                                                                    <TextBlock Text="{loc:Tr app_settings.artifact_encryption_revoke_button}"/>
+                                                                </Button>
+                                                            </Grid>
+                                                            <TextBlock Text="{Binding CreatedAtText}" Classes="muted"/>
+                                                            <TextBlock Text="{Binding RotatedAtText}" Classes="muted" IsVisible="{Binding HasRotatedAt}"/>
+                                                            <TextBlock Text="{Binding RevokedAtText}" Classes="muted" IsVisible="{Binding HasRevokedAt}"/>
+                                                            <TextBlock Text="{Binding NoteText}" Classes="muted" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <TextBlock Text="{Binding ArtifactEncryptionMessage}"
+                                                   Foreground="{DynamicResource VeyraInfoBrush}"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding ArtifactEncryptionMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- ── Sync tab ────────────────────────────────────────────── -->
                         <Border Classes="card" Padding="12" IsVisible="{Binding IsSyncTabSelected}">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="{loc:Tr app_settings.pseudo_cloud_sync}" FontSize="16" FontWeight="SemiBold"/>
@@ -350,8 +783,21 @@
 
                                     <WrapPanel x:Name="AppSettingsSyncActionsPanel" Orientation="Horizontal">
                                         <Button
+                                                Command="{Binding OpenCloudRepositoryManagerCommand}"
+                                                IsEnabled="{Binding HasActiveProfile}"
+                                                Classes="subtle compact responsive-icon"
+                                                Margin="0,0,8,8"
+                                                ToolTip.Tip="{loc:Tr cloud_manager.open_tooltip}">
+                                            <Button.Content>
+                                                <StackPanel Classes="button-content">
+                                                    <TextBlock Classes="button-icon" Text="&#xE753;"/>
+                                                    <TextBlock Classes="button-label" Text="{loc:Tr cloud_manager.open_short}"/>
+                                                </StackPanel>
+                                            </Button.Content>
+                                        </Button>
+                                        <Button
                                                 Command="{Binding RestoreFromCloudCommand}"
-                                                IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                IsEnabled="{Binding CanSyncToCloud}"
                                                 Classes="subtle compact responsive-icon"
                                                 Margin="0,0,8,8">
                                             <Button.Content>
@@ -363,7 +809,7 @@
                                         </Button>
                                         <Button
                                                 Command="{Binding PushAllRepositoriesCommand}"
-                                                IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                IsEnabled="{Binding CanSyncToCloud}"
                                                 Classes="subtle compact responsive-icon"
                                                 Margin="0,0,8,8">
                                             <Button.Content>
@@ -375,7 +821,7 @@
                                         </Button>
                                         <Button
                                                 Command="{Binding ProcessQueueCommand}"
-                                                IsEnabled="{Binding IsSyncBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
+                                                IsEnabled="{Binding CanSyncToCloud}"
                                                 Classes="subtle compact responsive-icon"
                                                 Margin="0,0,8,8">
                                             <Button.Content>
@@ -414,7 +860,8 @@
                                                TextWrapping="Wrap"/>
                                 </StackPanel>
 
-                                <Border Classes="filter-sheet" Padding="12">
+                                <Border Classes="filter-sheet" Padding="12"
+                                        IsVisible="{Binding ShowLocalStorageSection}">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <StackPanel Grid.Column="0" Spacing="2">
@@ -493,7 +940,8 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="filter-sheet" Padding="12">
+                                <Border Classes="filter-sheet" Padding="12"
+                                        IsVisible="{Binding ShowSystemDiagnosticsSection}">
                                     <StackPanel Spacing="12">
                                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <StackPanel Grid.Column="0" Spacing="2">
@@ -980,319 +1428,20 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
+                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                        IsVisible="{Binding ShowSimpleAutoSnapshotsSection}">
                                     <StackPanel Spacing="8">
                                         <TextBlock Text="{loc:Tr app_settings.auto_snapshots_title}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr app_settings.auto_snapshots_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-
+                                        <TextBlock Text="{loc:Tr app_settings.auto_snapshots_basic_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
                                         <CheckBox Content="{loc:Tr app_settings.auto_snapshots_checkbox}"
                                                   IsChecked="{Binding IsAutomaticSnapshotsEnabled, Mode=TwoWay}"/>
-
                                         <TextBlock Text="{Binding AutomaticSnapshotsSummaryText}"
                                                    Classes="muted"
                                                    FontSize="11"
                                                    TextWrapping="Wrap"/>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.auto_snapshots_interval_label}" Opacity="0.8"/>
-                                            <ComboBox Grid.Column="1"
-                                                      ItemsSource="{Binding AutomaticSnapshotIntervalOptions}"
-                                                      SelectedItem="{Binding SelectedAutomaticSnapshotIntervalMinutes, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="x:Int32">
-                                                        <TextBlock Text="{Binding StringFormat='{}{0} min'}"/>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="170,*,Auto,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.auto_snapshots_quiet_hours_label}" Opacity="0.8"/>
-                                            <ComboBox Grid.Column="1"
-                                                      ItemsSource="{Binding QuietHourOptions}"
-                                                      SelectedItem="{Binding SelectedAutomaticSnapshotQuietStartHour, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="x:Int32">
-                                                        <TextBlock Text="{Binding StringFormat='{}{0:00}:00'}"/>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                            <TextBlock Grid.Column="2" Text="-" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                                            <ComboBox Grid.Column="3"
-                                                      ItemsSource="{Binding QuietHourOptions}"
-                                                      SelectedItem="{Binding SelectedAutomaticSnapshotQuietEndHour, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="x:Int32">
-                                                        <TextBlock Text="{Binding StringFormat='{}{0:00}:00'}"/>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </Grid>
-
-                                        <Button Command="{Binding SaveAutomaticSnapshotsSettingsCommand}"
-                                                Classes="subtle compact responsive-icon"
-                                                HorizontalAlignment="Left"
-                                                IsEnabled="{Binding IsAutomaticSnapshotsBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}"
-                                                >
-                                            <Button.Content>
-                                                <StackPanel Classes="button-content">
-                                                    <TextBlock Classes="button-icon" Text="&#xE70F;"/>
-                                                    <TextBlock Classes="button-label" Text="{loc:Tr app_settings.auto_snapshots_apply_button}"/>
-                                                </StackPanel>
-                                            </Button.Content>
-                                        </Button>
-
-                                        <Border Classes="metric-card" IsVisible="{Binding IsAutomaticSnapshotsBusy}">
-                                            <StackPanel Classes="loading-state">
-                                                <TextBlock Text="{loc:Tr app_settings.auto_snapshots_running}" FontWeight="SemiBold"/>
-                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <TextBlock Text="{Binding AutomaticSnapshotsMessage}"
-                                                   Foreground="{DynamicResource VeyraInfoBrush}"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding AutomaticSnapshotsMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="{loc:Tr app_settings.global_retention_title}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr app_settings.global_retention_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-
-                                        <CheckBox Content="{loc:Tr app_settings.global_retention_checkbox}"
-                                                  IsChecked="{Binding GlobalRetentionEnabled, Mode=TwoWay}"/>
-
-                                        <TextBlock Text="{Binding GlobalRetentionSummaryText}"
-                                                   Classes="muted"
-                                                   FontSize="11"
-                                                   TextWrapping="Wrap"/>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_age_label}" Opacity="0.8"/>
-                                            <TextBox Grid.Column="1"
-                                                     Watermark="{loc:Tr common.not_available_short}"
-                                                     Text="{Binding GlobalRetentionMaxAgeDays, Mode=TwoWay}"/>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_snapshots_label}" Opacity="0.8"/>
-                                            <TextBox Grid.Column="1"
-                                                     Watermark="{loc:Tr common.not_available_short}"
-                                                     Text="{Binding GlobalRetentionMaxSnapshots, Mode=TwoWay}"/>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_max_total_size_label}" Opacity="0.8"/>
-                                            <TextBox Grid.Column="1"
-                                                     Watermark="{loc:Tr common.not_available_short}"
-                                                     Text="{Binding GlobalRetentionMaxTotalSizeMb, Mode=TwoWay}"/>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_trigger_filter_label}" Opacity="0.8"/>
-                                            <ComboBox Grid.Column="1"
-                                                      SelectedIndex="{Binding SelectedGlobalRetentionTriggerPresetIndex, Mode=TwoWay}">
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_only}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_working}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_auto_manual}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_only}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_working_only}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_manual_working}"/>
-                                                <ComboBoxItem Content="{loc:Tr repo_settings.retention_trigger_option_all}"/>
-                                            </ComboBox>
-                                        </Grid>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.global_retention_run_interval_label}" Opacity="0.8"/>
-                                            <ComboBox Grid.Column="1"
-                                                      ItemsSource="{Binding AutomaticSnapshotIntervalOptions}"
-                                                      SelectedItem="{Binding GlobalRetentionRunIntervalMinutes, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="x:Int32">
-                                                        <TextBlock Text="{Binding StringFormat='{}{0} min'}"/>
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </Grid>
-
-                                        <WrapPanel Orientation="Horizontal">
-                                            <Button Command="{Binding SaveGlobalRetentionDefaultsCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE70F;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_save_button}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                            <Button Command="{Binding ApplyGlobalRetentionDefaultsToAllCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE8A5;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_apply_all_button}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                            <Button Command="{Binding RunGlobalRetentionCleanupNowCommand}"
-                                                    Classes="primary compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsGlobalRetentionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE9CE;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.global_retention_cleanup_now_button}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                        </WrapPanel>
-
-                                        <Border Classes="metric-card" IsVisible="{Binding IsGlobalRetentionBusy}">
-                                            <StackPanel Classes="loading-state">
-                                                <TextBlock Text="{loc:Tr app_settings.global_retention_running}" FontWeight="SemiBold"/>
-                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <TextBlock Text="{Binding GlobalRetentionMessage}"
-                                                   Foreground="{DynamicResource VeyraInfoBrush}"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding GlobalRetentionMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_title}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-
-                                        <Button Command="{Binding ClearTransientStateCacheCommand}"
-                                                Classes="subtle compact responsive-icon"
-                                                HorizontalAlignment="Left"
-                                                IsEnabled="{Binding IsTransientCacheCleanupBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                            <Button.Content>
-                                                <StackPanel Classes="button-content">
-                                                    <TextBlock Classes="button-icon" Text="&#xE74D;"/>
-                                                    <TextBlock Classes="button-label" Text="{loc:Tr app_settings.transient_cache_cleanup_button}"/>
-                                                </StackPanel>
-                                            </Button.Content>
-                                        </Button>
-
-                                        <Border Classes="metric-card" IsVisible="{Binding IsTransientCacheCleanupBusy}">
-                                            <StackPanel Classes="loading-state">
-                                                <TextBlock Text="{loc:Tr app_settings.transient_cache_cleanup_running}" FontWeight="SemiBold"/>
-                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <TextBlock Text="{Binding TransientCacheCleanupMessage}"
-                                                   Foreground="{DynamicResource VeyraInfoBrush}"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding TransientCacheCleanupMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="{loc:Tr app_settings.artifact_encryption_title}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{loc:Tr app_settings.artifact_encryption_hint}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_status_label}" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionStatusText}" FontWeight="SemiBold"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_active_key_label}" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionActiveKeyText}" TextWrapping="Wrap"/>
-                                        </Grid>
-                                        <Grid ColumnDefinitions="170,*" ColumnSpacing="10">
-                                            <TextBlock Grid.Column="0" Text="{loc:Tr app_settings.artifact_encryption_updated_label}" Opacity="0.8"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding ArtifactEncryptionUpdatedText}" TextWrapping="Wrap"/>
-                                        </Grid>
-
-                                        <WrapPanel Orientation="Horizontal">
-                                            <Button Command="{Binding RefreshArtifactEncryptionCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE72C;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr common.refresh}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                            <Button Command="{Binding RotateArtifactKeyCommand}"
-                                                    Classes="primary compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE8AC;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_encryption_rotate_button}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                            <Button Command="{Binding OpenArtifactKeyManagementCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    Margin="0,0,8,8"
-                                                    IsEnabled="{Binding IsArtifactEncryptionBusy, Converter={x:Static conv:BoolInvertConverter.Instance}}">
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE943;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.artifact_key_management_button}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                        </WrapPanel>
-
-                                        <Border Classes="metric-card" IsVisible="{Binding IsArtifactEncryptionBusy}">
-                                            <StackPanel Classes="loading-state">
-                                                <TextBlock Text="{loc:Tr app_settings.artifact_encryption_running}" FontWeight="SemiBold"/>
-                                                <ProgressBar Classes="loading-progress" IsIndeterminate="True"/>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <ItemsControl ItemsSource="{Binding ArtifactKeys}" IsVisible="{Binding HasArtifactKeys}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="settings:AppArtifactKeyItemViewModel">
-                                                    <Border Classes="metric-card" Margin="0,0,0,8">
-                                                        <StackPanel Spacing="6">
-                                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                                                <StackPanel Grid.Column="0" Spacing="2">
-                                                                    <TextBlock Text="{Binding KeyId}" FontWeight="SemiBold"/>
-                                                                    <TextBlock Text="{Binding StatusText}" Classes="muted"/>
-                                                                </StackPanel>
-                                                                <Button Grid.Column="1"
-                                                                        Command="{Binding #Root.((settings:AppSettingsViewModel)DataContext).RevokeArtifactKeyCommand}"
-                                                                        CommandParameter="{Binding .}"
-                                                                        Classes="subtle compact"
-                                                                        IsVisible="{Binding CanRevoke}">
-                                                                    <TextBlock Text="{loc:Tr app_settings.artifact_encryption_revoke_button}"/>
-                                                                </Button>
-                                                            </Grid>
-                                                            <TextBlock Text="{Binding CreatedAtText}" Classes="muted"/>
-                                                            <TextBlock Text="{Binding RotatedAtText}" Classes="muted" IsVisible="{Binding HasRotatedAt}"/>
-                                                            <TextBlock Text="{Binding RevokedAtText}" Classes="muted" IsVisible="{Binding HasRevokedAt}"/>
-                                                            <TextBlock Text="{Binding NoteText}" Classes="muted" TextWrapping="Wrap"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-
-                                        <TextBlock Text="{Binding ArtifactEncryptionMessage}"
-                                                   Foreground="{DynamicResource VeyraInfoBrush}"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding ArtifactEncryptionMessage, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"/>
-                                    </StackPanel>
-                                </Border>
 
                                 <Border x:Name="AppSettingsGuidedTourCard" Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}">
                                     <StackPanel Spacing="8">
@@ -1396,66 +1545,6 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Classes="card" Padding="10" BorderBrush="{DynamicResource VeyraBorderSoftBrush}" IsVisible="{Binding IsMonitoringTabSelected}">
-                                    <StackPanel Spacing="8">
-                                        <Grid x:Name="AppSettingsOperationJournalHeader" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                                            <StackPanel Spacing="4">
-                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_title}" FontWeight="SemiBold"/>
-                                                <TextBlock Text="{loc:Tr app_settings.operation_journal_subtitle}" Classes="muted" FontSize="11" TextWrapping="Wrap"/>
-                                            </StackPanel>
-
-                                            <Button Grid.Column="1"
-                                                    Command="{Binding OpenOperationMonitorCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    VerticalAlignment="Top"
-                                                    >
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE823;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.operation_monitor_open}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-
-                                            <Button x:Name="AppSettingsOperationJournalButton"
-                                                    Grid.Column="2"
-                                                    Command="{Binding ShowOperationJournalCommand}"
-                                                    Classes="subtle compact responsive-icon"
-                                                    VerticalAlignment="Top"
-                                                    >
-                                                <Button.Content>
-                                                    <StackPanel Classes="button-content">
-                                                        <TextBlock Classes="button-icon" Text="&#xE8A5;"/>
-                                                        <TextBlock Classes="button-label" Text="{loc:Tr app_settings.operation_journal_show_all}"/>
-                                                    </StackPanel>
-                                                </Button.Content>
-                                            </Button>
-                                        </Grid>
-
-                                        <ItemsControl ItemsSource="{Binding OperationJournalItems}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="settings:AppOperationJournalItemViewModel">
-                                                    <Border Classes="card" Padding="8" Margin="0,0,0,6">
-                                                        <StackPanel Spacing="6">
-                                                            <WrapPanel Orientation="Horizontal">
-                                                                <TextBlock Text="{Binding TimestampText}" Classes="muted" Margin="0,0,10,4"/>
-                                                                <TextBlock Text="{Binding Level}" FontWeight="SemiBold" Margin="0,0,10,4"/>
-                                                                <TextBlock Text="{Binding Category}" Classes="muted" Margin="0,0,10,4"/>
-                                                                <TextBlock Text="{Binding ScopeText}" Classes="muted" Margin="0,0,0,4"/>
-                                                            </WrapPanel>
-                                                            <TextBlock Text="{Binding Action}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Classes="muted"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-
-                                        <TextBlock Text="{loc:Tr operation_journal.empty}"
-                                                   Classes="muted"
-                                                   IsVisible="{Binding HasOperationJournalItems, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
-                                    </StackPanel>
-                                </Border>
                             </StackPanel>
                         </Border>
                     </StackPanel>

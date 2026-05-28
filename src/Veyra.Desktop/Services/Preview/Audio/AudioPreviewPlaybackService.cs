@@ -19,6 +19,24 @@ public sealed class AudioPreviewPlaybackService : IAudioPreviewPlaybackService
 
     public bool IsPlaying { get; private set; }
 
+    public TimeSpan CurrentTime
+    {
+        get
+        {
+            lock (_gate)
+                return _reader?.CurrentTime ?? TimeSpan.Zero;
+        }
+    }
+
+    public TimeSpan TotalTime
+    {
+        get
+        {
+            lock (_gate)
+                return _reader?.TotalTime ?? TimeSpan.Zero;
+        }
+    }
+
     public async Task PlayAsync(
         string path,
         TimeSpan? startTime = null,
@@ -100,6 +118,30 @@ public sealed class AudioPreviewPlaybackService : IAudioPreviewPlaybackService
             playbackCts.Dispose();
             throw;
         }
+    }
+
+    public void Seek(TimeSpan position)
+    {
+        if (_disposed)
+            return;
+
+        lock (_gate)
+        {
+            if (_reader is null)
+                return;
+
+            var total = _reader.TotalTime;
+            if (total <= TimeSpan.Zero)
+                return;
+
+            _reader.CurrentTime = position <= TimeSpan.Zero
+                ? TimeSpan.Zero
+                : position >= total
+                    ? total - TimeSpan.FromMilliseconds(1)
+                    : position;
+        }
+
+        RaisePlaybackStateChanged();
     }
 
     private async Task RunLoopPlaybackAsync(string path, TimeSpan start, TimeSpan duration, CancellationToken ct, int generation)

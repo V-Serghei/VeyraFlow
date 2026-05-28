@@ -12,7 +12,9 @@ namespace Veyra.Desktop.Services.Connectivity;
 
 public sealed class ConnectivityStatusService : IConnectivityStatusService, IDisposable
 {
-    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan OnlineRefreshInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DegradedRefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan UnknownRefreshInterval = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -21,6 +23,7 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Uri? _cloudProbeUri;
 
+    private volatile bool _cloudProbeEnabled = true;
     private ConnectivityStatusSnapshot _snapshot = new(ConnectivityState.Unknown, DateTime.UtcNow);
 
     public ConnectivityStatusService(
@@ -35,8 +38,8 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
                       ?? Environment.GetEnvironmentVariable("VEYRA_CLOUDAPI_URL")
                       ?? "http://localhost:8080";
 
-        _cloudProbeUri = Uri.TryCreate(baseUrl, UriKind.Absolute, out var probeUri)
-            ? probeUri
+        _cloudProbeUri = Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri)
+            ? new Uri(baseUri, "/healthz")
             : null;
 
         NetworkChange.NetworkAvailabilityChanged += OnNetworkAvailabilityChanged;
@@ -50,6 +53,24 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
     public Task RefreshAsync(CancellationToken ct = default)
         => RefreshCoreAsync(ct, logFailures: false);
 
+    public void SetCloudProbeEnabled(bool enabled)
+    {
+        _cloudProbeEnabled = enabled;
+        if (!enabled)
+        {
+            var next = new ConnectivityStatusSnapshot(ConnectivityState.Unknown, DateTime.UtcNow);
+            if (next != _snapshot)
+            {
+                _snapshot = next;
+                StatusChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            return;
+        }
+
+        _ = Task.Run(() => RefreshCoreAsync(_shutdownCts.Token, logFailures: true));
+    }
+
     public void Dispose()
     {
         NetworkChange.NetworkAvailabilityChanged -= OnNetworkAvailabilityChanged;
@@ -62,10 +83,11 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
     {
         try
         {
-            await RefreshCoreAsync(_shutdownCts.Token, logFailures: true).ConfigureAwait(false);
-            using var timer = new PeriodicTimer(RefreshInterval);
-            while (await timer.WaitForNextTickAsync(_shutdownCts.Token).ConfigureAwait(false))
+            while (!_shutdownCts.IsCancellationRequested)
+            {
                 await RefreshCoreAsync(_shutdownCts.Token, logFailures: true).ConfigureAwait(false);
+                await Task.Delay(ResolveRefreshInterval(_snapshot.State), _shutdownCts.Token).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -114,6 +136,9 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
 
     private async Task<ConnectivityStatusSnapshot> ProbeAsync(CancellationToken ct)
     {
+        if (!_cloudProbeEnabled)
+            return new(ConnectivityState.Unknown, DateTime.UtcNow);
+
         if (!NetworkInterface.GetIsNetworkAvailable())
             return new(ConnectivityState.InternetUnavailable, DateTime.UtcNow);
 
@@ -126,12 +151,20 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
             timeoutCts.CancelAfter(ProbeTimeout);
 
             using var client = _httpClientFactory.CreateClient();
-            using var request = new HttpRequestMessage(HttpMethod.Head, _cloudProbeUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, _cloudProbeUri);
             using var response = await client.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
                     timeoutCts.Token)
                 .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return new(
+                    ConnectivityState.CloudUnavailable,
+                    DateTime.UtcNow,
+                    $"{(int)response.StatusCode} {response.ReasonPhrase}".Trim());
+            }
 
             return new(ConnectivityState.Online, DateTime.UtcNow, ((int)response.StatusCode).ToString());
         }
@@ -198,4 +231,12 @@ public sealed class ConnectivityStatusService : IConnectivityStatusService, IDis
 
         return null;
     }
+
+    private static TimeSpan ResolveRefreshInterval(ConnectivityState state)
+        => state switch
+        {
+            ConnectivityState.Online => OnlineRefreshInterval,
+            ConnectivityState.CloudUnavailable or ConnectivityState.InternetUnavailable => DegradedRefreshInterval,
+            _ => UnknownRefreshInterval
+        };
 }

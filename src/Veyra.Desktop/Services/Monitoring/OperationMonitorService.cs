@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -8,24 +7,22 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Services.Monitoring.Models;
 
 namespace Veyra.Desktop.Services.Monitoring;
 
 public sealed class OperationMonitorService(
+    IProcessResourceMonitorService processResourceMonitor,
     IMediator mediator,
     IOperationJournalService journal,
     ILogger<OperationMonitorService> log)
     : IOperationMonitorService
 {
-    private TimeSpan? _lastCpuTime;
-    private DateTime? _lastCpuSampleUtc;
-
     public async Task<OperationMonitorSnapshotDto> CaptureAsync(CancellationToken cancellationToken = default)
     {
-        var nowUtc = DateTime.UtcNow;
-        var processSnapshot = CaptureProcessSnapshot(nowUtc);
+        var processSnapshot = processResourceMonitor.Capture();
+        var nowUtc = processSnapshot.CapturedAtUtc;
 
         var repositories = await mediator.Send(new GetAllRepositoriesQuery(), cancellationToken);
         var activeRepositories = repositories
@@ -48,53 +45,21 @@ public sealed class OperationMonitorService(
 
         return new OperationMonitorSnapshotDto(
             nowUtc,
-            processSnapshot,
+            MapProcessSnapshot(processSnapshot),
             activeRepositories,
             recentOperations);
     }
 
-    private OperationMonitorProcessSnapshotDto CaptureProcessSnapshot(DateTime nowUtc)
+    private static OperationMonitorProcessSnapshotDto MapProcessSnapshot(ProcessResourceSnapshotDto snapshot)
     {
-        using var process = Process.GetCurrentProcess();
-        process.Refresh();
-
-        double? cpuPercent = null;
-        var totalProcessorTime = process.TotalProcessorTime;
-        if (_lastCpuTime.HasValue && _lastCpuSampleUtc.HasValue)
-        {
-            var cpuDeltaMs = (totalProcessorTime - _lastCpuTime.Value).TotalMilliseconds;
-            var wallDeltaMs = (nowUtc - _lastCpuSampleUtc.Value).TotalMilliseconds;
-            if (wallDeltaMs > 0)
-            {
-                cpuPercent = Math.Max(
-                    0,
-                    Math.Min(
-                        1000,
-                        cpuDeltaMs / (wallDeltaMs * Math.Max(1, Environment.ProcessorCount)) * 100d));
-            }
-        }
-
-        _lastCpuTime = totalProcessorTime;
-        _lastCpuSampleUtc = nowUtc;
-
-        DateTime? startedAtUtc;
-        try
-        {
-            startedAtUtc = process.StartTime.ToUniversalTime();
-        }
-        catch
-        {
-            startedAtUtc = null;
-        }
-
         return new OperationMonitorProcessSnapshotDto(
-            cpuPercent,
-            process.WorkingSet64,
-            process.PrivateMemorySize64,
-            GC.GetTotalMemory(false),
-            process.Threads.Count,
-            process.HandleCount,
-            startedAtUtc);
+            snapshot.CpuPercent,
+            snapshot.WorkingSetBytes,
+            snapshot.PrivateMemoryBytes,
+            snapshot.ManagedHeapBytes,
+            snapshot.ThreadCount,
+            snapshot.HandleCount,
+            snapshot.StartedAtUtc);
     }
 
     private static OperationMonitorRepositorySnapshotDto? MapActiveRepository(RepositoryDto repository)

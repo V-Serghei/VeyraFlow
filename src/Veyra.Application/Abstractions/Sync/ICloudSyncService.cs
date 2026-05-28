@@ -13,6 +13,11 @@ public interface ICloudSyncService
         int repositoryId,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<CloudSnapshotPackageDto>> GetRepositorySnapshotsAsync(
+        string accessToken,
+        int repositoryId,
+        CancellationToken ct = default);
+
     Task<CloudPushResultDto?> PushSnapshotAsync(
         string accessToken,
         int repositoryId,
@@ -50,6 +55,10 @@ public interface ICloudSyncService
         int scanLimit = 512,
         int compactLimit = 128,
         CancellationToken ct = default);
+
+    Task<bool> DeleteRepositoryAsync(
+        string accessToken,
+        int repositoryId,
+        CancellationToken ct = default)
+        => throw new NotSupportedException("Cloud repository deletion is not supported by this cloud sync provider.");
 }
-
-

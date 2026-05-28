@@ -30,7 +30,7 @@
             </Transitions>
         </Border.Transitions>
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*" RowSpacing="10">
             <Border Grid.Row="0" Classes="toolbar" Padding="12,10">
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                     <StackPanel Spacing="4">
@@ -129,7 +129,35 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="4" Classes="card" Padding="12">
+            <Border Grid.Row="4"
+                    Classes="card"
+                    Padding="12"
+                    IsVisible="{Binding ShowProcessLoad}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="{loc:Tr tray.panel_process_title}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding ProcessLoadAccentColor}"/>
+                    <TextBlock Text="{Binding ProcessLoadText}"
+                               Foreground="{Binding ProcessLoadAccentColor}"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ProcessLoadDetailText}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ProcessLoadPeakText}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding ProcessLoadHistoryText}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Row="5" Classes="card" Padding="12">
                 <StackPanel Spacing="10">
                     <TextBlock Text="{loc:Tr tray.panel_navigation_title}" FontSize="12" FontWeight="SemiBold"/>
                     <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
@@ -141,7 +169,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="5" Classes="card" Padding="12">
+            <Border Grid.Row="6" Classes="card" Padding="12">
                 <StackPanel Spacing="10">
                     <TextBlock Text="{loc:Tr tray.panel_snapshot_title}" FontSize="12" FontWeight="SemiBold"/>
                     <ComboBox ItemsSource="{Binding Repositories}"
@@ -160,7 +188,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="6"
+            <Border Grid.Row="7"
                     Classes="metric-card"
                     IsVisible="{Binding HasSelectedRepository}">
                 <StackPanel Spacing="10">
@@ -193,6 +221,24 @@
                                        Foreground="{Binding SelectedRepositoryLastSnapshotAccentColor}"
                                        TextWrapping="Wrap"/>
                         </Grid>
+                        <StackPanel Spacing="2">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                <TextBlock Text="{Binding SelectedRepositoryLiveSyncGlyph}"
+                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           Foreground="{Binding SelectedRepositoryLiveSyncAccentColor}"
+                                           VerticalAlignment="Top"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding SelectedRepositoryLiveSyncText}"
+                                           Foreground="{Binding SelectedRepositoryLiveSyncAccentColor}"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+                            <TextBlock Text="{Binding SelectedRepositoryLiveSyncDetailText}"
+                                       Margin="24,0,0,0"
+                                       Classes="muted"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding HasSelectedRepositoryLiveSyncDetail}"/>
+                        </StackPanel>
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                             <TextBlock Text="{Binding SelectedRepositoryCloudSyncGlyph}"
                                        FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
@@ -234,7 +280,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="7"
+            <Border Grid.Row="8"
                     Classes="card"
                     Padding="12"
                     IsVisible="{Binding HasIssueItems}">
@@ -290,7 +336,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="8" Classes="card" Padding="12">
+            <Border Grid.Row="9" Classes="card" Padding="12">
                 <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
                     <TextBlock Grid.Row="0" Text="{loc:Tr tray.panel_cloud_title}" FontSize="12" FontWeight="SemiBold"/>
                     <Button Grid.Row="1"

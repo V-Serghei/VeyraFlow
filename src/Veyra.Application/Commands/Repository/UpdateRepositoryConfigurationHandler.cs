@@ -1,7 +1,9 @@
 using MediatR;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 
@@ -17,6 +19,8 @@ public sealed class UpdateRepositoryConfigurationHandler(
 {
     public async Task<OperationResult> Handle(UpdateRepositoryConfigurationCommand request, CancellationToken ct)
     {
+        var totalTimer = Stopwatch.StartNew();
+        var stageTimer = Stopwatch.StartNew();
         try
         {
             log.LogInformation("Updating repository configuration {RepositoryId}", request.RepositoryId);
@@ -32,13 +36,15 @@ public sealed class UpdateRepositoryConfigurationHandler(
             var normalizedFormats = NormalizeFormats(request.Formats);
             if (normalizedFormats.Count == 0)
                 return OperationResult.Fail("At least one format is required.");
+            var normalizedExcludedPatterns = NormalizeExcludedPatterns(request.ExcludedPatterns);
 
             var safeName = string.IsNullOrWhiteSpace(request.Name)
                 ? repo.Name
                 : request.Name.Trim();
 
             var safeRetentionPolicy = NormalizeRetentionPolicy(request.RetentionPolicy);
-            if (safeRetentionPolicy.Enabled
+            if (safeRetentionPolicy.HasLocalOverride
+                && safeRetentionPolicy.Enabled
                 && TargetsManualSnapshots(safeRetentionPolicy.TriggerFilters)
                 && !safeRetentionPolicy.AllowManualSnapshotCleanup)
             {
@@ -48,64 +54,126 @@ public sealed class UpdateRepositoryConfigurationHandler(
             var safeSyncConflictStrategy = RepositorySyncConflictStrategies.Normalize(request.SyncConflictStrategy);
             var safeSyncRetryMaxAttempts = Math.Clamp(request.SyncRetryMaxAttempts, 1, 20);
             var safeSyncRetryBaseDelaySeconds = Math.Clamp(request.SyncRetryBaseDelaySeconds, 5, 600);
+            var validationMs = stageTimer.ElapsedMilliseconds;
+
+            var pathChanged = !PathEquals(repo.DirectoryPath, normalizedPath);
+            var formatsChanged = !SetEquals(normalizedFormats, NormalizeFormats(repo.LinkedFormats));
+            var excludedPatternsChanged = !SetEquals(normalizedExcludedPatterns, NormalizeExcludedPatterns(repo.ExcludedPatterns));
+            var repositoryFieldsChanged =
+                !string.Equals(repo.Name, safeName, StringComparison.Ordinal)
+                || !string.Equals(repo.Description ?? string.Empty, request.Description ?? string.Empty, StringComparison.Ordinal)
+                || repo.AutoCaptureFileVersions != request.AutoCaptureFileVersions
+                || repo.ProtectCloudMetadata != request.ProtectCloudMetadata
+                || excludedPatternsChanged
+                || !RetentionPolicyEquals(NormalizeRetentionPolicy(repo.RetentionPolicy), safeRetentionPolicy)
+                || !string.Equals(
+                    RepositorySyncConflictStrategies.Normalize(repo.CloudSync?.ConflictStrategy),
+                    safeSyncConflictStrategy,
+                    StringComparison.OrdinalIgnoreCase)
+                || (repo.CloudSync?.RetryMaxAttempts ?? 5) != safeSyncRetryMaxAttempts
+                || (repo.CloudSync?.RetryBaseDelaySeconds ?? 30) != safeSyncRetryBaseDelaySeconds;
+
+            if (!pathChanged && !formatsChanged && !repositoryFieldsChanged)
+            {
+                log.LogInformation(
+                    "Repository configuration update skipped: no changes detected. RepositoryId {RepositoryId}. ValidationMs {ValidationMs}. TotalMs {TotalMs}",
+                    request.RepositoryId,
+                    validationMs,
+                    totalTimer.ElapsedMilliseconds);
+                return OperationResult.Ok();
+            }
 
             if (!PathEquals(repo.DirectoryPath, normalizedPath))
                 await setup.UpdateWatchedDirectoryAsync(repo.DirectoryPath, normalizedPath, ct);
 
-            await repositories.UpdateRepositoryAsync(
-                repo.Id,
-                safeName,
-                request.Description,
-                request.AutoCaptureFileVersions,
-                request.ProtectCloudMetadata,
-                NormalizeExcludedPatterns(request.ExcludedPatterns),
-                safeRetentionPolicy,
-                safeSyncConflictStrategy,
-                safeSyncRetryMaxAttempts,
-                safeSyncRetryBaseDelaySeconds,
-                ct);
+            var directoryMs = stageTimer.ElapsedMilliseconds - validationMs;
+            var dbSaveMs = 0L;
+            if (pathChanged || repositoryFieldsChanged)
+            {
+                stageTimer.Restart();
+                await repositories.UpdateRepositoryAsync(
+                    repo.Id,
+                    safeName,
+                    request.Description,
+                    request.AutoCaptureFileVersions,
+                    request.ProtectCloudMetadata,
+                    normalizedExcludedPatterns,
+                    safeRetentionPolicy,
+                    safeSyncConflictStrategy,
+                    safeSyncRetryMaxAttempts,
+                    safeSyncRetryBaseDelaySeconds,
+                    ct);
+                dbSaveMs = stageTimer.ElapsedMilliseconds;
+            }
 
-            var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
-            var missingGlobal = normalizedFormats
-                .Where(f => !globalFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
-                .ToList();
+            var formatMs = 0L;
+            if (pathChanged || formatsChanged)
+            {
+                stageTimer.Restart();
+                var globalFormats = await setup.GetTrackedExtensionsAsync(ct);
+                var missingGlobal = normalizedFormats
+                    .Where(f => !globalFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
 
-            foreach (var ext in missingGlobal)
-                await setup.AddTrackedExtensionAsync(ext, ct);
+                foreach (var ext in missingGlobal)
+                    await setup.AddTrackedExtensionAsync(ext, ct);
 
-            var linkedFormats = await setup.GetFormatsForDirectoryAsync(normalizedPath, ct);
+                var linkedFormats = await setup.GetFormatsForDirectoryAsync(normalizedPath, ct);
 
-            var toLink = normalizedFormats
-                .Where(f => !linkedFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
-                .ToList();
+                var toLink = normalizedFormats
+                    .Where(f => !linkedFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
 
-            var toUnlink = linkedFormats
-                .Where(f => !normalizedFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
-                .ToList();
+                var toUnlink = linkedFormats
+                    .Where(f => !normalizedFormats.Contains(f, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
 
-            if (toUnlink.Count > 0)
-                await setup.UnlinkDirectoryFromFormatsAsync(normalizedPath, toUnlink, ct);
+                if (toUnlink.Count > 0)
+                    await setup.UnlinkDirectoryFromFormatsAsync(normalizedPath, toUnlink, ct);
 
-            if (toLink.Count > 0)
-                await setup.LinkDirectoryToFormatsAsync(normalizedPath, toLink, ct);
+                if (toLink.Count > 0)
+                    await setup.LinkDirectoryToFormatsAsync(normalizedPath, toLink, ct);
+                formatMs = stageTimer.ElapsedMilliseconds;
+            }
 
-            await scanner.ScanRepositoryAsync(
-                repo.Id,
-                null,
-                new RepositoryScanOptionsDto(
-                    SaveFileVersions: false,
-                    TriggerOverride: "sync_index_config_update"),
-                ct);
+            var scanMs = 0L;
+            var nativeApplyMs = 0L;
+            var indexingSetupChanged = pathChanged || formatsChanged || excludedPatternsChanged;
+            if (indexingSetupChanged)
+            {
+                stageTimer.Restart();
+                await scanner.ScanRepositoryAsync(
+                    repo.Id,
+                    null,
+                    new RepositoryScanOptionsDto(
+                        SaveFileVersions: false,
+                        TriggerOverride: "sync_index_config_update"),
+                    ct);
+                scanMs = stageTimer.ElapsedMilliseconds;
 
-            await native.ApplySetupAsync(ct);
+                stageTimer.Restart();
+                await native.ApplySetupAsync(ct);
+                nativeApplyMs = stageTimer.ElapsedMilliseconds;
+            }
 
             log.LogInformation(
-                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}. RetentionEnabled {RetentionEnabled}. SyncStrategy {SyncStrategy}",
+                "Repository {RepositoryId} updated. Path {Path}. Formats {FormatCount}. RetentionEnabled {RetentionEnabled}. SyncStrategy {SyncStrategy}. Changes Path {PathChanged}. Formats {FormatsChanged}. RepositoryFields {RepositoryFieldsChanged}. IndexingSetup {IndexingSetupChanged}. ValidationMs {ValidationMs}. DirectoryMs {DirectoryMs}. DbSaveMs {DbSaveMs}. FormatMs {FormatMs}. ScanMs {ScanMs}. NativeApplyMs {NativeApplyMs}. TotalMs {TotalMs}",
                 repo.Id,
                 normalizedPath,
                 normalizedFormats.Count,
                 safeRetentionPolicy.Enabled,
-                safeSyncConflictStrategy);
+                safeSyncConflictStrategy,
+                pathChanged,
+                formatsChanged,
+                repositoryFieldsChanged,
+                indexingSetupChanged,
+                validationMs,
+                directoryMs,
+                dbSaveMs,
+                formatMs,
+                scanMs,
+                nativeApplyMs,
+                totalTimer.ElapsedMilliseconds);
 
             return OperationResult.Ok();
         }
@@ -134,13 +202,16 @@ public sealed class UpdateRepositoryConfigurationHandler(
     private static bool PathEquals(string left, string right)
         => left.TrimEnd('\\', '/').Equals(right.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
 
+    private static bool SetEquals(IReadOnlyCollection<string> left, IReadOnlyCollection<string> right)
+        => left.Count == right.Count && left.All(value => right.Contains(value, StringComparer.OrdinalIgnoreCase));
+
     private static List<string> NormalizeFormats(IEnumerable<string> values)
     {
         return values
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim())
-            .Select(v => v.StartsWith('.') ? v : "." + v)
-            .Select(v => v.ToLowerInvariant())
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -162,6 +233,7 @@ public sealed class UpdateRepositoryConfigurationHandler(
             TriggerFilters = filters,
             RunIntervalMinutes = Math.Clamp(policy.RunIntervalMinutes, 5, 7 * 24 * 60),
             StorageMode = RepositoryRetentionStorageModes.Normalize(policy.StorageMode),
+            PolicySource = RepositoryRetentionPolicySources.Normalize(policy.PolicySource),
             AutomaticCompactionWindowHours = policy.AutomaticCompactionEnabled
                 ? NormalizePositive(policy.AutomaticCompactionWindowHours)
                 : null
@@ -180,6 +252,23 @@ public sealed class UpdateRepositoryConfigurationHandler(
 
     private static long? NormalizePositive(long? value)
         => value is > 0 ? value : null;
+
+    private static bool RetentionPolicyEquals(RepositoryRetentionPolicyDto left, RepositoryRetentionPolicyDto right)
+        => left.HasLocalOverride == right.HasLocalOverride
+           && left.Enabled == right.Enabled
+           && left.MaxAgeDays == right.MaxAgeDays
+           && left.MaxSnapshots == right.MaxSnapshots
+           && left.MaxTotalSizeBytes == right.MaxTotalSizeBytes
+           && SetEquals(left.TriggerFilters.ToList(), right.TriggerFilters.ToList())
+           && left.RunIntervalMinutes == right.RunIntervalMinutes
+           && left.MaintenanceWindowStartHour == right.MaintenanceWindowStartHour
+           && left.MaintenanceWindowEndHour == right.MaintenanceWindowEndHour
+           && string.Equals(left.StorageMode, right.StorageMode, StringComparison.OrdinalIgnoreCase)
+           && left.AllowManualSnapshotCleanup == right.AllowManualSnapshotCleanup
+           && left.AutomaticCompactionEnabled == right.AutomaticCompactionEnabled
+           && left.AutomaticCompactionWindowHours == right.AutomaticCompactionWindowHours
+           && string.Equals(left.PolicySource, right.PolicySource, StringComparison.OrdinalIgnoreCase)
+           && left.SourceRepositoryId == right.SourceRepositoryId;
 
     private static IReadOnlyCollection<string> NormalizeExcludedPatterns(IEnumerable<string> values)
     {

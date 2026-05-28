@@ -15,14 +15,18 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
+using Veyra.Desktop.Services.Monitoring;
+using Veyra.Desktop.Services.Monitoring.Models;
 using Veyra.Desktop.Services.Navigation;
+using Veyra.Desktop.Services.Repositories;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Styling;
+using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
 
 namespace Veyra.Desktop.ViewModels.Pages.Dashboard;
@@ -37,11 +41,16 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private readonly ISensitiveActionGuard _sensitiveActionGuard;
     private readonly IUserProfileRepository _userProfiles;
     private readonly IConnectivityStatusService _connectivity;
+    private readonly IMonitoringControlService _monitoringControl;
+    private readonly IProcessResourceStatusStore _processResourceStatusStore;
     private readonly IRepositoryDashboardFilterStore _filterStore;
+    private readonly IRepositoryLiveSyncStatusStore _liveSyncStatusStore;
+    private readonly IRepositoryRelocationDetector _relocationDetector;
     private readonly LocalizationManager _localization;
     private readonly UserExperienceManager _experience;
     private readonly List<RepositoryCardViewModel> _allRepositories = [];
     private readonly Dictionary<int, RepositoryCardViewModel> _repositoryCardCache = [];
+    private ProcessResourceSnapshotDto? _processResourceSnapshot;
 
     private bool _presetsLoaded;
     private bool _suppressFilterApply;
@@ -58,6 +67,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     public event Func<int, Task>? OpenRepositorySettingsRequested;
 
     public ObservableCollection<RepositoryCardViewModel> Repositories { get; } = new();
+    public ObservableCollection<DashboardFolderTreeNodeViewModel> FolderTreeRoots { get; } = [];
     public ObservableCollection<RepositoryDashboardSavedFilterViewModel> SavedFilters { get; } = new();
 
     public ObservableCollection<string> AvailabilityFilters { get; } = ["all", "available", "unavailable"];
@@ -78,7 +88,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [ObservableProperty] private string _maxSizeMb = string.Empty;
     [ObservableProperty] private bool _onlyQueueIssues;
     [ObservableProperty] private bool _isAdvancedFiltersVisible;
+    [ObservableProperty] private bool _isSearchVisible;
+    [ObservableProperty] private bool _isCompactCards;
+    [ObservableProperty] private bool _isListView;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FolderTreeModeButtonText))]
+    private bool _isRepositoryTreeOnly;
+    [ObservableProperty] private int _repositoryGridColumns = 3;
     [ObservableProperty] private string _savedFilterName = string.Empty;
+    [ObservableProperty] private DashboardFolderTreeNodeViewModel? _selectedFolderNode;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFolderFilterActive))]
+    [NotifyPropertyChangedFor(nameof(EmptyTitle))]
+    [NotifyPropertyChangedFor(nameof(EmptyHint))]
+    private string _selectedFolderPath = string.Empty;
     [ObservableProperty] private RepositoryDashboardSavedFilterViewModel? _selectedSavedFilter;
     [ObservableProperty] private bool _hasSavedFilters;
     [ObservableProperty]
@@ -89,11 +112,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ConnectivityPanelDetail))]
     [NotifyPropertyChangedFor(nameof(ConnectivityPanelAccentColor))]
     [NotifyPropertyChangedFor(nameof(ConnectivityPanelBackgroundColor))]
+    [NotifyPropertyChangedFor(nameof(ConnectivityPanelIcon))]
     private bool _hasCloudAccess;
 
     public bool HasActiveFilters => GetActiveFilterCount() > 0;
-    public bool ShowConnectivityPanel => HasCloudAccess
-        && (_connectivity.Snapshot.State is ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable);
+    public bool ShowConnectivityPanel => HasCloudAccess;
     public string ConnectivityPanelText => _connectivity.Snapshot.State switch
     {
         ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_compact"),
@@ -116,10 +139,14 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         {
             ConnectivityState.InternetUnavailable => Loc.T("dashboard.mode.internet_unavailable_detail"),
             ConnectivityState.CloudUnavailable => Loc.T("dashboard.mode.cloud_unavailable_detail"),
-            _ => string.Empty
+            _ => Loc.T("dashboard.mode.cloud_connected_detail")
         };
     public string ConnectivityPanelAccentColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).AccentColor;
     public string ConnectivityPanelBackgroundColor => DescribeConnectivityVisuals(HasCloudAccess, _connectivity.Snapshot.State).BackgroundColor;
+    public string ConnectivityPanelIcon => HasCloudAccess &&
+        _connectivity.Snapshot.State is not (ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable)
+        ? ""   // checkmark — cloud connected
+        : "";  // warning — connectivity issue
     public bool ShowLoadingOverlay => IsLoading || IsTransientActionBusy;
     public string LoadingOverlayTitle => IsTransientActionBusy
         ? TransientActionTitle
@@ -130,6 +157,68 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     public string FilterButtonLabel => HasActiveFilters
         ? Loc.F("dashboard.filters_active_button", GetActiveFilterCount())
         : Loc.T("dashboard.filters_button");
+    public bool IsCardView => !IsListView;
+    public bool IsRegularCardView => !IsListView && !IsCompactCards;
+    public bool IsCompactCardView => !IsListView && IsCompactCards;
+    public string RepositoryViewModeLabel => IsListView
+        ? Loc.T("dashboard.view_mode_list")
+        : IsCompactCards
+            ? Loc.T("dashboard.view_mode_compact_cards")
+            : Loc.T("dashboard.view_mode_roomy_cards");
+    public string RepositoryViewModeIcon => IsListView ? "\uE8FD" : "\uE8A9";
+    public string FolderTreeModeButtonText => IsRepositoryTreeOnly
+        ? Loc.T("dashboard.folder_tree_all_folders")
+        : Loc.T("dashboard.folder_tree_repositories");
+    public bool IsFolderFilterActive => !string.IsNullOrWhiteSpace(SelectedFolderPath);
+    public string EmptyTitle => IsFolderFilterActive
+        ? Loc.T("dashboard.no_repositories_in_folder")
+        : Loc.T("dashboard.no_repositories");
+    public string EmptyHint => IsFolderFilterActive
+        ? Loc.F("dashboard.no_repositories_in_folder_hint", SelectedFolderPath)
+        : Loc.T("dashboard.no_repositories_hint");
+    public bool HasProcessLoadSnapshot => _processResourceSnapshot is not null;
+    public bool HasProcessLoadHistory => _processResourceStatusStore.History.Count > 0;
+    public string ProcessLoadSummaryText
+    {
+        get
+        {
+            if (_processResourceSnapshot is not { } snapshot)
+                return string.Empty;
+
+            return snapshot.CpuPercent.HasValue
+                ? Loc.F(
+                    "dashboard.process_load_summary",
+                    snapshot.CpuPercent.Value.ToString("0.#", CultureInfo.CurrentCulture),
+                    FormatSize(snapshot.WorkingSetBytes))
+                : Loc.F("dashboard.process_load_summary_cpu_pending", FormatSize(snapshot.WorkingSetBytes));
+        }
+    }
+
+    public string ProcessLoadDetailText
+    {
+        get
+        {
+            if (_processResourceSnapshot is not { } snapshot)
+                return string.Empty;
+
+            return Loc.F(
+                "dashboard.process_load_detail",
+                FormatSize(snapshot.PrivateMemoryBytes),
+                FormatSize(snapshot.ManagedHeapBytes),
+                snapshot.ThreadCount,
+                snapshot.HandleCount,
+                snapshot.CapturedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+        }
+    }
+
+    public string ProcessLoadPeakText
+        => ProcessResourceStatusPresenter.FormatPeakSummary(_processResourceStatusStore.History);
+
+    public string ProcessLoadHistoryText
+        => ProcessResourceStatusPresenter.FormatRecentHistory(_processResourceStatusStore.History);
+
+    public string ProcessLoadAccentColor => DescribeProcessLoadVisuals(_processResourceSnapshot).AccentColor;
+    public string ProcessLoadBackgroundColor => DescribeProcessLoadVisuals(_processResourceSnapshot).BackgroundColor;
     public string RepositoryResultsSummary
         => _allRepositories.Count == 0
             ? Loc.T("dashboard.results_none")
@@ -144,7 +233,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         ISensitiveActionGuard sensitiveActionGuard,
         IUserProfileRepository userProfiles,
         IConnectivityStatusService connectivity,
-        IRepositoryDashboardFilterStore filterStore)
+        IMonitoringControlService monitoringControl,
+        IProcessResourceStatusStore processResourceStatusStore,
+        IRepositoryDashboardFilterStore filterStore,
+        IRepositoryLiveSyncStatusStore liveSyncStatusStore,
+        IRepositoryRelocationDetector relocationDetector)
     {
         _mediator = mediator;
         _log = log;
@@ -152,12 +245,22 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         _sensitiveActionGuard = sensitiveActionGuard;
         _userProfiles = userProfiles;
         _connectivity = connectivity;
+        _monitoringControl = monitoringControl;
+        _processResourceStatusStore = processResourceStatusStore;
         _filterStore = filterStore;
+        _liveSyncStatusStore = liveSyncStatusStore;
+        _relocationDetector = relocationDetector;
         _localization = LocalizationManager.Instance;
         _experience = UserExperienceManager.Instance;
+        _processResourceSnapshot = _monitoringControl.IsEnabled
+            ? _processResourceStatusStore.Snapshot
+            : null;
         _localization.LanguageChanged += OnLanguageChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
         _connectivity.StatusChanged += OnConnectivityStatusChanged;
+        _liveSyncStatusStore.StatusChanged += OnLiveSyncStatusChanged;
+        _processResourceStatusStore.StatusChanged += OnProcessResourceStatusChanged;
+        _monitoringControl.StateChanged += OnMonitoringStateChanged;
     }
 
     [RelayCommand]
@@ -206,9 +309,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             });
 
             _allRepositories.AddRange(cards);
+            RebuildFolderTreeRoots();
 
             RebuildFormatTagFilters();
-            if (!HasActiveFilters)
+            var shouldApplyFilters = HasActiveFilters || IsFolderFilterActive;
+            if (!shouldApplyFilters)
             {
                 ReplaceVisibleRepositories(cards);
                 IsEmpty = Repositories.Count == 0;
@@ -216,7 +321,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
 
             IsLoading = false;
 
-            if (HasActiveFilters)
+            if (shouldApplyFilters)
                 await ApplyFilterAsync(debounce: false);
 
             _log.LogInformation(
@@ -246,6 +351,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     partial void OnMinSizeMbChanged(string value) => ApplyFilterIfNeeded();
     partial void OnMaxSizeMbChanged(string value) => ApplyFilterIfNeeded();
     partial void OnOnlyQueueIssuesChanged(bool value) => ApplyFilterIfNeeded();
+    partial void OnIsCompactCardsChanged(bool value) => NotifyLayoutModeChanged();
+    partial void OnIsListViewChanged(bool value) => NotifyLayoutModeChanged();
+    partial void OnSelectedFolderNodeChanged(DashboardFolderTreeNodeViewModel? value)
+    {
+        if (value?.IsPlaceholder == true)
+            return;
+
+        MarkSelectedFolderNode(value);
+        if (value is not null)
+            EnsureFolderChildrenLoaded(value);
+
+        SelectedFolderPath = value?.FullPath ?? string.Empty;
+        ApplyFilterIfNeeded(debounce: false);
+    }
 
     [RelayCommand]
     private async Task OpenRepositoryAsync(RepositoryCardViewModel? repo)
@@ -292,7 +411,139 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task AutoRelinkRepositoryAsync(RepositoryCardViewModel? repo)
+    {
+        if (repo is null)
+            return;
+
+        await RunTransientActionAsync(
+            "repo_relink.search_title",
+            "repo_relink.search_detail",
+            async () =>
+            {
+                ErrorMessage = null;
+
+                var repository = await _mediator.Send(new GetRepositoryDetailQuery(repo.Id));
+                if (repository is null)
+                {
+                    ErrorMessage = Loc.T("ui_error.repository_not_found");
+                    return;
+                }
+
+                var latestEntries = await _mediator.Send(new GetRepositoryLatestEntriesQuery(repo.Id));
+                var suggestion = await _relocationDetector.SuggestAsync(repository.DirectoryPath, latestEntries);
+
+                if (!suggestion.CanAutoRelink || string.IsNullOrWhiteSpace(suggestion.SuggestedPath))
+                {
+                    ErrorMessage = suggestion.IsAmbiguous
+                        ? Loc.T("repo_relink.error_auto_ambiguous")
+                        : Loc.T("repo_relink.error_auto_not_found");
+                    return;
+                }
+
+                var result = await _mediator.Send(RepositoryRelinkCommandFactory.Create(repository, suggestion.SuggestedPath));
+                if (!result.Success)
+                {
+                    ErrorMessage = UserFacingMessageLocalizer.LocalizeOrFallback(
+                        result.Error,
+                        "repo_relink.error_apply_failed");
+                    return;
+                }
+
+                await LoadAsync();
+            },
+            ex =>
+            {
+                _log.LogError(ex, "Failed to auto-relink repository from dashboard. RepositoryId {RepositoryId}", repo.Id);
+                ErrorMessage = UserFacingMessageLocalizer.LocalizeExceptionOrFallback(ex, "repo_relink.error_apply_failed");
+            });
+    }
+
+    [RelayCommand]
     private async Task AddRepositoryAsync()
+    {
+        await OpenCreateRepositoryWizardAsync(null);
+    }
+
+    [RelayCommand]
+    private async Task CreateRepositoryFromFolderAsync(DashboardFolderTreeNodeViewModel? folder)
+    {
+        if (folder is null || !folder.CanCreateRepository)
+            return;
+
+        await OpenCreateRepositoryWizardAsync(folder.FullPath);
+    }
+
+    [RelayCommand]
+    private async Task OpenRepositorySettingsFromFolderAsync(DashboardFolderTreeNodeViewModel? folder)
+    {
+        if (folder?.Repository is not { } repository)
+            return;
+
+        await OpenRepositorySettingsAsync(repository);
+    }
+
+    [RelayCommand]
+    private async Task DeleteRepositoryFromFolderAsync(DashboardFolderTreeNodeViewModel? folder)
+    {
+        if (folder?.Repository is not { } repository)
+            return;
+
+        try
+        {
+            if (!await ConfirmRepositoryDeletionAsync(repository))
+                return;
+
+            var guardResult = await _sensitiveActionGuard.AuthorizeIfRequiredLocalizedAsync(
+                "security.action_delete_repository",
+                "security.action_delete_repository_body",
+                [repository.Name]);
+
+            if (!guardResult.IsAllowed)
+            {
+                if (!guardResult.IsCancelled)
+                    ErrorMessage = guardResult.ErrorMessage ?? Loc.T("security.error_verification_failed");
+                return;
+            }
+
+            await RunTransientActionAsync(
+                "dashboard.loading_title",
+                "dashboard.loading_detail",
+                async () =>
+                {
+                    await _mediator.Send(new DeleteRepositoryCommand(repository.Id));
+                    await LoadAsync();
+                },
+                ex =>
+                {
+                    _log.LogError(ex, "Failed to delete repository from dashboard tree. RepositoryId {RepositoryId}", repository.Id);
+                    ErrorMessage = Loc.T("repo_settings.error_delete_failed");
+                });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to delete repository from dashboard tree. RepositoryId {RepositoryId}", repository.Id);
+            ErrorMessage = Loc.T("repo_settings.error_delete_failed");
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleRepositoryTreeMode()
+    {
+        IsRepositoryTreeOnly = !IsRepositoryTreeOnly;
+        ClearFolderSelection();
+        RebuildFolderTreeRoots();
+    }
+
+    public void ClearFolderSelection()
+    {
+        SelectedFolderNode = null;
+        MarkSelectedFolderNode(null);
+        SelectedFolderPath = string.Empty;
+        ApplyFilterIfNeeded(debounce: false);
+    }
+
+    private async Task OpenCreateRepositoryWizardAsync(string? initialDirectoryPath)
     {
         try
         {
@@ -308,6 +559,12 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             }
 
             var wizard = _windows.Create<CreateRepositoryWindow>();
+            if (!string.IsNullOrWhiteSpace(initialDirectoryPath)
+                && wizard.DataContext is Veyra.Desktop.ViewModels.Windows.CreateRepositoryWindowViewModel createRepositoryVm)
+            {
+                createRepositoryVm.ConfigureInitialDirectory(initialDirectoryPath, lockDirectory: true);
+            }
+
             var owner = _windows.GetActiveWindow();
             _log.LogInformation("Opening create repository window from dashboard");
 
@@ -325,8 +582,78 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         }
     }
 
+    private async Task<bool> ConfirmRepositoryDeletionAsync(RepositoryCardViewModel repository)
+    {
+        var owner = _windows.GetActiveWindow();
+        if (owner is null)
+            return false;
+
+        var window = _windows.Create<ConfirmActionWindow>();
+        if (window.DataContext is ConfirmActionWindowViewModel vm)
+        {
+            vm.ConfigureLocalized(
+                "repo_settings.delete_confirm_title",
+                "repo_settings.delete_confirm_body",
+                [repository.Name],
+                "repo_settings.delete_confirm_warning",
+                "repo_settings.delete_confirm_button");
+        }
+
+        await _windows.ShowDialogAsync(window, owner);
+        return window.DataContext is ConfirmActionWindowViewModel resultVm && resultVm.IsConfirmed;
+    }
+
     [RelayCommand]
     private void ToggleAdvancedFilters() => IsAdvancedFiltersVisible = !IsAdvancedFiltersVisible;
+
+    [RelayCommand]
+    private void ToggleSearch() => IsSearchVisible = !IsSearchVisible;
+
+    [RelayCommand]
+    private void ToggleCardDensity() => IsCompactCards = !IsCompactCards;
+
+    [RelayCommand]
+    private void ToggleViewMode() => IsListView = !IsListView;
+
+    [RelayCommand]
+    private void SelectRoomyCardsView()
+    {
+        IsListView = false;
+        IsCompactCards = false;
+    }
+
+    [RelayCommand]
+    private void SelectCompactCardsView()
+    {
+        IsListView = false;
+        IsCompactCards = true;
+    }
+
+    [RelayCommand]
+    private void SelectListView()
+    {
+        IsListView = true;
+    }
+
+    public void UpdateRepositoryGridColumns(double availableWidth)
+    {
+        if (availableWidth <= 0)
+            return;
+
+        var minimumCardWidth = IsCompactCards ? 280 : 360;
+        var columns = Math.Clamp((int)Math.Floor(availableWidth / minimumCardWidth), 1, 3);
+        if (RepositoryGridColumns != columns)
+            RepositoryGridColumns = columns;
+    }
+
+    public void ExpandFolderNode(DashboardFolderTreeNodeViewModel? node)
+    {
+        if (node is null || node.IsPlaceholder)
+            return;
+
+        node.IsExpanded = true;
+        EnsureFolderChildrenLoaded(node);
+    }
 
     [RelayCommand]
     private void ClearAdvancedFilters()
@@ -440,6 +767,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         var minSizeMb = ParseNullableDouble(MinSizeMb) ?? directives.MinSizeMb;
         var maxSizeMb = ParseNullableDouble(MaxSizeMb) ?? directives.MaxSizeMb;
         var onlyQueueIssues = OnlyQueueIssues;
+        var selectedFolderPath = SelectedFolderPath;
         var source = _allRepositories.ToArray();
         var (requestId, ct) = BeginFilterRequest();
 
@@ -468,7 +796,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                         formatTagFilter,
                         minSizeMb,
                         maxSizeMb,
-                        onlyQueueIssues))
+                        onlyQueueIssues,
+                        selectedFolderPath))
                 {
                     return new List<RepositoryCardViewModel>(source);
                 }
@@ -490,6 +819,9 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                         continue;
 
                     if (!MatchesRepositorySize(repository, minSizeMb, maxSizeMb))
+                        continue;
+
+                    if (!MatchesRepositoryFolder(repository, selectedFolderPath))
                         continue;
 
                     if (onlyQueueIssues
@@ -568,6 +900,195 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     {
         SyncCollection(Repositories, repositories);
         NotifyDashboardChromeStateChanged();
+    }
+
+    private void RebuildFolderTreeRoots()
+    {
+        var trackedPaths = _allRepositories
+            .Select(card => NormalizeDirectoryPath(card.DirectoryPath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var roots = IsRepositoryTreeOnly
+            ? BuildRepositoryOnlyTreeRoots(trackedPaths)
+            : DriveInfo.GetDrives()
+                .Where(drive => drive.IsReady)
+                .OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(drive => CreateFolderNode(drive.Name, trackedPaths, isDrive: true))
+                .Where(node => node is not null)
+                .Cast<DashboardFolderTreeNodeViewModel>()
+                .ToList();
+
+        FolderTreeRoots.Clear();
+        foreach (var root in roots)
+        {
+            if (!IsRepositoryTreeOnly)
+                AddPlaceholderIfExpandable(root);
+
+            FolderTreeRoots.Add(root);
+        }
+
+        MarkSelectedFolderNode(null);
+    }
+
+    private List<DashboardFolderTreeNodeViewModel> BuildRepositoryOnlyTreeRoots(IReadOnlyCollection<string> trackedPaths)
+    {
+        var nodes = trackedPaths
+            .Select(path => CreateFolderNode(path, trackedPaths))
+            .Where(node => node is not null)
+            .Cast<DashboardFolderTreeNodeViewModel>()
+            .ToDictionary(node => NormalizeDirectoryPath(node.FullPath), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in nodes.Values)
+        {
+            node.IsLoaded = true;
+            node.IsExpanded = true;
+        }
+
+        var roots = new List<DashboardFolderTreeNodeViewModel>();
+        foreach (var node in nodes.Values.OrderBy(node => node.FullPath.Length))
+        {
+            var parent = nodes.Values
+                .Where(candidate => !ReferenceEquals(candidate, node)
+                                    && IsSameOrChildPath(candidate.FullPath, node.FullPath))
+                .OrderByDescending(candidate => candidate.FullPath.Length)
+                .FirstOrDefault();
+
+            if (parent is null)
+                roots.Add(node);
+            else
+                parent.Children.Add(node);
+        }
+
+        SortRepositoryOnlyNodes(roots);
+        return roots;
+    }
+
+    private static void SortRepositoryOnlyNodes(IList<DashboardFolderTreeNodeViewModel> nodes)
+    {
+        var sorted = nodes
+            .OrderBy(node => node.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        nodes.Clear();
+        foreach (var node in sorted)
+        {
+            SortRepositoryOnlyNodes(node.Children);
+            nodes.Add(node);
+        }
+    }
+
+    private DashboardFolderTreeNodeViewModel? CreateFolderNode(
+        string path,
+        IReadOnlyCollection<string> trackedPaths,
+        bool isDrive = false)
+    {
+        var normalizedPath = NormalizeDirectoryPath(path);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return null;
+
+        var name = isDrive
+            ? normalizedPath
+            : Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+        if (string.IsNullOrWhiteSpace(name))
+            name = normalizedPath;
+
+        var isTracked = trackedPaths.Any(trackedPath => PathsEqual(trackedPath, normalizedPath));
+        var hasTrackedDescendant = trackedPaths.Any(trackedPath => IsSameOrChildPath(normalizedPath, trackedPath));
+        var isInsideTrackedRepository = trackedPaths.Any(trackedPath =>
+            !PathsEqual(trackedPath, normalizedPath)
+            && IsSameOrChildPath(trackedPath, normalizedPath));
+        var repository = _allRepositories.FirstOrDefault(card => PathsEqual(card.DirectoryPath, normalizedPath));
+        return new DashboardFolderTreeNodeViewModel(
+            name,
+            normalizedPath,
+            isDrive,
+            isTracked,
+            hasTrackedDescendant,
+            isInsideTrackedRepository,
+            repository);
+    }
+
+    private void EnsureFolderChildrenLoaded(DashboardFolderTreeNodeViewModel node)
+    {
+        if (node.IsLoaded || node.IsPlaceholder)
+            return;
+
+        var trackedPaths = _allRepositories
+            .Select(card => NormalizeDirectoryPath(card.DirectoryPath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var children = EnumerateSafeDirectories(node.FullPath)
+            .Select(path => CreateFolderNode(path, trackedPaths))
+            .Where(child => child is not null)
+            .Cast<DashboardFolderTreeNodeViewModel>()
+            .OrderByDescending(child => child.IsTracked)
+            .ThenByDescending(child => child.IsInsideTrackedRepository)
+            .ThenByDescending(child => child.HasTrackedDescendant)
+            .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(240)
+            .ToList();
+
+        node.Children.Clear();
+        foreach (var child in children)
+        {
+            AddPlaceholderIfExpandable(child);
+            node.Children.Add(child);
+        }
+
+        node.IsLoaded = true;
+    }
+
+    private void AddPlaceholderIfExpandable(DashboardFolderTreeNodeViewModel node)
+    {
+        if (node.IsPlaceholder || !Directory.Exists(node.FullPath))
+            return;
+
+        try
+        {
+            if (!Directory.EnumerateDirectories(node.FullPath).Any())
+                return;
+        }
+        catch
+        {
+            return;
+        }
+
+        node.Children.Add(new DashboardFolderTreeNodeViewModel("...", string.Empty, false, false, false, false, isPlaceholder: true));
+    }
+
+    private static IEnumerable<string> EnumerateSafeDirectories(string path)
+    {
+        try
+        {
+            return Directory.EnumerateDirectories(path);
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private void MarkSelectedFolderNode(DashboardFolderTreeNodeViewModel? selected)
+    {
+        foreach (var node in EnumerateFolderNodes(FolderTreeRoots))
+            node.IsSelected = ReferenceEquals(node, selected);
+    }
+
+    private static IEnumerable<DashboardFolderTreeNodeViewModel> EnumerateFolderNodes(
+        IEnumerable<DashboardFolderTreeNodeViewModel> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+
+            foreach (var child in EnumerateFolderNodes(node.Children))
+                yield return child;
+        }
     }
 
     private void ApplyPreset(RepositoryDashboardFilterPreset preset)
@@ -733,15 +1254,17 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         if (_repositoryCardCache.TryGetValue(repository.Id, out var cached))
         {
             UpdateRepositoryCard(cached, repository, hasCloudAccess, connectivityState);
+            ApplyLiveSyncState(cached, _liveSyncStatusStore.Get(repository.Id));
             return cached;
         }
 
         var created = CreateRepositoryCard(repository, hasCloudAccess, connectivityState);
+        ApplyLiveSyncState(created, _liveSyncStatusStore.Get(repository.Id));
         _repositoryCardCache[repository.Id] = created;
         return created;
     }
 
-    private static RepositoryCardViewModel CreateRepositoryCard(
+    private RepositoryCardViewModel CreateRepositoryCard(
         RepositoryDto repository,
         bool hasCloudAccess,
         ConnectivityState connectivityState)
@@ -776,10 +1299,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             StatusColor = statusBadge.Color,
             LastActivity = FormatLastActivity(repository.LastScannedAt),
             FileCount = repository.FileCount,
-            VersionCount = repository.VersionCount,
+            VersionCount = repository.ChangedVersionCount,
             TotalSizeBytes = repository.TotalSizeBytes,
             SizeDisplay = FormatSize(repository.TotalSizeBytes),
             ShowCloudSection = hasCloudAccess,
+            ShowLiveSyncSection = _monitoringControl.IsEnabled,
             CloudSyncStateKey = syncStateKey,
             CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus, hasCloudAccess, connectivityState),
             CloudModeText = FormatCloudMode(hasCloudAccess, connectivityState, syncStateKey),
@@ -804,7 +1328,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return card;
     }
 
-    private static void UpdateRepositoryCard(
+    private void UpdateRepositoryCard(
         RepositoryCardViewModel card,
         RepositoryDto repository,
         bool hasCloudAccess,
@@ -837,10 +1361,11 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         card.StatusColor = statusBadge.Color;
         card.LastActivity = FormatLastActivity(repository.LastScannedAt);
         card.FileCount = repository.FileCount;
-        card.VersionCount = repository.VersionCount;
+        card.VersionCount = repository.ChangedVersionCount;
         card.TotalSizeBytes = repository.TotalSizeBytes;
         card.SizeDisplay = FormatSize(repository.TotalSizeBytes);
         card.ShowCloudSection = hasCloudAccess;
+        card.ShowLiveSyncSection = _monitoringControl.IsEnabled;
         card.CloudSyncStateKey = syncStateKey;
         card.CloudSyncStatus = FormatCloudSyncStatus(repository.CloudSync?.LastStatus, hasCloudAccess, connectivityState);
         card.CloudModeText = FormatCloudMode(hasCloudAccess, connectivityState, syncStateKey);
@@ -1072,6 +1597,14 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return true;
     }
 
+    private static bool MatchesRepositoryFolder(RepositoryCardViewModel repository, string? selectedFolderPath)
+    {
+        if (string.IsNullOrWhiteSpace(selectedFolderPath))
+            return true;
+
+        return IsSameOrChildPath(selectedFolderPath, repository.DirectoryPath);
+    }
+
     private static bool IsPassThroughDashboardFilter(
         string textQuery,
         string availabilityFilter,
@@ -1079,7 +1612,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         string formatTagFilter,
         double? minSizeMb,
         double? maxSizeMb,
-        bool onlyQueueIssues)
+        bool onlyQueueIssues,
+        string? selectedFolderPath)
     {
         return string.IsNullOrWhiteSpace(textQuery)
                && availabilityFilter == "all"
@@ -1087,7 +1621,47 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                && formatTagFilter == "all"
                && minSizeMb is not > 0
                && maxSizeMb is not > 0
-               && !onlyQueueIssues;
+               && !onlyQueueIssues
+               && string.IsNullOrWhiteSpace(selectedFolderPath);
+    }
+
+    private static bool PathsEqual(string? left, string? right)
+        => string.Equals(NormalizeDirectoryPath(left), NormalizeDirectoryPath(right), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSameOrChildPath(string? parentPath, string? childPath)
+    {
+        var parent = NormalizeDirectoryPath(parentPath);
+        var child = NormalizeDirectoryPath(childPath);
+        if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(child))
+            return false;
+
+        if (string.Equals(parent, child, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var parentWithSeparator = parent.EndsWith(Path.DirectorySeparatorChar)
+            ? parent
+            : parent + Path.DirectorySeparatorChar;
+        return child.StartsWith(parentWithSeparator, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeDirectoryPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return string.Empty;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetPathRoot(fullPath);
+            if (string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+                return fullPath;
+
+            return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
     }
 
     private static string FormatLastActivity(DateTime? utc)
@@ -1117,7 +1691,8 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                 _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => Loc.T("dashboard.sync.simple.in_progress"),
                 "queued" or "syncing" or "syncing_prepare" or "syncing_snapshot" or "syncing_finalize" or "offline_retry" or "retrying"
                     => Loc.T("dashboard.sync.simple.in_progress"),
-                "auth_required" or "conflict" or "dead_letter" or "failed" => Loc.T("dashboard.sync.simple.attention"),
+                "auth_required" or "conflict" or "dead_letter" or "failed" or "paused" or "cancelled" => Loc.T("dashboard.sync.simple.attention"),
+                "linked" => Loc.T("dashboard.sync.simple.ready"),
                 _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.simple.ready"),
                 _ => Loc.T("dashboard.sync.simple.local_only")
             };
@@ -1136,10 +1711,21 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             "conflict" => Loc.T("dashboard.sync.conflict"),
             "dead_letter" => Loc.T("dashboard.sync.dead_letter"),
             "failed" => Loc.T("dashboard.sync.failed"),
+            "linked" => Loc.T("dashboard.sync.linked"),
+            "paused" => Loc.T("dashboard.sync.paused"),
+            "cancelled" => Loc.T("dashboard.sync.cancelled"),
             "skipped" => Loc.T("dashboard.sync.skipped"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.synced"),
-            _ => status.Replace('_', ' ')
+            _ => Loc.F("dashboard.sync.unknown_status", HumanizeStatusToken(status))
         };
+    }
+
+    private static string HumanizeStatusToken(string status)
+    {
+        var text = status.Trim().Replace('_', ' ').Replace('-', ' ');
+        return string.Join(" ", text
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => char.ToUpperInvariant(segment[0]) + segment[1..].ToLowerInvariant()));
     }
 
     private static string FormatSyncingUploadStatus(string? status)
@@ -1261,6 +1847,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         return (Loc.T("dashboard.sync.simple.local_only"), "#4CAF50");
     }
 
+    private static void ApplyLiveSyncState(
+        RepositoryCardViewModel card,
+        RepositoryLiveSyncStatusSnapshot? status)
+    {
+        var visuals = RepositoryLiveSyncStatusPresenter.DescribeVisualState(status);
+        card.LiveSyncStateText = RepositoryLiveSyncStatusPresenter.FormatStateText(status);
+        card.LiveSyncModeText = RepositoryLiveSyncStatusPresenter.FormatModeText(status);
+        card.LiveSyncSummaryText = RepositoryLiveSyncStatusPresenter.FormatSummaryText(status);
+        card.LiveSyncDetailText = RepositoryLiveSyncStatusPresenter.FormatDetailText(status);
+        card.LiveSyncAccentColor = visuals.AccentColor;
+        card.LiveSyncBorderColor = visuals.AccentColor;
+        card.LiveSyncBackgroundColor = visuals.BackgroundColor;
+    }
+
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         RefreshLocalizationState();
@@ -1274,6 +1874,37 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     private void OnConnectivityStatusChanged(object? sender, EventArgs e)
     {
         Dispatcher.UIThread.Post(RefreshLocalizationState);
+    }
+
+    private void OnLiveSyncStatusChanged(object? sender, RepositoryLiveSyncStatusChangedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_repositoryCardCache.TryGetValue(e.RepositoryId, out var card))
+                ApplyLiveSyncState(card, e.Snapshot);
+        });
+    }
+
+    private void OnMonitoringStateChanged(bool enabled)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _processResourceSnapshot = enabled ? _processResourceStatusStore.Snapshot : null;
+
+            foreach (var card in _repositoryCardCache.Values)
+                card.ShowLiveSyncSection = enabled;
+
+            NotifyProcessLoadStateChanged();
+        });
+    }
+
+    private void OnProcessResourceStatusChanged(object? sender, ProcessResourceStatusChangedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _processResourceSnapshot = _monitoringControl.IsEnabled ? e.Snapshot : null;
+            NotifyProcessLoadStateChanged();
+        });
     }
 
     private void RefreshLocalizationState()
@@ -1295,6 +1926,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             card.StatusColor = statusBadge.Color;
             card.LastActivity = FormatLastActivity(card.LastActivityUtc);
             card.ShowCloudSection = HasCloudAccess;
+            card.ShowLiveSyncSection = _monitoringControl.IsEnabled;
             card.CloudSyncStatus = FormatCloudSyncStatus(card.CloudSyncStateKey, HasCloudAccess, _connectivity.Snapshot.State);
             card.CloudModeText = FormatCloudMode(HasCloudAccess, _connectivity.Snapshot.State, card.CloudSyncStateKey);
             card.CloudModeColor = FormatCloudModeColor(HasCloudAccess, _connectivity.Snapshot.State);
@@ -1306,6 +1938,7 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
                 card.QueueRetryCount,
                 card.QueueConflictCount,
                 card.QueueDeadLetterCount);
+            ApplyLiveSyncState(card, _liveSyncStatusStore.Get(card.Id));
             card.RefreshLocalization();
         }
 
@@ -1318,6 +1951,20 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
         OnPropertyChanged(nameof(ConnectivityPanelDetail));
         OnPropertyChanged(nameof(ConnectivityPanelAccentColor));
         OnPropertyChanged(nameof(ConnectivityPanelBackgroundColor));
+        OnPropertyChanged(nameof(ConnectivityPanelIcon));
+        NotifyProcessLoadStateChanged();
+    }
+
+    private void NotifyProcessLoadStateChanged()
+    {
+        OnPropertyChanged(nameof(HasProcessLoadSnapshot));
+        OnPropertyChanged(nameof(HasProcessLoadHistory));
+        OnPropertyChanged(nameof(ProcessLoadSummaryText));
+        OnPropertyChanged(nameof(ProcessLoadDetailText));
+        OnPropertyChanged(nameof(ProcessLoadPeakText));
+        OnPropertyChanged(nameof(ProcessLoadHistoryText));
+        OnPropertyChanged(nameof(ProcessLoadAccentColor));
+        OnPropertyChanged(nameof(ProcessLoadBackgroundColor));
     }
 
     private void RefreshFilterOptionBindings()
@@ -1381,10 +2028,23 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasActiveFilters));
         OnPropertyChanged(nameof(FilterButtonLabel));
+        OnPropertyChanged(nameof(FolderTreeModeButtonText));
+        OnPropertyChanged(nameof(RepositoryViewModeLabel));
         OnPropertyChanged(nameof(RepositoryResultsSummary));
+        OnPropertyChanged(nameof(EmptyTitle));
+        OnPropertyChanged(nameof(EmptyHint));
         OnPropertyChanged(nameof(ShowLoadingOverlay));
         OnPropertyChanged(nameof(LoadingOverlayTitle));
         OnPropertyChanged(nameof(LoadingOverlayDetail));
+    }
+
+    private void NotifyLayoutModeChanged()
+    {
+        OnPropertyChanged(nameof(IsCardView));
+        OnPropertyChanged(nameof(IsRegularCardView));
+        OnPropertyChanged(nameof(IsCompactCardView));
+        OnPropertyChanged(nameof(RepositoryViewModeLabel));
+        OnPropertyChanged(nameof(RepositoryViewModeIcon));
     }
 
     partial void OnIsLoadingChanged(bool value)
@@ -1428,6 +2088,21 @@ public sealed partial class RepositoryDashboardViewModel : ObservableObject
             TransientActionTitle = string.Empty;
             TransientActionDetail = string.Empty;
         }
+    }
+
+    private static (string AccentColor, string BackgroundColor) DescribeProcessLoadVisuals(ProcessResourceSnapshotDto? snapshot)
+    {
+        if (snapshot is null)
+            return ("#6EA8FF", "#1A6EA8FF");
+
+        var cpu = snapshot.CpuPercent ?? 0;
+        if (cpu >= 75 || snapshot.WorkingSetBytes >= 1024L * 1024 * 1024)
+            return ("#F97316", "#1AF97316");
+
+        if (cpu >= 40 || snapshot.WorkingSetBytes >= 700L * 1024 * 1024)
+            return ("#F59E0B", "#1AF59E0B");
+
+        return ("#4ADE80", "#164ADE80");
     }
 
     private static string FormatSize(long bytes)

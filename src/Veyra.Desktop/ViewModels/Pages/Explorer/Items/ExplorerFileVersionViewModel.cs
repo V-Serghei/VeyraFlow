@@ -8,6 +8,7 @@ namespace Veyra.Desktop.ViewModels.Pages.Explorer;
 public sealed partial class ExplorerFileVersionViewModel : ObservableObject
 {
     public long FileVersionId { get; init; }
+    public int VersionOrdinal { get; init; }
     public DateTime CreatedAtUtc { get; init; }
     public long SizeBytes { get; init; }
     public bool IsDeletionMarker { get; init; }
@@ -15,7 +16,7 @@ public sealed partial class ExplorerFileVersionViewModel : ObservableObject
     public string ContentHashSha256 { get; init; } = string.Empty;
     public string RelativePath { get; init; } = string.Empty;
 
-    public string VersionName => $"v{FileVersionId}";
+    public string VersionName => $"v{VersionOrdinal}";
 
     public string Title
     {

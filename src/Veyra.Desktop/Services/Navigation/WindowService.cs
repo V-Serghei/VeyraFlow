@@ -29,6 +29,7 @@ public sealed class WindowService : IWindowService
         try
         {
             var window = scope.ServiceProvider.GetRequiredService<T>();
+            AppWindowIconProvider.Apply(window);
             if (!_windowScopes.TryAdd(window, scope))
             {
                 scope.Dispose();
@@ -74,6 +75,7 @@ public sealed class WindowService : IWindowService
 
         if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            AppWindowIconProvider.Apply(newMain);
             desktop.MainWindow = newMain;
             newMain.Show();
             toClose?.Close();

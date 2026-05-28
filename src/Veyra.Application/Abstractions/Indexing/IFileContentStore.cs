@@ -10,5 +10,10 @@ public interface IFileContentStore
         IReadOnlyList<StoredFileBlockDto> blocks,
         string targetPath,
         bool overwriteExisting,
+        string? expectedContentHash = null,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<string>> FindMissingBlocksAsync(
+        IReadOnlyCollection<string> blockStorageKeys,
         CancellationToken ct = default);
 }

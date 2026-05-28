@@ -16,7 +16,7 @@
 
     <Grid Margin="16" RowDefinitions="Auto,*" RowSpacing="12">
         <Border Grid.Row="0" Classes="toolbar" Padding="14,12">
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <Border Classes="badge">
                         <TextBlock Text="{loc:Tr app.brand}"
@@ -31,6 +31,21 @@
                            Classes="muted"
                            HorizontalAlignment="Right"
                            VerticalAlignment="Center"/>
+
+                <Button Grid.Column="2"
+                        MinWidth="58"
+                        Height="34"
+                        FontWeight="SemiBold"
+                        Command="{Binding ToggleLanguageCommand}"
+                        ToolTip.Tip="{loc:Tr main.toggle_language}"
+                        Classes="subtle responsive-icon">
+                    <Button.Content>
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE909;"/>
+                            <TextBlock Classes="button-label" Text="{Binding LanguageToggleLabel}"/>
+                        </StackPanel>
+                    </Button.Content>
+                </Button>
             </Grid>
         </Border>
 
@@ -39,6 +54,5 @@
         </Border>
     </Grid>
 </Window>
-
 
 

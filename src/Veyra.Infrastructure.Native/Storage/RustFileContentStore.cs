@@ -144,6 +144,7 @@ internal sealed class RustFileContentStore : IFileContentStore
         IReadOnlyList<StoredFileBlockDto> blocks,
         string targetPath,
         bool overwriteExisting,
+        string? expectedContentHash = null,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -157,41 +158,120 @@ internal sealed class RustFileContentStore : IFileContentStore
 
         await EnsureArchivedBlocksAvailableAsync(blocks, ct);
 
+        long written;
         if (!_nativeRestoreAvailable)
-            return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+        {
+            written = await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+        }
+        else
+        {
+            try
+            {
+                written = await _scheduler.RunAsync(() =>
+                {
+                    var payload = blocks
+                        .OrderBy(b => b.Sequence)
+                        .Select(b => new RestoreBlockPayload
+                        {
+                            BlockStorageKey = b.BlockStorageKey,
+                            LengthBytes = b.LengthBytes
+                        })
+                        .ToList();
+
+                    var json = JsonSerializer.Serialize(payload);
+                    return VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
+                }, ct);
+
+                _log.LogInformation(
+                    "Restored file from native block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
+                    fullTarget,
+                    written,
+                    blocks.Count);
+                NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.RestoreBlocks);
+            }
+            catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
+            {
+                NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RestoreBlocks);
+                DisableNativeRestore(ex, fullTarget);
+                written = await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(expectedContentHash))
+            await ValidateRestoredFileHashAsync(fullTarget, expectedContentHash, ct);
+
+        return written;
+    }
+
+    public async Task<IReadOnlyList<string>> FindMissingBlocksAsync(
+        IReadOnlyCollection<string> blockStorageKeys,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var keys = blockStorageKeys
+            .Where(static key => !string.IsNullOrWhiteSpace(key))
+            .Select(static key => key.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (keys.Count == 0)
+            return Array.Empty<string>();
 
         try
         {
-            var written = await _scheduler.RunAsync(() =>
-            {
-                var payload = blocks
-                    .OrderBy(b => b.Sequence)
-                    .Select(b => new RestoreBlockPayload
-                    {
-                        BlockStorageKey = b.BlockStorageKey,
-                        LengthBytes = b.LengthBytes
-                    })
-                    .ToList();
-
-                var json = JsonSerializer.Serialize(payload);
-                return VeyraCoreNative.RestoreFileBlocks(_storeRoot, json, fullTarget, overwriteExisting);
-            }, ct);
-
-            _log.LogInformation(
-                "Restored file from native block-store. Target {Target}. Bytes {Bytes}. Blocks {Blocks}",
-                fullTarget,
-                written,
-                blocks.Count);
-            NativeFeatureUsageTracker.MarkNativeHit(NativeFeatureUsageTracker.RestoreBlocks);
-
-            return written;
+            await _snapshotArchive.EnsureArchivedBlocksAvailableAsync(keys, ct);
         }
-        catch (Exception ex) when (IsNativeBlocksUnavailable(ex))
+        catch (Exception ex)
         {
-            NativeFeatureUsageTracker.MarkManagedFallback(NativeFeatureUsageTracker.RestoreBlocks);
-            DisableNativeRestore(ex, fullTarget);
-            return await RestoreFileManagedAsync(blocks, fullTarget, overwriteExisting, ct);
+            _log.LogWarning(ex, "Archived snapshot hydration check failed before block availability scan.");
         }
+
+        var missing = new List<string>();
+        foreach (var key in keys)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var path = ResolveBlockPath(key);
+            if (path is null || !File.Exists(path))
+                missing.Add(key);
+        }
+
+        return missing;
+    }
+
+    private async Task ValidateRestoredFileHashAsync(string fullTarget, string expectedHash, CancellationToken ct)
+    {
+        string actualHash;
+        await using (var stream = new FileStream(
+            fullTarget,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: DefaultChunkSize,
+            useAsync: true))
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var hashBytes = await sha.ComputeHashAsync(stream, ct);
+            actualHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+        }
+
+        if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            _log.LogError(
+                "Post-restore hash mismatch. Target {Target}. Expected {Expected}. Actual {Actual}",
+                fullTarget,
+                expectedHash,
+                actualHash);
+            throw new InvalidOperationException(
+                $"Restored file hash does not match the expected content hash. " +
+                $"The file at '{fullTarget}' may be corrupted.");
+        }
+
+        _log.LogDebug(
+            "Post-restore hash validated. Target {Target}. Hash {Hash}",
+            fullTarget,
+            actualHash);
     }
 
     private async Task EnsureArchivedBlocksAvailableAsync(
@@ -604,6 +684,16 @@ internal sealed class RustFileContentStore : IFileContentStore
         var p2 = normalized.Length >= 4 ? normalized[2..4] : "00";
 
         return Path.Combine(_storeRoot, "blocks", p1, p2, $"{normalized}.zst");
+    }
+
+    private string? ResolveBlockPath(string key)
+    {
+        if (key.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
+            return GetManagedBlockPath(key[ManagedHashPrefix.Length..]);
+
+        return IsNativeBlockHash(key)
+            ? GetNativeBlockPath(key)
+            : null;
     }
 
     private static bool IsNativeBlockHash(string hash)

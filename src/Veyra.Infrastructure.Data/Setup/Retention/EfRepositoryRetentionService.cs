@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
@@ -17,6 +18,56 @@ public sealed class EfRepositoryRetentionService(
     : IRepositoryRetentionService
 {
     private const string ManagedHashPrefix = "sha256-";
+    private sealed record RetentionDefaultsUserSettings(
+        bool Enabled,
+        int? MaxAgeDays,
+        int? MaxSnapshots,
+        long? MaxTotalSizeBytes,
+        string? TriggerFilter,
+        int RunIntervalMinutes,
+        string StorageMode = RepositoryRetentionStorageModes.Delete,
+        int? MaintenanceWindowStartHour = null,
+        int? MaintenanceWindowEndHour = null);
+    private static readonly string[] ProtectedRetentionTagAliases =
+    [
+        "keep",
+        "keephistory",
+        "keepforever",
+        "protected",
+        "protect",
+        "preserve",
+        "important",
+        "no-delete",
+        "nodelete",
+        "no-cleanup",
+        "nocleanup",
+        "no-retention",
+        "noretention",
+        "never-delete",
+        "neverdelete",
+        "save",
+        "\u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C",
+        "\u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C\u043D\u0430\u0432\u0441\u0435\u0433\u0434\u0430",
+        "\u0437\u0430\u0449\u0438\u0442\u0430",
+        "\u0437\u0430\u0449\u0438\u0449\u0435\u043D\u043E",
+        "\u0432\u0430\u0436\u043D\u043E\u0435",
+        "\u0432\u0430\u0436\u043D\u044B\u0439",
+        "\u043D\u0435\u0443\u0434\u0430\u043B\u044F\u0442\u044C",
+        "\u043D\u0438\u043A\u043E\u0433\u0434\u0430\u043D\u0435\u0443\u0434\u0430\u043B\u044F\u0442\u044C",
+        "\u043D\u0430\u0432\u0441\u0435\u0433\u0434\u0430",
+        "сохранить",
+        "сохранитьнавсегда",
+        "защита",
+        "защищено",
+        "важное",
+        "важный",
+        "неудалять",
+        "никогданеудалять",
+        "навсегда"
+    ];
+    private static readonly HashSet<string> ProtectedRetentionTags = ProtectedRetentionTagAliases
+        .Select(NormalizeRetentionTagForComparison)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public async Task<IReadOnlyList<RepositoryRetentionRunResultDto>> RunDueRetentionAsync(
         IProgress<RepositoryRetentionProgressDto>? progress = null,
@@ -24,32 +75,26 @@ public sealed class EfRepositoryRetentionService(
     {
         var nowUtc = DateTime.UtcNow;
         var nowLocal = DateTime.Now;
-        var dueRepos = await db.Set<Repository>()
-            .Where(r => !r.IsDeleted && r.RetentionEnabled)
-            .Select(r => new
-            {
-                r.Id,
-                r.RetentionRunIntervalMinutes,
-                r.RetentionLastRunAt,
-                r.RetentionMaintenanceWindowStartHour,
-                r.RetentionMaintenanceWindowEndHour
-            })
-            .ToListAsync(ct);
+        var repositories = await LoadRepositoriesForPolicyResolutionAsync(ct);
 
         var results = new List<RepositoryRetentionRunResultDto>();
 
-        foreach (var repo in dueRepos)
+        foreach (var repo in repositories)
         {
             ct.ThrowIfCancellationRequested();
 
-            var intervalMinutes = Math.Clamp(repo.RetentionRunIntervalMinutes, 5, 7 * 24 * 60);
+            var effectivePolicy = ResolveEffectivePolicy(repo, repositories, null);
+            if (!effectivePolicy.Enabled)
+                continue;
+
+            var intervalMinutes = Math.Clamp(effectivePolicy.RunIntervalMinutes, 5, 7 * 24 * 60);
             if (repo.RetentionLastRunAt is not null && nowUtc - repo.RetentionLastRunAt.Value < TimeSpan.FromMinutes(intervalMinutes))
                 continue;
 
             if (!IsWithinMaintenanceWindow(
                     nowLocal,
-                    repo.RetentionMaintenanceWindowStartHour,
-                    repo.RetentionMaintenanceWindowEndHour))
+                    effectivePolicy.MaintenanceWindowStartHour,
+                    effectivePolicy.MaintenanceWindowEndHour))
             {
                 continue;
             }
@@ -89,6 +134,7 @@ public sealed class EfRepositoryRetentionService(
 
         var repository = await db.Set<Repository>()
             .IgnoreQueryFilters()
+            .Include(r => r.Directory)
             .FirstOrDefaultAsync(r => r.Id == repositoryId, ct);
 
         if (repository is null || repository.IsDeleted)
@@ -102,7 +148,7 @@ public sealed class EfRepositoryRetentionService(
                 summary: "Repository not found.");
         }
 
-        var effectivePolicy = BuildEffectivePolicy(repository, policyOverride);
+        var effectivePolicy = await ResolveEffectivePolicyAsync(repositoryId, policyOverride, ct);
         if (!effectivePolicy.Enabled)
         {
             return BuildResult(
@@ -119,14 +165,15 @@ public sealed class EfRepositoryRetentionService(
         var snapshots = await db.Set<RepositorySnapshot>()
             .IgnoreQueryFilters()
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
-            .Where(s => !archiveMode || !s.IsArchived)
             .OrderBy(s => s.CreatedAt)
             .ThenBy(s => s.Id)
             .Select(s => new SnapshotState(
                 s.Id,
                 s.CreatedAt,
                 s.TotalFileBytes,
-                s.Trigger))
+                s.Trigger,
+                s.IsArchived,
+                s.TagsCsv))
             .ToListAsync(ct);
 
         if (snapshots.Count == 0)
@@ -612,6 +659,9 @@ public sealed class EfRepositoryRetentionService(
         IReadOnlyCollection<BlockState> candidateBlocks,
         CancellationToken ct)
     {
+        var candidateBlockIds = candidateBlocks
+            .Select(b => b.Id)
+            .ToHashSet();
         var candidateHashes = candidateBlocks
             .Select(b => b.BlockHash)
             .Where(h => h.StartsWith(ManagedHashPrefix, StringComparison.OrdinalIgnoreCase))
@@ -623,7 +673,9 @@ public sealed class EfRepositoryRetentionService(
 
         var activeManagedHashes = await db.Set<FileVersionBlock>()
             .IgnoreQueryFilters()
-            .Where(b => !b.IsDeleted && candidateHashes.Contains(b.BlockStorageKey))
+            .Where(b => !b.IsDeleted
+                        && candidateHashes.Contains(b.BlockStorageKey)
+                        && !candidateBlockIds.Contains(b.Id))
             .Select(b => b.BlockStorageKey)
             .Distinct()
             .ToListAsync(ct);
@@ -732,6 +784,7 @@ public sealed class EfRepositoryRetentionService(
         DateTime nowUtc)
     {
         var eligible = snapshots
+            .Where(s => !IsSnapshotProtectedFromRetention(s))
             .Where(s => MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
             .ToList();
 
@@ -808,6 +861,175 @@ public sealed class EfRepositoryRetentionService(
         return (toDelete, automaticSnapshotsCompacted);
     }
 
+    private async Task<RepositoryRetentionPolicyDto> ResolveEffectivePolicyAsync(
+        int repositoryId,
+        RepositoryRetentionPolicyDto? policyOverride,
+        CancellationToken ct)
+    {
+        var repository = await db.Set<Repository>()
+            .IgnoreQueryFilters()
+            .Include(r => r.Directory)
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted, ct);
+
+        if (repository is null)
+            return DisabledPolicy();
+
+        var repositories = await LoadRepositoriesForPolicyResolutionAsync(ct);
+        return ResolveEffectivePolicy(repository, repositories, policyOverride);
+    }
+
+    private RepositoryRetentionPolicyDto ResolveEffectivePolicy(
+        Repository repository,
+        IReadOnlyList<Repository> repositories,
+        RepositoryRetentionPolicyDto? policyOverride)
+    {
+        if (policyOverride is not null)
+            return BuildEffectivePolicy(repository, policyOverride with
+            {
+                HasLocalOverride = true,
+                PolicySource = IsNestedRepository(repository, repositories)
+                    ? RepositoryRetentionPolicySources.NestedRepositoryOverride
+                    : RepositoryRetentionPolicySources.Repository,
+                SourceRepositoryId = repository.Id
+            });
+
+        var isNested = IsNestedRepository(repository, repositories);
+
+        if (repository.RetentionPolicyOverrideEnabled)
+        {
+            return BuildEffectivePolicy(repository, MapRepositoryPolicyForResolution(
+                repository,
+                isNested
+                    ? RepositoryRetentionPolicySources.NestedRepositoryOverride
+                    : RepositoryRetentionPolicySources.Repository));
+        }
+
+        var parent = FindNearestParentRepository(repository, repositories);
+        if (parent is not null && parent.RetentionPolicyOverrideEnabled)
+        {
+            return BuildEffectivePolicy(repository, MapRepositoryPolicyForResolution(
+                parent,
+                RepositoryRetentionPolicySources.ParentRepository));
+        }
+
+        var globalPolicy = LoadGlobalRetentionPolicy();
+        return BuildEffectivePolicy(repository, globalPolicy);
+    }
+
+    private async Task<IReadOnlyList<Repository>> LoadRepositoriesForPolicyResolutionAsync(CancellationToken ct)
+        => await db.Set<Repository>()
+            .IgnoreQueryFilters()
+            .Include(r => r.Directory)
+            .Where(r => !r.IsDeleted && !r.Directory.IsDeleted)
+            .ToListAsync(ct);
+
+    private static Repository? FindNearestParentRepository(Repository repository, IReadOnlyList<Repository> repositories)
+    {
+        var path = NormalizePathForPolicy(repository.Directory.Path);
+        return repositories
+            .Where(r => r.Id != repository.Id)
+            .Select(r => new { Repository = r, Path = NormalizePathForPolicy(r.Directory.Path) })
+            .Where(item => IsAncestorPath(item.Path, path))
+            .OrderByDescending(item => item.Path.Length)
+            .Select(item => item.Repository)
+            .FirstOrDefault();
+    }
+
+    private static bool IsNestedRepository(Repository repository, IReadOnlyList<Repository> repositories)
+        => FindNearestParentRepository(repository, repositories) is not null;
+
+    private static bool IsAncestorPath(string ancestor, string path)
+        => path.Length > ancestor.Length
+           && path.StartsWith(ancestor, StringComparison.OrdinalIgnoreCase)
+           && (ancestor.EndsWith(Path.DirectorySeparatorChar)
+               || path[ancestor.Length] == Path.DirectorySeparatorChar);
+
+    private static string NormalizePathForPolicy(string value)
+    {
+        try
+        {
+            return Path.GetFullPath(value.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return value.Trim().TrimEnd('\\', '/');
+        }
+    }
+
+    private RepositoryRetentionPolicyDto LoadGlobalRetentionPolicy()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "VeyraFlow",
+                "retention-defaults.json");
+
+            if (!File.Exists(path))
+                return DisabledPolicy();
+
+            var settings = JsonSerializer.Deserialize<RetentionDefaultsUserSettings>(File.ReadAllText(path));
+            if (settings is null || !settings.Enabled)
+                return DisabledPolicy();
+
+            return new RepositoryRetentionPolicyDto(
+                settings.Enabled,
+                settings.MaxAgeDays,
+                settings.MaxSnapshots,
+                settings.MaxTotalSizeBytes,
+                ParseTriggerFilters(settings.TriggerFilter),
+                settings.RunIntervalMinutes,
+                settings.MaintenanceWindowStartHour,
+                settings.MaintenanceWindowEndHour,
+                null,
+                null,
+                settings.StorageMode,
+                HasLocalOverride: false,
+                PolicySource: RepositoryRetentionPolicySources.Global);
+        }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Failed to load global retention defaults. Retention falls back to disabled.");
+            return DisabledPolicy();
+        }
+    }
+
+    private static RepositoryRetentionPolicyDto DisabledPolicy()
+        => new(
+            false,
+            null,
+            null,
+            null,
+            [],
+            60,
+            null,
+            null,
+            null,
+            null,
+            RepositoryRetentionStorageModes.Delete,
+            HasLocalOverride: false,
+            PolicySource: RepositoryRetentionPolicySources.None);
+
+    private static RepositoryRetentionPolicyDto MapRepositoryPolicyForResolution(Repository repository, string source)
+        => new(
+            repository.RetentionEnabled,
+            repository.RetentionMaxAgeDays,
+            repository.RetentionMaxSnapshots,
+            repository.RetentionMaxTotalSizeBytes,
+            ParseTriggerFilters(repository.RetentionTriggerFilter),
+            repository.RetentionRunIntervalMinutes,
+            repository.RetentionMaintenanceWindowStartHour,
+            repository.RetentionMaintenanceWindowEndHour,
+            repository.RetentionLastRunAt,
+            repository.RetentionLastStatus,
+            repository.RetentionStorageMode,
+            repository.RetentionAllowManualSnapshotCleanup,
+            repository.RetentionAutomaticCompactionEnabled,
+            repository.RetentionAutomaticCompactionWindowHours,
+            repository.RetentionPolicyOverrideEnabled,
+            source,
+            repository.Id);
+
     private static RepositoryRetentionPolicyDto BuildEffectivePolicy(
         Repository repository,
         RepositoryRetentionPolicyDto? policyOverride)
@@ -849,7 +1071,8 @@ public sealed class EfRepositoryRetentionService(
             StorageMode = RepositoryRetentionStorageModes.Normalize(source.StorageMode),
             AutomaticCompactionWindowHours = source.AutomaticCompactionEnabled
                 ? NormalizePositive(source.AutomaticCompactionWindowHours)
-                : null
+                : null,
+            PolicySource = RepositoryRetentionPolicySources.Normalize(source.PolicySource)
         };
     }
 
@@ -864,6 +1087,36 @@ public sealed class EfRepositoryRetentionService(
             .Select(static v => v.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static bool IsSnapshotProtectedFromRetention(SnapshotState snapshot)
+        => snapshot.IsArchived || HasProtectedRetentionTag(snapshot.TagsCsv);
+
+    private static bool HasProtectedRetentionTag(string? tagsCsv)
+    {
+        if (string.IsNullOrWhiteSpace(tagsCsv))
+            return false;
+
+        foreach (var rawTag in tagsCsv.Split([';', ',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var normalized = NormalizeRetentionTagForComparison(rawTag);
+            if (ProtectedRetentionTags.Contains(normalized))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizeRetentionTagForComparison(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var ch in value.Trim().TrimStart('#').ToLowerInvariant())
+        {
+            if (char.IsLetterOrDigit(ch))
+                builder.Append(ch);
+        }
+
+        return builder.ToString();
     }
 
     private static HashSet<string> NormalizeTriggerFilters(IReadOnlyList<string> triggerFilters)

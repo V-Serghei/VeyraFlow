@@ -19,27 +19,28 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Abstractions.Storage;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Security;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Connectivity.Models;
 using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Maintenance;
+using Veyra.Desktop.Services.Monitoring;
+using Veyra.Desktop.Services.Monitoring.Models;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Observability;
 using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.Onboarding;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Scheduling;
-using Veyra.Desktop.Services.Storage.Models;
 using Veyra.Desktop.Services.System;
 using Veyra.Desktop.Services.Sync.Runtime;
-using Veyra.Desktop.Services.Sync.Runtime.Models;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -70,6 +71,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private readonly IWindowsAutostartService _autostart;
     private readonly IConnectivityStatusService _connectivity;
     private readonly ICloudSyncRuntimeControlService _cloudSyncRuntime;
+    private readonly IMonitoringControlService _monitoringControl;
+    private readonly IProcessResourceStatusStore _processResourceStatusStore;
     private readonly ISnapshotScheduler _snapshotScheduler;
     private readonly ISnapshotSchedulerSettingsStore _snapshotSchedulerSettingsStore;
     private readonly IRuntimeObservabilityControlService _runtimeObservability;
@@ -96,13 +99,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private LocalBlockStorageMetricsDto? _lastLocalStorageMetrics;
     private CloudStorageMetricsDto? _lastCloudStorageMetrics;
     private AppDiagnosticsReportDto? _lastDiagnosticsReport;
+    private ProcessResourceSnapshotDto? _monitoringProcessResourceSnapshot;
     private UserProfileSessionDto? _lastActiveProfile;
     private CancellationTokenSource? _loadCts;
     private long _loadRequestId;
+    private bool _suppressMonitoringEnabledChange;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsGeneralTabSelected))]
     [NotifyPropertyChangedFor(nameof(IsUserTabSelected))]
+    [NotifyPropertyChangedFor(nameof(IsAutomationTabSelected))]
     [NotifyPropertyChangedFor(nameof(IsSyncTabSelected))]
     [NotifyPropertyChangedFor(nameof(IsMonitoringTabSelected))]
     [NotifyPropertyChangedFor(nameof(ShowConnectivityBanner))]
@@ -153,7 +159,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     private bool _isAuthBusy;
 
     [ObservableProperty] private string _authMessage = string.Empty;
-    [ObservableProperty] private bool _isSyncBusy;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSyncToCloud))]
+    private bool _isSyncBusy;
     [ObservableProperty] private bool _isCloudMaintenanceBusy;
     [ObservableProperty] private string _syncMessage = string.Empty;
     [ObservableProperty] private string _cloudStorageMessage = string.Empty;
@@ -210,10 +218,17 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ToggleRuntimeLoggingLabel))]
     private bool _isRuntimeLoggingEnabled;
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(MonitoringStateText))]
+    [NotifyPropertyChangedFor(nameof(MonitoringHelpText))]
+    [NotifyPropertyChangedFor(nameof(ShowMonitoringProcessLoad))]
+    [NotifyPropertyChangedFor(nameof(HasMonitoringProcessHistory))]
+    private bool _isMonitoringEnabled;
+    [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ToggleRuntimeDiagnosticsCommand))]
     [NotifyCanExecuteChangedFor(nameof(ToggleRuntimeLoggingCommand))]
     private bool _isRuntimeObservabilityBusy;
     [ObservableProperty] private string _runtimeObservabilityMessage = string.Empty;
+    [ObservableProperty] private string _monitoringMessage = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasRepositorySyncIssues))]
     private int _repositorySyncIssueCount;
@@ -243,6 +258,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ConnectivityBannerAccentColor))]
     [NotifyPropertyChangedFor(nameof(ConnectivityBannerBackgroundColor))]
     [NotifyPropertyChangedFor(nameof(ConnectivityBannerText))]
+    [NotifyPropertyChangedFor(nameof(CanSyncToCloud))]
     private bool _hasActiveProfile;
     [ObservableProperty] private bool _requirePasswordForSensitiveActions;
     [ObservableProperty] private bool _isWindowsAutostartEnabled;
@@ -349,6 +365,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [
         new("general", "app_settings.tab_general_title", "app_settings.tab_general_subtitle"),
         new("user", "app_settings.tab_user_title", "app_settings.tab_user_subtitle"),
+        new("automation", "app_settings.tab_automation_title", "app_settings.tab_automation_subtitle"),
         new("sync", "app_settings.tab_sync_title", "app_settings.tab_sync_subtitle"),
         new("monitoring", "app_settings.tab_monitoring_title", "app_settings.tab_monitoring_subtitle")
     ];
@@ -382,6 +399,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         IWindowsAutostartService autostart,
         IConnectivityStatusService connectivity,
         ICloudSyncRuntimeControlService cloudSyncRuntime,
+        IMonitoringControlService monitoringControl,
+        IProcessResourceStatusStore processResourceStatusStore,
         ISnapshotScheduler snapshotScheduler,
         ISnapshotSchedulerSettingsStore snapshotSchedulerSettingsStore,
         IRuntimeObservabilityControlService runtimeObservability,
@@ -409,6 +428,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _autostart = autostart;
         _connectivity = connectivity;
         _cloudSyncRuntime = cloudSyncRuntime;
+        _monitoringControl = monitoringControl;
+        _processResourceStatusStore = processResourceStatusStore;
         _snapshotScheduler = snapshotScheduler;
         _snapshotSchedulerSettingsStore = snapshotSchedulerSettingsStore;
         _runtimeObservability = runtimeObservability;
@@ -438,6 +459,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         ArtifactEncryptionActiveKeyText = Loc.T("common.not_available_short");
         ArtifactEncryptionUpdatedText = Loc.T("common.not_available_short");
         ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+        ApplyMonitoringEnabledState(_monitoringControl.IsEnabled);
         SelectedTab = Tabs.FirstOrDefault();
 
         _localization.LanguageChanged += OnLanguageChanged;
@@ -445,6 +467,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _experience.ModeChanged += OnExperienceModeChanged;
         _connectivity.StatusChanged += OnConnectivityStatusChanged;
         _cloudSyncRuntime.StateChanged += OnCloudSyncRuntimeStateChanged;
+        _monitoringControl.StateChanged += OnMonitoringStateChanged;
+        _processResourceStatusStore.StatusChanged += OnProcessResourceStatusChanged;
         RebuildLanguageOptions();
         RebuildThemeOptions();
         RebuildExperienceOptions();
@@ -454,8 +478,10 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     public bool IsGeneralTabSelected => string.Equals(SelectedTab?.Key, "general", StringComparison.OrdinalIgnoreCase);
     public bool IsUserTabSelected => string.Equals(SelectedTab?.Key, "user", StringComparison.OrdinalIgnoreCase);
+    public bool IsAutomationTabSelected => string.Equals(SelectedTab?.Key, "automation", StringComparison.OrdinalIgnoreCase);
     public bool IsSyncTabSelected => string.Equals(SelectedTab?.Key, "sync", StringComparison.OrdinalIgnoreCase);
     public bool IsMonitoringTabSelected => string.Equals(SelectedTab?.Key, "monitoring", StringComparison.OrdinalIgnoreCase);
+    public bool ShowSimpleAutoSnapshotsSection => IsBasicMode;
     public bool ShowInitialLoadingOverlay => IsLoading && !HasLoadedPrimaryState;
     public bool ShowRefreshActivityCard => IsLoading && HasLoadedPrimaryState;
     public string RefreshActivityTitle => Loc.T("app_settings.loading_title");
@@ -463,6 +489,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         "sync" => Loc.T("app_settings.sync_running_detail"),
         "monitoring" => Loc.T("app_settings.system_diagnostics_running_detail"),
+        "automation" => Loc.T("app_settings.loading_detail"),
         "user" => Loc.T("app_settings.loading_detail"),
         _ => Loc.T("app_settings.loading_detail")
     };
@@ -489,7 +516,45 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     public bool ShowTechnicalProfileDetails => IsProfessionalMode;
     public bool ShowCloudStorageDiagnostics => IsProfessionalMode && HasActiveProfile;
     public bool ShowDetailedRepositorySyncIssueDiagnostics => IsProfessionalMode;
+    public bool ShowRetentionSection => true;
+    public bool ShowTransientCacheSection => IsProfessionalMode;
+    public bool ShowArtifactEncryptionSection => IsProfessionalMode && IsArtifactEncryptionEnabled;
+    public bool ShowLocalStorageSection => IsProfessionalMode;
+    public bool ShowSystemDiagnosticsSection => IsProfessionalMode;
     public bool ShowSystemDiagnosticsCloudUsageMetric => HasSystemDiagnostics && IsRuntimeDiagnosticsEnabled;
+    public string MonitoringStateText => IsMonitoringEnabled
+        ? Loc.T("app_settings.runtime_observability_state_enabled")
+        : Loc.T("app_settings.runtime_observability_state_disabled");
+    public string MonitoringHelpText => IsMonitoringEnabled
+        ? Loc.T("app_settings.monitoring_enable_hint")
+        : Loc.T("app_settings.monitoring_disabled_hint");
+    public bool ShowMonitoringProcessLoad => IsMonitoringEnabled && _monitoringProcessResourceSnapshot is not null;
+    public bool HasMonitoringProcessHistory => IsMonitoringEnabled && _processResourceStatusStore.History.Count > 0;
+    public string MonitoringProcessLoadSummaryText
+        => _monitoringProcessResourceSnapshot is not { } snapshot
+            ? string.Empty
+            : snapshot.CpuPercent.HasValue
+                ? Loc.F(
+                    "dashboard.process_load_summary",
+                    snapshot.CpuPercent.Value.ToString("0.#", CultureInfo.CurrentCulture),
+                    FormatBytes(snapshot.WorkingSetBytes))
+                : Loc.F("dashboard.process_load_summary_cpu_pending", FormatBytes(snapshot.WorkingSetBytes));
+    public string MonitoringProcessLoadDetailText
+        => _monitoringProcessResourceSnapshot is not { } snapshot
+            ? string.Empty
+            : Loc.F(
+                "dashboard.process_load_detail",
+                FormatBytes(snapshot.PrivateMemoryBytes),
+                FormatBytes(snapshot.ManagedHeapBytes),
+                snapshot.ThreadCount,
+                snapshot.HandleCount,
+                snapshot.CapturedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+    public string MonitoringProcessLoadPeakText
+        => ProcessResourceStatusPresenter.FormatPeakSummary(_processResourceStatusStore.History);
+    public string MonitoringProcessLoadHistoryText
+        => ProcessResourceStatusPresenter.FormatRecentHistory(_processResourceStatusStore.History);
+    public string MonitoringProcessLoadAccentColor => ProcessResourceStatusPresenter.DescribeVisuals(_monitoringProcessResourceSnapshot).AccentColor;
+    public string MonitoringProcessLoadBackgroundColor => ProcessResourceStatusPresenter.DescribeVisuals(_monitoringProcessResourceSnapshot).BackgroundColor;
     public bool CanConfigureWindowsAutostart => _autostart.IsSupported;
     public string AutomaticSnapshotsSummaryText => !IsAutomaticSnapshotsEnabled
         ? Loc.T("app_settings.auto_snapshots_summary_disabled")
@@ -629,6 +694,16 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         _ = SaveSensitiveActionVerificationSettingAsync(value);
     }
 
+    partial void OnIsMonitoringEnabledChanged(bool value)
+    {
+        NotifyMonitoringStateChanged();
+
+        if (_suppressMonitoringEnabledChange)
+            return;
+
+        _ = SetMonitoringEnabledAsync(value);
+    }
+
     [RelayCommand(CanExecute = nameof(CanToggleRuntimeObservability))]
     private Task ToggleRuntimeDiagnosticsAsync()
         => SetRuntimeDiagnosticsAsync(!IsRuntimeDiagnosticsEnabled);
@@ -641,6 +716,21 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     {
         IsRuntimeDiagnosticsEnabled = snapshot.IsDiagnosticsEnabled;
         IsRuntimeLoggingEnabled = snapshot.IsLoggingEnabled;
+    }
+
+    private async Task SetMonitoringEnabledAsync(bool enabled)
+    {
+        try
+        {
+            MonitoringMessage = string.Empty;
+            await _monitoringControl.SetEnabledAsync(enabled);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to update repository monitoring state");
+            MonitoringMessage = Loc.T("app_settings.monitoring_enable_save_failed");
+            ApplyMonitoringEnabledState(_monitoringControl.IsEnabled);
+        }
     }
 
     private async Task SetRuntimeDiagnosticsAsync(bool enabled)
@@ -889,21 +979,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             IsAutomaticSnapshotsBusy = true;
             AutomaticSnapshotsMessage = string.Empty;
 
-            var normalized = new SnapshotSchedulerUserSettings(
-                Enabled: IsAutomaticSnapshotsEnabled,
-                IntervalMinutes: Math.Clamp(SelectedAutomaticSnapshotIntervalMinutes, 1, 24 * 60),
-                QuietHoursStartHour: Math.Clamp(SelectedAutomaticSnapshotQuietStartHour, 0, 23),
-                QuietHoursEndHour: Math.Clamp(SelectedAutomaticSnapshotQuietEndHour, 0, 23));
-
-            _snapshotSchedulerOptions.Enabled = normalized.Enabled;
-            _snapshotSchedulerOptions.IntervalMinutes = normalized.IntervalMinutes;
-            _snapshotSchedulerOptions.QuietHoursStartHour = normalized.QuietHoursStartHour;
-            _snapshotSchedulerOptions.QuietHoursEndHour = normalized.QuietHoursEndHour;
-
-            await _snapshotSchedulerSettingsStore.SaveAsync(normalized);
-            await _snapshotScheduler.StopAsync();
-            if (normalized.Enabled)
-                _snapshotScheduler.Start();
+            var normalized = BuildSchedulerSettingsFromUi();
+            await ApplySchedulerSettingsAsync(normalized);
 
             LoadAutomaticSnapshotSettings();
             AutomaticSnapshotsMessage = normalized.Enabled
@@ -916,6 +993,57 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             _log.LogError(ex, "Failed to save automatic snapshot settings");
             AutomaticSnapshotsMessage = Loc.T("app_settings.auto_snapshots_save_failed");
             await AppendJournalAsync("error", "scheduler", "settings_auto_snapshots_updated", $"{AutomaticSnapshotsMessage} {ex.Message}", ActiveUsername);
+        }
+        finally
+        {
+            IsAutomaticSnapshotsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApplyReducedBackgroundLoadPresetAsync()
+    {
+        try
+        {
+            IsAutomaticSnapshotsBusy = true;
+            AutomaticSnapshotsMessage = string.Empty;
+
+            var current = BuildSchedulerSettingsFromUi();
+            var integrityEnabled = current.IntegrityEnabled ?? _snapshotSchedulerOptions.IntegrityEnabled;
+            var reduced = current with
+            {
+                IntervalMinutes = current.Enabled
+                    ? Math.Max(current.IntervalMinutes, SnapshotSchedulerOptions.RecommendedIntervalMinutes)
+                    : current.IntervalMinutes,
+                PollSeconds = Math.Max(
+                    NormalizeSchedulerPollSeconds(current.PollSeconds),
+                    SnapshotSchedulerOptions.RecommendedPollSeconds),
+                MaxReadBytesPerSecond = CapBackgroundReadRate(current.MaxReadBytesPerSecond),
+                MaxIoOperationsPerSecond = CapBackgroundIops(current.MaxIoOperationsPerSecond),
+                IntegrityEnabled = integrityEnabled,
+                IntegrityIntervalMinutes = integrityEnabled
+                    ? Math.Max(
+                        NormalizeIntegrityIntervalMinutes(current.IntegrityIntervalMinutes),
+                        SnapshotSchedulerOptions.RecommendedIntegrityIntervalMinutes)
+                    : NormalizeIntegrityIntervalMinutes(current.IntegrityIntervalMinutes)
+            };
+
+            await ApplySchedulerSettingsAsync(reduced);
+
+            if (IsRuntimeLoggingEnabled)
+                await _runtimeObservability.SetLoggingEnabledAsync(false);
+
+            ApplyRuntimeObservabilitySnapshot(_runtimeObservability.Snapshot);
+            LoadAutomaticSnapshotSettings();
+
+            AutomaticSnapshotsMessage = Loc.T("app_settings.auto_snapshots_low_impact_applied");
+            await AppendJournalAsync("info", "scheduler", "settings_low_impact_mode_applied", AutomaticSnapshotsMessage, ActiveUsername);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to apply reduced background load preset");
+            AutomaticSnapshotsMessage = Loc.T("app_settings.auto_snapshots_low_impact_failed");
+            await AppendJournalAsync("error", "scheduler", "settings_low_impact_mode_applied", $"{AutomaticSnapshotsMessage} {ex.Message}", ActiveUsername);
         }
         finally
         {
@@ -970,7 +1098,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
             var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
             var targetRepositories = repositories
-                .Where(static repository => repository.RetentionPolicy.Enabled)
+                .Where(static repository => !repository.RetentionPolicy.HasLocalOverride)
                 .ToList();
             var updated = 0;
 
@@ -995,7 +1123,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                     MaintenanceWindowEndHour: detail.RetentionPolicy.MaintenanceWindowEndHour,
                     LastRunAtUtc: detail.RetentionPolicy.LastRunAtUtc,
                     LastStatus: detail.RetentionPolicy.LastStatus,
-                    StorageMode: policy.StorageMode);
+                    StorageMode: policy.StorageMode,
+                    HasLocalOverride: false,
+                    PolicySource: RepositoryRetentionPolicySources.Global);
 
                 var result = await _mediator.Send(new UpdateRepositoryConfigurationCommand(
                     detail.Id,
@@ -1036,9 +1166,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             GlobalRetentionMessage = string.Empty;
 
             var repositories = await _mediator.Send(new GetAllRepositoriesQuery());
-            var retentionEnabledRepositories = repositories
-                .Where(static repository => repository.RetentionPolicy.Enabled)
-                .ToList();
+            var retentionEnabledRepositories = repositories.ToList();
 
             var results = new List<RepositoryRetentionRunResultDto>(retentionEnabledRepositories.Count);
             foreach (var repository in retentionEnabledRepositories)
@@ -1048,7 +1176,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             }
 
             var affected = results.Count(result => result.PolicyApplied);
-            GlobalRetentionMessage = Loc.F("app_settings.global_retention_cleanup_done", affected, results.Count);
+            var snapshots = results.Sum(result => result.SnapshotsMarked);
+            var versions = results.Sum(result => result.FileVersionsMarked);
+            var blocks = results.Sum(result => result.BlockFilesDeleted);
+            var freedBytes = results.Sum(result => result.EstimatedFreedBytes);
+            GlobalRetentionMessage = Loc.F(
+                "app_settings.global_retention_cleanup_done_detail",
+                affected,
+                results.Count,
+                snapshots,
+                versions,
+                blocks,
+                FormatBytes(freedBytes));
             await AppendJournalAsync("info", "retention", "settings_global_retention_cleanup_now", GlobalRetentionMessage, ActiveUsername);
         }
         catch (Exception ex)
@@ -1408,9 +1547,13 @@ public sealed partial class AppSettingsViewModel : ObservableObject
 
     private void UpdateTabVisibility()
     {
+        var automationTab = Tabs.FirstOrDefault(tab =>
+            string.Equals(tab.Key, "automation", StringComparison.OrdinalIgnoreCase));
         var monitoringTab = Tabs.FirstOrDefault(tab =>
             string.Equals(tab.Key, "monitoring", StringComparison.OrdinalIgnoreCase));
 
+        if (automationTab is not null)
+            automationTab.IsVisible = true;
         if (monitoringTab is not null)
             monitoringTab.IsVisible = IsProfessionalMode;
 
@@ -1518,6 +1661,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             await _localCredentialStore.SavePasswordAsync(session.Username, PasswordInput);
 
             var restored = 0;
+            var cloudSyncFailed = false;
             try
             {
                 restored = await _sync.RestoreRepositoriesFromCloudAsync();
@@ -1525,6 +1669,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             }
             catch (Exception cloudEx)
             {
+                cloudSyncFailed = true;
                 _log.LogWarning(cloudEx, "Cloud follow-up after auth is unavailable. Username {Username}", session.Username);
             }
 
@@ -1537,9 +1682,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 ? Loc.F("app_settings.auth_token_expires", session.AccessTokenExpiresAtUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"))
                 : string.Empty;
 
+            var cloudNote = cloudSyncFailed ? Loc.T("app_settings.auth_success_cloud_unavailable") : tokenText;
+
             AuthMessage = IsRegisterMode
-                ? Loc.F("app_settings.auth_registration_success", restored, tokenText)
-                : Loc.F("app_settings.auth_login_success", restored, tokenText);
+                ? Loc.F("app_settings.auth_registration_success", restored, cloudNote)
+                : Loc.F("app_settings.auth_login_success", restored, cloudNote);
 
             await AppendJournalAsync(
                 "info",
@@ -1734,6 +1881,21 @@ public sealed partial class AppSettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task OpenCloudSyncHealthCenterAsync()
         => await OpenCloudSyncHealthCenterCoreAsync();
+
+    [RelayCommand]
+    private async Task OpenCloudRepositoryManagerAsync()
+    {
+        var owner = _windows.GetActiveWindow();
+        var window = _windows.Create<CloudRepositoryManagerWindow>();
+
+        if (window.DataContext is CloudRepositoryManagerWindowViewModel vm)
+            await vm.RefreshAsync();
+
+        if (owner is not null)
+            await _windows.ShowDialogAsync(window, owner);
+        else
+            _windows.Show(window);
+    }
 
     private async Task OpenCloudSyncHealthCenterCoreAsync()
     {
@@ -2138,6 +2300,104 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AutomaticSnapshotsSummaryText));
     }
 
+    private SnapshotSchedulerUserSettings BuildSchedulerSettingsFromUi()
+    {
+        return new SnapshotSchedulerUserSettings(
+            Enabled: IsAutomaticSnapshotsEnabled,
+            IntervalMinutes: Math.Clamp(SelectedAutomaticSnapshotIntervalMinutes, 1, 24 * 60),
+            QuietHoursStartHour: Math.Clamp(SelectedAutomaticSnapshotQuietStartHour, 0, 23),
+            QuietHoursEndHour: Math.Clamp(SelectedAutomaticSnapshotQuietEndHour, 0, 23),
+            PollSeconds: NormalizeSchedulerPollSeconds(_snapshotSchedulerOptions.PollSeconds),
+            MaxReadBytesPerSecond: Math.Max(0, _snapshotSchedulerOptions.MaxReadBytesPerSecond),
+            MaxIoOperationsPerSecond: Math.Max(0, _snapshotSchedulerOptions.MaxIoOperationsPerSecond),
+            IntegrityEnabled: _snapshotSchedulerOptions.IntegrityEnabled,
+            IntegrityIntervalMinutes: NormalizeIntegrityIntervalMinutes(_snapshotSchedulerOptions.IntegrityIntervalMinutes));
+    }
+
+    private async Task ApplySchedulerSettingsAsync(SnapshotSchedulerUserSettings settings)
+    {
+        _snapshotSchedulerOptions.Enabled = settings.Enabled;
+        _snapshotSchedulerOptions.IntervalMinutes = Math.Clamp(settings.IntervalMinutes, 1, 24 * 60);
+        _snapshotSchedulerOptions.QuietHoursStartHour = Math.Clamp(settings.QuietHoursStartHour, 0, 23);
+        _snapshotSchedulerOptions.QuietHoursEndHour = Math.Clamp(settings.QuietHoursEndHour, 0, 23);
+        _snapshotSchedulerOptions.PollSeconds = NormalizeSchedulerPollSeconds(settings.PollSeconds);
+        _snapshotSchedulerOptions.MaxReadBytesPerSecond = Math.Max(0, settings.MaxReadBytesPerSecond ?? SnapshotSchedulerOptions.RecommendedMaxReadBytesPerSecond);
+        _snapshotSchedulerOptions.MaxIoOperationsPerSecond = Math.Max(0, settings.MaxIoOperationsPerSecond ?? SnapshotSchedulerOptions.RecommendedMaxIoOperationsPerSecond);
+        _snapshotSchedulerOptions.IntegrityEnabled = settings.IntegrityEnabled ?? true;
+        _snapshotSchedulerOptions.IntegrityIntervalMinutes = NormalizeIntegrityIntervalMinutes(settings.IntegrityIntervalMinutes);
+
+        var normalized = new SnapshotSchedulerUserSettings(
+            _snapshotSchedulerOptions.Enabled,
+            _snapshotSchedulerOptions.IntervalMinutes,
+            _snapshotSchedulerOptions.QuietHoursStartHour,
+            _snapshotSchedulerOptions.QuietHoursEndHour,
+            _snapshotSchedulerOptions.PollSeconds,
+            _snapshotSchedulerOptions.MaxReadBytesPerSecond,
+            _snapshotSchedulerOptions.MaxIoOperationsPerSecond,
+            _snapshotSchedulerOptions.IntegrityEnabled,
+            _snapshotSchedulerOptions.IntegrityIntervalMinutes);
+
+        await _snapshotSchedulerSettingsStore.SaveAsync(normalized);
+        await _snapshotScheduler.StopAsync();
+        if (normalized.Enabled)
+            _snapshotScheduler.Start();
+    }
+
+    private void OnMonitoringStateChanged(bool enabled)
+    {
+        Dispatcher.UIThread.Post(() => ApplyMonitoringEnabledState(enabled));
+    }
+
+    private void OnProcessResourceStatusChanged(object? sender, ProcessResourceStatusChangedEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _monitoringProcessResourceSnapshot = IsMonitoringEnabled ? e.Snapshot : null;
+            NotifyMonitoringStateChanged();
+        });
+    }
+
+    private void ApplyMonitoringEnabledState(bool enabled)
+    {
+        _suppressMonitoringEnabledChange = true;
+        try
+        {
+            IsMonitoringEnabled = enabled;
+        }
+        finally
+        {
+            _suppressMonitoringEnabledChange = false;
+        }
+
+        _monitoringProcessResourceSnapshot = enabled
+            ? _processResourceStatusStore.Snapshot
+            : null;
+
+        NotifyMonitoringStateChanged();
+    }
+
+    private static int NormalizeSchedulerPollSeconds(int? value)
+        => Math.Clamp(value ?? SnapshotSchedulerOptions.RecommendedPollSeconds, 5, 600);
+
+    private static int NormalizeIntegrityIntervalMinutes(int? value)
+        => Math.Clamp(value ?? SnapshotSchedulerOptions.RecommendedIntegrityIntervalMinutes, 30, 7 * 24 * 60);
+
+    private static int CapBackgroundReadRate(int? value)
+    {
+        if (value is null || value <= 0)
+            return SnapshotSchedulerOptions.RecommendedMaxReadBytesPerSecond;
+
+        return Math.Min(value.Value, SnapshotSchedulerOptions.RecommendedMaxReadBytesPerSecond);
+    }
+
+    private static int CapBackgroundIops(int? value)
+    {
+        if (value is null || value <= 0)
+            return SnapshotSchedulerOptions.RecommendedMaxIoOperationsPerSecond;
+
+        return Math.Min(value.Value, SnapshotSchedulerOptions.RecommendedMaxIoOperationsPerSecond);
+    }
+
     private async Task LoadGlobalRetentionDefaultsAsync(CancellationToken ct = default)
     {
         ApplyGlobalRetentionDefaults(await _retentionDefaultsStore.LoadAsync(ct));
@@ -2367,6 +2627,9 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         Dispatcher.UIThread.Post(() => SyncSelectedThemeOption(rebuildIfMissing: false));
     }
 
+    partial void OnHasActiveProfileChanged(bool value)
+        => _connectivity.SetCloudProbeEnabled(value);
+
     private void OnConnectivityStatusChanged(object? sender, EventArgs e)
     {
         Dispatcher.UIThread.Post(() =>
@@ -2375,6 +2638,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
             OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
             OnPropertyChanged(nameof(ConnectivityBannerText));
+            OnPropertyChanged(nameof(CanSyncToCloud));
         });
     }
 
@@ -2386,6 +2650,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(ConnectivityBannerAccentColor));
             OnPropertyChanged(nameof(ConnectivityBannerBackgroundColor));
             OnPropertyChanged(nameof(ConnectivityBannerText));
+            OnPropertyChanged(nameof(CanSyncToCloud));
         });
     }
 
@@ -2395,12 +2660,19 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         UpdateTabVisibility();
         OnPropertyChanged(nameof(IsBasicMode));
         OnPropertyChanged(nameof(IsProfessionalMode));
+        OnPropertyChanged(nameof(IsAutomationTabSelected));
+        OnPropertyChanged(nameof(ShowSimpleAutoSnapshotsSection));
         OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
         OnPropertyChanged(nameof(ShowTechnicalCloudDetails));
         OnPropertyChanged(nameof(ShowTechnicalProfileDetails));
         OnPropertyChanged(nameof(ShowCloudStorageDiagnostics));
         OnPropertyChanged(nameof(ShowDetailedRepositorySyncIssueDiagnostics));
         OnPropertyChanged(nameof(ShowSystemDiagnosticsCloudUsageMetric));
+        OnPropertyChanged(nameof(ShowRetentionSection));
+        OnPropertyChanged(nameof(ShowTransientCacheSection));
+        OnPropertyChanged(nameof(ShowArtifactEncryptionSection));
+        OnPropertyChanged(nameof(ShowLocalStorageSection));
+        OnPropertyChanged(nameof(ShowSystemDiagnosticsSection));
         OnPropertyChanged(nameof(ExperienceModeHint));
         OnPropertyChanged(nameof(LocalizationSummaryText));
         OnPropertyChanged(nameof(SyncSectionIntroText));
@@ -2528,11 +2800,18 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             : Loc.T("app_settings.artifact_encryption_disabled");
         OnPropertyChanged(nameof(IsBasicMode));
         OnPropertyChanged(nameof(IsProfessionalMode));
+        OnPropertyChanged(nameof(IsAutomationTabSelected));
+        OnPropertyChanged(nameof(ShowSimpleAutoSnapshotsSection));
         OnPropertyChanged(nameof(ShowLocalizationDiagnostics));
         OnPropertyChanged(nameof(ShowTechnicalCloudDetails));
         OnPropertyChanged(nameof(ShowTechnicalProfileDetails));
         OnPropertyChanged(nameof(ShowCloudStorageDiagnostics));
         OnPropertyChanged(nameof(ShowDetailedRepositorySyncIssueDiagnostics));
+        OnPropertyChanged(nameof(ShowRetentionSection));
+        OnPropertyChanged(nameof(ShowTransientCacheSection));
+        OnPropertyChanged(nameof(ShowArtifactEncryptionSection));
+        OnPropertyChanged(nameof(ShowLocalStorageSection));
+        OnPropertyChanged(nameof(ShowSystemDiagnosticsSection));
         OnPropertyChanged(nameof(ExperienceModeHint));
         OnPropertyChanged(nameof(LocalizationSummaryText));
         OnPropertyChanged(nameof(SyncSectionIntroText));
@@ -2550,8 +2829,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ArtifactEncryptionCoverageSummary));
         OnPropertyChanged(nameof(RuntimeDiagnosticsStateText));
         OnPropertyChanged(nameof(RuntimeLoggingStateText));
+        OnPropertyChanged(nameof(MonitoringStateText));
+        OnPropertyChanged(nameof(MonitoringHelpText));
         OnPropertyChanged(nameof(ToggleRuntimeDiagnosticsLabel));
         OnPropertyChanged(nameof(ToggleRuntimeLoggingLabel));
+        NotifyMonitoringStateChanged();
         OnPropertyChanged(nameof(CanConfigureWindowsAutostart));
         OnPropertyChanged(nameof(HasArtifactKeys));
         OnPropertyChanged(nameof(ArtifactActiveKeyCount));
@@ -3140,7 +3422,8 @@ public sealed partial class AppSettingsViewModel : ObservableObject
                 _ when normalizedBasic.StartsWith("syncing_upload", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_working"),
                 "queued" or "syncing" or "syncing_prepare" or "syncing_snapshot" or "syncing_finalize" or "offline_retry" or "retrying"
                     => Loc.T("repo_settings.sync_status_basic_working"),
-                "auth_required" or "conflict" or "failed" or "dead_letter" => Loc.T("repo_settings.sync_status_basic_attention"),
+                "auth_required" or "conflict" or "failed" or "dead_letter" or "paused" or "cancelled" => Loc.T("repo_settings.sync_status_basic_attention"),
+                "linked" => Loc.T("repo_settings.sync_status_basic_ready"),
                 _ when normalizedBasic.StartsWith("synced", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_ready"),
                 _ => Loc.T("repo_settings.sync_status_basic_local")
             };
@@ -3161,11 +3444,23 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             "retrying" => Loc.T("dashboard.sync.retrying"),
             "auth_required" => Loc.T("dashboard.sync.auth_required"),
             "conflict" => Loc.T("dashboard.sync.conflict"),
+            "dead_letter" => Loc.T("dashboard.sync.dead_letter"),
             "failed" => Loc.T("dashboard.sync.failed"),
+            "linked" => Loc.T("dashboard.sync.linked"),
+            "paused" => Loc.T("dashboard.sync.paused"),
+            "cancelled" => Loc.T("dashboard.sync.cancelled"),
             "skipped" => Loc.T("dashboard.sync.skipped"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.synced"),
-            _ => status.Replace('_', ' ')
+            _ => Loc.F("dashboard.sync.unknown_status", HumanizeStatusToken(status))
         };
+    }
+
+    private static string HumanizeStatusToken(string status)
+    {
+        var text = status.Trim().Replace('_', ' ').Replace('-', ' ');
+        return string.Join(" ", text
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => char.ToUpperInvariant(segment[0]) + segment[1..].ToLowerInvariant()));
     }
 
     private static string FormatSyncingUploadStatus(string? status)
@@ -3308,6 +3603,20 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         return Loc.F(
             "app_settings.repository_sync_health_stalled_format",
             FormatDuration(stalledFor));
+    }
+
+    private void NotifyMonitoringStateChanged()
+    {
+        OnPropertyChanged(nameof(MonitoringStateText));
+        OnPropertyChanged(nameof(MonitoringHelpText));
+        OnPropertyChanged(nameof(ShowMonitoringProcessLoad));
+        OnPropertyChanged(nameof(HasMonitoringProcessHistory));
+        OnPropertyChanged(nameof(MonitoringProcessLoadSummaryText));
+        OnPropertyChanged(nameof(MonitoringProcessLoadDetailText));
+        OnPropertyChanged(nameof(MonitoringProcessLoadPeakText));
+        OnPropertyChanged(nameof(MonitoringProcessLoadHistoryText));
+        OnPropertyChanged(nameof(MonitoringProcessLoadAccentColor));
+        OnPropertyChanged(nameof(MonitoringProcessLoadBackgroundColor));
     }
 
     private void ClearCloudStorageMetrics()
@@ -3666,6 +3975,11 @@ public sealed partial class AppSettingsViewModel : ObservableObject
            && (_connectivity.Snapshot.State is ConnectivityState.InternetUnavailable or ConnectivityState.CloudUnavailable
                || _cloudSyncRuntime.IsPaused);
 
+    public bool CanSyncToCloud
+        => HasActiveProfile
+           && !IsSyncBusy
+           && _connectivity.Snapshot.State == ConnectivityState.Online;
+
     public string ConnectivityBannerAccentColor
         => _cloudSyncRuntime.IsPaused && HasActiveProfile
             ? "#6EA8FF"
@@ -3886,7 +4200,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
         {
             "ScanRepositoryCommand" => Loc.T("operation_journal.action.scan_repository"),
             "EnsureRepositoriesCommand" => Loc.T("operation_journal.action.refresh_repositories"),
-            "CreateRepositoryWithFormatsCommand" => Loc.T("operation_journal.action.create_repository"),
+            "CreateRepositoryWithFormatsCommand" or "CreateRepositoryCommand" or "AddDirectoryAndCreateRepositoryCommand" => Loc.T("operation_journal.action.create_repository"),
             "dialog_login" => Loc.T("operation_journal.action.sign_in"),
             "dialog_register" => Loc.T("operation_journal.action.register"),
             "settings_cloud_storage_refresh" => Loc.T("operation_journal.action.refresh_cloud_status"),

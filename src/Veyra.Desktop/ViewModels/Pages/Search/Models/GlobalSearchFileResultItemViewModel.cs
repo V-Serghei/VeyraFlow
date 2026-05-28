@@ -13,4 +13,6 @@ public sealed record GlobalSearchFileResultItemViewModel(
     string ModifiedText,
     string RepositoryBadgeText,
     bool HasExtension,
-    bool HasParentPath);
+    bool HasParentPath,
+    string TagsText = "",
+    bool HasTags = false);

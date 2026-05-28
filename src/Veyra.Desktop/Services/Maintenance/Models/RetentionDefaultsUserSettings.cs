@@ -25,5 +25,7 @@ public sealed record RetentionDefaultsUserSettings(
         MaintenanceWindowEndHour,
         null,
         null,
-        StorageMode);
+        StorageMode,
+        HasLocalOverride: false,
+        PolicySource: Enabled ? RepositoryRetentionPolicySources.Global : RepositoryRetentionPolicySources.None);
 }

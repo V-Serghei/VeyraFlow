@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -17,9 +18,9 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
@@ -30,7 +31,6 @@ using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Storage;
 using Veyra.Desktop.Services.Sync.Runtime;
-using Veyra.Desktop.Services.Sync.Runtime.Models;
 using Veyra.Desktop.Styling;
 using Veyra.Desktop.ViewModels.Windows;
 using Veyra.Desktop.Views.Windows;
@@ -64,6 +64,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private bool _syncingRetentionTriggerSelection;
     private CancellationTokenSource? _cloudSyncStatusRefreshCts;
     private Task? _cloudSyncStatusRefreshTask;
+    private RepositorySettingsSnapshot? _lastSavedSettingsSnapshot;
 
     public event Action? BackRequested;
     public event Func<int, Task>? RepositoryUpdated;
@@ -79,6 +80,17 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private string _customExclusionPattern = string.Empty;
     [ObservableProperty] private bool _autoCaptureFileVersions;
     [ObservableProperty] private bool _protectCloudMetadata;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RetentionEffectiveSourceText))]
+    [NotifyPropertyChangedFor(nameof(RetentionInheritanceHintText))]
+    [NotifyPropertyChangedFor(nameof(CanEditLocalRetentionPolicy))]
+    private bool _retentionUseLocalPolicy = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RetentionEffectiveSourceText))]
+    [NotifyPropertyChangedFor(nameof(RetentionInheritanceHintText))]
+    private string _retentionPolicySource = RepositoryRetentionPolicySources.Repository;
 
     [ObservableProperty] private bool _retentionEnabled;
     [ObservableProperty] private string _retentionMaxAgeDays = string.Empty;
@@ -144,6 +156,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private string _bundleOperationMessage = string.Empty;
 
     [ObservableProperty] private bool _isRetentionRunning;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(RetentionSectionChevron))]
+    private bool _isRetentionSectionExpanded;
     [ObservableProperty] private string _retentionProgressText = string.Empty;
     [ObservableProperty] private string _retentionResultText = string.Empty;
     [ObservableProperty] private double _retentionProgressValue;
@@ -152,6 +167,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [ObservableProperty] private bool _isTransientActionBusy;
     [ObservableProperty] private string _transientActionTitle = string.Empty;
     [ObservableProperty] private string _transientActionDetail = string.Empty;
+    [ObservableProperty] private bool _hasUnsavedSettingsChanges;
 
     public ObservableCollection<string> SelectedFormats { get; } = [];
     public ObservableCollection<string> AvailableFormats { get; } = [];
@@ -189,6 +205,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         _sensitiveActionGuard = sensitiveActionGuard;
         _log = log;
         SelectedFormats.CollectionChanged += OnSelectedFormatsCollectionChanged;
+        ExcludedPatterns.CollectionChanged += OnSettingsCollectionChanged;
         BuildFormatCategories();
         _localization.LanguageChanged += OnLanguageChanged;
         _experience.ModeChanged += OnExperienceModeChanged;
@@ -201,6 +218,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public bool IsProfessionalMode => _experience.IsProfessionalMode;
     public bool ShowAdvancedSyncSettings => IsProfessionalMode;
     public bool ShowAdvancedRetentionSettings => IsProfessionalMode;
+    public bool CanSave => RepositoryId > 0 && !IsLoading && (HasUnsavedSettingsChanges || HasPendingCustomFormat);
     public string CloudSyncSectionHint => !HasCloudAccess
         ? Loc.T("repo_settings.sync_guest_hint")
         : IsBasicMode
@@ -230,6 +248,30 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public string RetentionSectionHint => IsBasicMode
         ? Loc.T("repo_settings.retention_hint_basic")
         : Loc.T("repo_settings.retention_hint");
+    public string RetentionPolicyTitle => IsBasicMode
+        ? Loc.T("repo_settings.retention_policy_basic")
+        : Loc.T("repo_settings.retention_policy");
+    public bool CanEditLocalRetentionPolicy => RetentionUseLocalPolicy;
+    public string RetentionEffectiveSourceText
+    {
+        get
+        {
+            if (!RetentionUseLocalPolicy)
+                return Loc.T("repo_settings.retention_source_inherited_runtime");
+
+            return RepositoryRetentionPolicySources.Normalize(RetentionPolicySource) switch
+            {
+                RepositoryRetentionPolicySources.Global => Loc.T("repo_settings.retention_source_global"),
+                RepositoryRetentionPolicySources.ParentRepository => Loc.T("repo_settings.retention_source_parent"),
+                RepositoryRetentionPolicySources.NestedRepositoryOverride => Loc.T("repo_settings.retention_source_nested_override"),
+                RepositoryRetentionPolicySources.Repository => Loc.T("repo_settings.retention_source_repository"),
+                _ => Loc.T("repo_settings.retention_source_none")
+            };
+        }
+    }
+    public string RetentionInheritanceHintText => RetentionUseLocalPolicy
+        ? Loc.T("repo_settings.retention_local_override_hint")
+        : Loc.T("repo_settings.retention_inherited_hint");
     public bool ShowCloudSyncProgressCard => HasCloudAccess && (HasActiveCloudSyncWork(_lastAppliedCloudSyncStatus) || IsSyncNowRunning);
     public bool HasMeasuredCloudSyncProgress => (_lastAppliedCloudSyncStatus?.UploadProgressTotal ?? 0) > 0;
     public bool ShowCloudSyncProgressPercent => HasMeasuredCloudSyncProgress;
@@ -399,6 +441,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             RetentionResultText = string.Empty;
             RetentionProgressText = string.Empty;
             BundleOperationMessage = string.Empty;
+            _lastSavedSettingsSnapshot = BuildSettingsSnapshot();
+            RefreshSettingsDirtyState();
             _log.LogInformation(
                 "Repository settings loaded. RepositoryId {RepositoryId}. SelectedFormats {SelectedFormatsCount}",
                 RepositoryId,
@@ -547,9 +591,19 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             SelectedFormats.Remove(match);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSave))]
     private async Task SaveAsync()
     {
+        ApplyPendingCustomFormat();
+
+        if (!HasUnsavedSettingsChanges)
+        {
+            _log.LogInformation("Repository settings save skipped because nothing changed. RepositoryId {RepositoryId}", RepositoryId);
+            return;
+        }
+
+        var saveTimer = Stopwatch.StartNew();
+        var validationTimer = Stopwatch.StartNew();
         try
         {
             IsLoading = true;
@@ -566,10 +620,15 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
             if (!await EnsureManualCleanupConfirmationAsync(policy, applyingNow: false))
                 return;
+            var validationMs = validationTimer.ElapsedMilliseconds;
 
             var syncRetryAttempts = ParseIntOrDefault(SyncRetryMaxAttempts, 5, 1, 20);
             var syncRetryDelay = ParseIntOrDefault(SyncRetryBaseDelaySeconds, 30, 5, 600);
             var strategy = RepositorySyncConflictStrategies.Normalize(SyncConflictStrategy);
+            var beforeSaveSnapshot = _lastSavedSettingsSnapshot;
+            var currentSnapshot = BuildSettingsSnapshot(policy, strategy, syncRetryAttempts, syncRetryDelay);
+            var cloudSettingsChanged = beforeSaveSnapshot is not null && currentSnapshot.CloudKey != beforeSaveSnapshot.CloudKey;
+            var mediatorTimer = Stopwatch.StartNew();
 
             var result = await SendMediatorAsync(new UpdateRepositoryConfigurationCommand(
                 RepositoryId,
@@ -584,6 +643,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 strategy,
                 syncRetryAttempts,
                 syncRetryDelay));
+            var mediatorMs = mediatorTimer.ElapsedMilliseconds;
 
             if (!result.Success)
             {
@@ -591,20 +651,37 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 return;
             }
 
-            try
+            if (cloudSettingsChanged)
             {
-                await _cloudSync.ProcessPendingQueueAsync();
-            }
-            catch (Exception syncEx)
-            {
-                _log.LogWarning(syncEx, "Cloud queue resume skipped after repository settings save. RepositoryId {RepositoryId}", RepositoryId);
+                var cloudTimer = Stopwatch.StartNew();
+                try
+                {
+                    await _cloudSync.ProcessPendingQueueAsync();
+                }
+                catch (Exception syncEx)
+                {
+                    _log.LogWarning(syncEx, "Cloud queue resume skipped after repository settings save. RepositoryId {RepositoryId}", RepositoryId);
+                }
+
+                _log.LogInformation(
+                    "Repository settings cloud queue refresh completed. RepositoryId {RepositoryId}. DurationMs {DurationMs}",
+                    RepositoryId,
+                    cloudTimer.ElapsedMilliseconds);
             }
 
             if (RepositoryUpdated is not null)
                 await RepositoryUpdated.Invoke(RepositoryId);
 
-            await LoadAsync(RepositoryId);
-            _log.LogInformation("Repository settings saved. RepositoryId {RepositoryId}", RepositoryId);
+            _lastAppliedRetentionPolicy = policy;
+            _lastSavedSettingsSnapshot = currentSnapshot;
+            RefreshSettingsDirtyState();
+            _log.LogInformation(
+                "Repository settings saved. RepositoryId {RepositoryId}. ValidationMs {ValidationMs}. MediatorMs {MediatorMs}. TotalMs {TotalMs}. CloudSettingsChanged {CloudSettingsChanged}",
+                RepositoryId,
+                validationMs,
+                mediatorMs,
+                saveTimer.ElapsedMilliseconds,
+                cloudSettingsChanged);
         }
         catch (Exception ex)
         {
@@ -614,6 +691,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         finally
         {
             IsLoading = false;
+            SaveCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -687,6 +765,21 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 IsSyncNowRunning = false;
             });
         }
+    }
+
+    [RelayCommand]
+    private async Task OpenCloudRepositoryManagerAsync()
+    {
+        var owner = _windows.GetActiveWindow();
+        var window = _windows.Create<CloudRepositoryManagerWindow>();
+
+        if (window.DataContext is CloudRepositoryManagerWindowViewModel vm)
+            await vm.RefreshAsync();
+
+        if (owner is not null)
+            await _windows.ShowDialogAsync(window, owner);
+        else
+            _windows.Show(window);
     }
 
     [RelayCommand]
@@ -905,6 +998,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private void ToggleRetentionSection() => IsRetentionSectionExpanded = !IsRetentionSectionExpanded;
+
     [RelayCommand(CanExecute = nameof(CanRunRetentionDryRun))]
     private Task RunRetentionDryRunAsync() => RunRetentionAsync(dryRun: true);
 
@@ -938,7 +1034,11 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     {
         RefreshAvailableFormats();
         RefreshFormatCategoryState();
+        RefreshSettingsDirtyState();
     }
+
+    private void OnSettingsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        => RefreshSettingsDirtyState();
 
     private void RefreshAvailableFormats()
     {
@@ -1032,27 +1132,24 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public bool CanRunRetention => CanRunRetentionDryRun;
     public bool CanRunRetentionDryRun =>
         RepositoryId > 0
-        && RetentionEnabled
+        && (RetentionEnabled || !RetentionUseLocalPolicy)
         && !IsRetentionRunning
         && !RequiresManualCleanupUnlock
-        && IsRetentionAutomaticCompactionConfigured;
+        && (!RetentionUseLocalPolicy || IsRetentionAutomaticCompactionConfigured);
     public bool CanRunRetentionApply =>
         CanRunRetentionDryRun
         && !RequiresManualCleanupUnlock
-        && IsRetentionAutomaticCompactionConfigured
-        && IsRetentionMaintenanceWindowConfigured
-        && HasRetentionPreview
-        && RetentionRulesAcknowledged
-        && (RetentionPreview?.PolicyApplied ?? false);
+        && (!RetentionUseLocalPolicy || IsRetentionAutomaticCompactionConfigured);
     public bool CanCancelRetention => IsRetentionRunning;
     public bool HasRetentionPreview => RetentionPreview is not null;
-    public bool RequiresManualCleanupUnlock => RetentionEnabled && TargetsManualSnapshotsFromState() && !RetentionManualCleanupAllowed;
+    public bool RequiresManualCleanupUnlock => RetentionUseLocalPolicy && RetentionEnabled && TargetsManualSnapshotsFromState() && !RetentionManualCleanupAllowed;
     public bool ShowsRetentionManualRiskBadge => RetentionEnabled && TargetsManualSnapshotsFromState();
     public bool IsRetentionAutomaticCompactionConfigured => !RetentionAutomaticCompactionEnabled || SelectedRetentionAutomaticCompactionWindowHours > 0;
     public bool IsRetentionMaintenanceWindowConfigured =>
         !RetentionEnabled
         || (RetentionMaintenanceWindowEnabled
             && SelectedRetentionMaintenanceWindowStartHour != SelectedRetentionMaintenanceWindowEndHour);
+    public string RetentionSectionChevron => IsRetentionSectionExpanded ? "▼" : "▶";
     public string RetentionStorageModeSummaryText => RetentionArchiveMode
         ? Loc.T("repo_settings.retention_storage_mode_archive_summary")
         : Loc.T("repo_settings.retention_storage_mode_delete_summary");
@@ -1106,20 +1203,26 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     {
         get
         {
+            if (!RetentionUseLocalPolicy)
+            {
+                if (!HasRetentionPreview)
+                    return Loc.T("repo_settings.retention_preview_optional");
+
+                return (RetentionPreview?.PolicyApplied ?? false)
+                    ? Loc.T("repo_settings.retention_apply_ready")
+                    : Loc.T("repo_settings.retention_preview_ready_no_cleanup");
+            }
+
             if (!RetentionEnabled)
                 return Loc.T("repo_settings.retention_preview_disabled");
             if (RequiresManualCleanupUnlock)
                 return Loc.T("repo_settings.retention_manual_cleanup_required");
             if (!IsRetentionAutomaticCompactionConfigured)
                 return Loc.T("repo_settings.retention_compaction_window_required");
-            if (!IsRetentionMaintenanceWindowConfigured)
-                return Loc.T("repo_settings.retention_window_required");
             if (!HasRetentionPreview)
-                return Loc.T("repo_settings.retention_preview_required");
-            if (!RetentionRulesAcknowledged)
-                return Loc.T("repo_settings.retention_ack_required");
+                return Loc.T("repo_settings.retention_preview_optional");
             if (!(RetentionPreview?.PolicyApplied ?? false))
-                return Loc.T("repo_settings.retention_preview_no_changes");
+                return Loc.T("repo_settings.retention_preview_ready_no_cleanup");
             if (NeedsManualCleanupConfirmation(BuildRetentionPolicyFromState()))
                 return Loc.T("repo_settings.retention_manual_second_confirm_required");
 
@@ -1143,6 +1246,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     partial void OnIsLoadingChanged(bool value)
     {
+        SaveCommand.NotifyCanExecuteChanged();
         ExportBundleCommand.NotifyCanExecuteChanged();
         ImportBundleCommand.NotifyCanExecuteChanged();
         OpenRetentionSetupCommand.NotifyCanExecuteChanged();
@@ -1151,6 +1255,13 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowBlockingOverlay));
         OnPropertyChanged(nameof(BlockingOverlayTitle));
         OnPropertyChanged(nameof(BlockingOverlayDetail));
+        OnPropertyChanged(nameof(CanSave));
+    }
+
+    partial void OnHasUnsavedSettingsChangesChanged(bool value)
+    {
+        SaveCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSave));
     }
 
     partial void OnIsBundleOperationRunningChanged(bool value)
@@ -1172,6 +1283,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     partial void OnRepositoryIdChanged(int value)
     {
+        SaveCommand.NotifyCanExecuteChanged();
         RunRetentionDryRunCommand.NotifyCanExecuteChanged();
         RunRetentionApplyCommand.NotifyCanExecuteChanged();
         OpenRetentionSetupCommand.NotifyCanExecuteChanged();
@@ -1182,7 +1294,30 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CanRunRetentionDryRun));
         OnPropertyChanged(nameof(CanRunRetentionApply));
         OnPropertyChanged(nameof(CanRunBundleOperations));
+        OnPropertyChanged(nameof(CanSave));
     }
+
+    partial void OnRepositoryNameChanged(string value) => RefreshSettingsDirtyState();
+
+    partial void OnDescriptionChanged(string? value) => RefreshSettingsDirtyState();
+
+    partial void OnDirectoryPathChanged(string value) => RefreshSettingsDirtyState();
+
+    partial void OnCustomFormatChanged(string value)
+    {
+        SaveCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSave));
+    }
+
+    partial void OnAutoCaptureFileVersionsChanged(bool value) => RefreshSettingsDirtyState();
+
+    partial void OnProtectCloudMetadataChanged(bool value) => RefreshSettingsDirtyState();
+
+    partial void OnSyncConflictStrategyChanged(string value) => RefreshSettingsDirtyState();
+
+    partial void OnSyncRetryMaxAttemptsChanged(string value) => RefreshSettingsDirtyState();
+
+    partial void OnSyncRetryBaseDelaySecondsChanged(string value) => RefreshSettingsDirtyState();
 
     partial void OnRetentionEnabledChanged(bool value)
     {
@@ -1194,6 +1329,17 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         InvalidateRetentionPreview();
         RunRetentionCommandStateRefresh();
+        RefreshSettingsDirtyState();
+    }
+
+    partial void OnRetentionUseLocalPolicyChanged(bool value)
+    {
+        RetentionPolicySource = value
+            ? RepositoryRetentionPolicySources.Repository
+            : RepositoryRetentionPolicySources.None;
+        InvalidateRetentionPreview();
+        RunRetentionCommandStateRefresh();
+        RefreshSettingsDirtyState();
     }
 
     partial void OnRetentionMaxAgeDaysChanged(string value) => OnRetentionPolicyEdited();
@@ -1311,6 +1457,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         SyncManualHistorySafeModeFromState();
         InvalidateRetentionPreview();
         RunRetentionCommandStateRefresh();
+        RefreshSettingsDirtyState();
     }
 
     private void InvalidateRetentionPreview()
@@ -1423,8 +1570,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             var currentPolicy = BuildRetentionPolicyFromState();
             var hasUnsavedRetentionPolicyChanges = HasRetentionPolicyChanges(currentPolicy);
 
-            if (!dryRun && !await EnsureManualCleanupConfirmationAsync(currentPolicy, applyingNow: true))
+            if (!dryRun
+                && currentPolicy.HasLocalOverride
+                && !await EnsureManualCleanupConfirmationAsync(currentPolicy, applyingNow: true))
+            {
                 return;
+            }
 
             IsRetentionRunning = true;
             if (dryRun)
@@ -1450,7 +1601,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 new RunRepositoryRetentionCommand(
                     RepositoryId,
                     dryRun,
-                    currentPolicy,
+                    currentPolicy.HasLocalOverride ? currentPolicy : null,
                     progress),
                 _retentionCts.Token);
 
@@ -1466,7 +1617,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                 RetentionRulesAcknowledged = false;
             }
 
-            RetentionResultText = result.Value.Summary;
+            RetentionResultText = FormatRetentionRunResult(result.Value);
             RetentionProgressText = Loc.T("repo_settings.retention_completed");
             RetentionProgressValue = 100;
             IsRetentionProgressIndeterminate = false;
@@ -1508,6 +1659,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private void ApplyRetentionPolicy(RepositoryRetentionPolicyDto policy)
     {
         _lastAppliedRetentionPolicy = policy;
+        RetentionUseLocalPolicy = policy.HasLocalOverride;
+        RetentionPolicySource = policy.PolicySource;
         ApplyRetentionEditableState(policy);
         ApplyRetentionStatusState(policy);
     }
@@ -1541,10 +1694,59 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     private void ApplyRetentionStatusState(RepositoryRetentionPolicyDto policy)
     {
         RetentionLastRunText = FormatNeverOrDate(policy.LastRunAtUtc);
-        RetentionLastStatusText = string.IsNullOrWhiteSpace(policy.LastStatus)
-            ? Loc.T("common.not_available_short")
-            : policy.LastStatus;
+        RetentionLastStatusText = HumanizeRetentionStatus(policy.LastStatus);
     }
+
+    private static string HumanizeRetentionStatus(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return Loc.T("common.not_available_short");
+
+        if (raw.StartsWith("No snapshots found", StringComparison.OrdinalIgnoreCase))
+            return Loc.T("repo_settings.retention_status_no_changes");
+
+        var isDryRun = raw.StartsWith("Dry-run:", StringComparison.OrdinalIgnoreCase);
+        var isApplied = raw.StartsWith("Applied:", StringComparison.OrdinalIgnoreCase);
+
+        if (!isDryRun && !isApplied)
+            return raw;
+
+        var snapshots = ExtractRetentionStatusInt(raw, "snapshots");
+        var freed = ExtractRetentionStatusFreed(raw);
+        var key = isDryRun ? "repo_settings.retention_status_dry_run" : "repo_settings.retention_status_applied";
+        return Loc.F(key, snapshots, freed);
+    }
+
+    private static int ExtractRetentionStatusInt(string raw, string field)
+    {
+        var marker = field + "=";
+        var idx = raw.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return 0;
+        idx += marker.Length;
+        var end = raw.IndexOfAny([',', ' '], idx);
+        var token = end < 0 ? raw[idx..] : raw[idx..end];
+        return int.TryParse(token, out var n) ? n : 0;
+    }
+
+    private static string ExtractRetentionStatusFreed(string raw)
+    {
+        var marker = "freed=";
+        var idx = raw.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return "0 B";
+        idx += marker.Length;
+        var end = raw.IndexOfAny([',', ')'], idx);
+        return (end < 0 ? raw[idx..] : raw[idx..end]).Trim();
+    }
+
+    private static string FormatRetentionRunResult(RepositoryRetentionRunResultDto result)
+        => Loc.F(
+            result.DryRun
+                ? "repo_settings.retention_preview_completed_detail"
+                : "repo_settings.retention_cleanup_completed_detail",
+            result.SnapshotsMarked,
+            result.FileVersionsMarked,
+            result.BlockFilesDeleted,
+            FormatBytes(result.EstimatedFreedBytes));
 
     private void ApplyCloudSyncStatus(RepositoryCloudSyncStatusDto? status)
     {
@@ -1692,11 +1894,156 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             AutomaticCompactionEnabled: RetentionAutomaticCompactionEnabled,
             AutomaticCompactionWindowHours: RetentionAutomaticCompactionEnabled
                 ? SelectedRetentionAutomaticCompactionWindowHours
-                : null);
+                : null,
+            HasLocalOverride: RetentionUseLocalPolicy,
+            PolicySource: RetentionUseLocalPolicy
+                ? RepositoryRetentionPolicySources.Repository
+                : RepositoryRetentionPolicySources.None,
+            SourceRepositoryId: RetentionUseLocalPolicy ? RepositoryId : null);
     }
+
+    private RepositorySettingsSnapshot BuildSettingsSnapshot()
+    {
+        var policy = BuildRetentionPolicyFromState();
+        var retryAttempts = ParseIntOrDefault(SyncRetryMaxAttempts, 5, 1, 20);
+        var retryDelay = ParseIntOrDefault(SyncRetryBaseDelaySeconds, 30, 5, 600);
+        var strategy = RepositorySyncConflictStrategies.Normalize(SyncConflictStrategy);
+        return BuildSettingsSnapshot(policy, strategy, retryAttempts, retryDelay);
+    }
+
+    private RepositorySettingsSnapshot BuildSettingsSnapshot(
+        RepositoryRetentionPolicyDto policy,
+        string syncConflictStrategy,
+        int syncRetryAttempts,
+        int syncRetryDelaySeconds)
+    {
+        var normalizedPolicy = NormalizeRetentionPolicy(policy);
+        var retentionKey = string.Join("|", new[]
+        {
+            normalizedPolicy.HasLocalOverride.ToString(CultureInfo.InvariantCulture),
+            normalizedPolicy.Enabled.ToString(CultureInfo.InvariantCulture),
+            normalizedPolicy.MaxAgeDays?.ToString(CultureInfo.InvariantCulture) ?? "",
+            normalizedPolicy.MaxSnapshots?.ToString(CultureInfo.InvariantCulture) ?? "",
+            normalizedPolicy.MaxTotalSizeBytes?.ToString(CultureInfo.InvariantCulture) ?? "",
+            string.Join(",", normalizedPolicy.TriggerFilters),
+            normalizedPolicy.RunIntervalMinutes.ToString(CultureInfo.InvariantCulture),
+            normalizedPolicy.MaintenanceWindowStartHour?.ToString(CultureInfo.InvariantCulture) ?? "",
+            normalizedPolicy.MaintenanceWindowEndHour?.ToString(CultureInfo.InvariantCulture) ?? "",
+            RepositoryRetentionStorageModes.Normalize(normalizedPolicy.StorageMode),
+            normalizedPolicy.AllowManualSnapshotCleanup.ToString(CultureInfo.InvariantCulture),
+            normalizedPolicy.AutomaticCompactionEnabled.ToString(CultureInfo.InvariantCulture),
+            normalizedPolicy.AutomaticCompactionWindowHours?.ToString(CultureInfo.InvariantCulture) ?? "",
+            RepositoryRetentionPolicySources.Normalize(normalizedPolicy.PolicySource),
+            normalizedPolicy.SourceRepositoryId?.ToString(CultureInfo.InvariantCulture) ?? ""
+        });
+
+        var cloudKey = string.Join("|", new[]
+        {
+            ProtectCloudMetadata.ToString(CultureInfo.InvariantCulture),
+            RepositorySyncConflictStrategies.Normalize(syncConflictStrategy),
+            syncRetryAttempts.ToString(CultureInfo.InvariantCulture),
+            syncRetryDelaySeconds.ToString(CultureInfo.InvariantCulture)
+        });
+
+        return new RepositorySettingsSnapshot(
+            RepositoryId,
+            (RepositoryName ?? string.Empty).Trim(),
+            Description?.Trim() ?? string.Empty,
+            NormalizeDirectoryPathForSnapshot(DirectoryPath),
+            BuildNormalizedFormatsKey(SelectedFormats),
+            AutoCaptureFileVersions,
+            ProtectCloudMetadata,
+            BuildNormalizedPatternsKey(ExcludedPatterns),
+            retentionKey,
+            RepositorySyncConflictStrategies.Normalize(syncConflictStrategy),
+            syncRetryAttempts,
+            syncRetryDelaySeconds,
+            cloudKey);
+    }
+
+    private void RefreshSettingsDirtyState()
+    {
+        HasUnsavedSettingsChanges = _lastSavedSettingsSnapshot is not null
+                                    && !BuildSettingsSnapshot().Equals(_lastSavedSettingsSnapshot);
+        SaveCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSave));
+    }
+
+    private bool HasPendingCustomFormat
+    {
+        get
+        {
+            var normalized = NormalizeFormat(CustomFormat);
+            return !string.IsNullOrWhiteSpace(normalized)
+                   && !SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void ApplyPendingCustomFormat()
+    {
+        var normalized = NormalizeFormat(CustomFormat);
+        if (string.IsNullOrWhiteSpace(normalized)
+            || SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _allFormatOptions.Add(normalized);
+        SelectedFormats.Add(normalized);
+        CustomFormat = string.Empty;
+    }
+
+    private static string BuildNormalizedFormatsKey(IEnumerable<string> values)
+        => string.Join("|", values
+            .Select(NormalizeFormat)
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+
+    private static string BuildNormalizedPatternsKey(IEnumerable<string> values)
+        => string.Join("|", values
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Select(static value => value.Trim().Replace('\\', '/').Trim('/'))
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase));
+
+    private static string NormalizeDirectoryPathForSnapshot(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        try
+        {
+            return Path.GetFullPath(value.Trim().Replace('/', Path.DirectorySeparatorChar))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return value.Trim().TrimEnd('\\', '/');
+        }
+    }
+
+    private sealed record RepositorySettingsSnapshot(
+        int RepositoryId,
+        string Name,
+        string Description,
+        string DirectoryPath,
+        string FormatsKey,
+        bool AutoCaptureFileVersions,
+        bool ProtectCloudMetadata,
+        string ExcludedPatternsKey,
+        string RetentionKey,
+        string SyncConflictStrategy,
+        int SyncRetryMaxAttempts,
+        int SyncRetryBaseDelaySeconds,
+        string CloudKey);
 
     private string? ValidateRetentionPolicyBeforeSave(RepositoryRetentionPolicyDto policy)
     {
+        if (!policy.HasLocalOverride)
+            return null;
+
         if (!policy.Enabled || !HasRetentionPolicyChanges(policy))
             return null;
 
@@ -1705,15 +2052,6 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
         if (policy.AutomaticCompactionEnabled && policy.AutomaticCompactionWindowHours is not > 0)
             return Loc.T("repo_settings.retention_compaction_window_required");
-
-        if (!IsRetentionMaintenanceWindowConfigured)
-            return Loc.T("repo_settings.retention_window_required");
-
-        if (!HasRetentionPreview)
-            return Loc.T("repo_settings.retention_preview_required");
-
-        if (!RetentionRulesAcknowledged)
-            return Loc.T("repo_settings.retention_ack_required");
 
         return null;
     }
@@ -1726,7 +2064,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         var current = NormalizeRetentionPolicy(currentPolicy);
         var applied = NormalizeRetentionPolicy(_lastAppliedRetentionPolicy);
 
-        if (current.Enabled != applied.Enabled
+        if (current.HasLocalOverride != applied.HasLocalOverride
+            || current.Enabled != applied.Enabled
             || current.MaxAgeDays != applied.MaxAgeDays
             || current.MaxSnapshots != applied.MaxSnapshots
             || current.MaxTotalSizeBytes != applied.MaxTotalSizeBytes
@@ -1766,6 +2105,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             MaintenanceWindowStartHour = policy.MaintenanceWindowStartHour is >= 0 and <= 23 ? policy.MaintenanceWindowStartHour : null,
             MaintenanceWindowEndHour = policy.MaintenanceWindowEndHour is >= 0 and <= 23 ? policy.MaintenanceWindowEndHour : null,
             StorageMode = RepositoryRetentionStorageModes.Normalize(policy.StorageMode),
+            HasLocalOverride = policy.HasLocalOverride,
+            PolicySource = RepositoryRetentionPolicySources.Normalize(policy.PolicySource),
+            SourceRepositoryId = policy.SourceRepositoryId,
             AutomaticCompactionWindowHours = policy.AutomaticCompactionEnabled && policy.AutomaticCompactionWindowHours is > 0
                 ? policy.AutomaticCompactionWindowHours
                 : null,
@@ -1794,11 +2136,23 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             "retrying" => Loc.T("dashboard.sync.retrying"),
             "auth_required" => Loc.T("dashboard.sync.auth_required"),
             "conflict" => Loc.T("dashboard.sync.conflict"),
+            "dead_letter" => Loc.T("dashboard.sync.dead_letter"),
             "failed" => Loc.T("dashboard.sync.failed"),
+            "linked" => Loc.T("dashboard.sync.linked"),
+            "paused" => Loc.T("dashboard.sync.paused"),
+            "cancelled" => Loc.T("dashboard.sync.cancelled"),
             "skipped" => Loc.T("dashboard.sync.skipped"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("dashboard.sync.synced"),
-            _ => status.Replace('_', ' ')
+            _ => Loc.F("dashboard.sync.unknown_status", HumanizeStatusToken(status))
         };
+    }
+
+    private static string HumanizeStatusToken(string status)
+    {
+        var text = status.Trim().Replace('_', ' ').Replace('-', ' ');
+        return string.Join(" ", text
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(segment => char.ToUpperInvariant(segment[0]) + segment[1..].ToLowerInvariant()));
     }
 
     private static string FormatSyncingUploadStatus(string? status)
@@ -1832,7 +2186,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             _ when normalized.StartsWith("syncing_upload", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_working"),
             "queued" or "syncing" or "syncing_prepare" or "syncing_snapshot" or "syncing_finalize" or "offline_retry" or "retrying"
                 => Loc.T("repo_settings.sync_status_basic_working"),
-            "auth_required" or "conflict" or "failed" or "dead_letter" => Loc.T("repo_settings.sync_status_basic_attention"),
+            "auth_required" or "conflict" or "failed" or "dead_letter" or "paused" or "cancelled" => Loc.T("repo_settings.sync_status_basic_attention"),
+            "linked" => Loc.T("repo_settings.sync_status_basic_ready"),
             _ when normalized.StartsWith("synced", StringComparison.Ordinal) => Loc.T("repo_settings.sync_status_basic_ready"),
             _ => Loc.T("repo_settings.sync_status_basic_local")
         };
@@ -1936,6 +2291,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowCloudConnectivityHint));
         OnPropertyChanged(nameof(CloudConnectivityHintText));
         NotifyCloudSyncPresentationChanged();
+        OnPropertyChanged(nameof(RetentionPolicyTitle));
         OnPropertyChanged(nameof(RetentionSectionHint));
         OnPropertyChanged(nameof(CanRunSyncNow));
         OnPropertyChanged(nameof(CanRunCloudRepair));
@@ -2571,6 +2927,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             BuildRetentionRuleText(),
             BuildRetentionStorageText(),
             BuildRetentionManualHistoryText(),
+            BuildRetentionProtectedTagsText(),
             BuildRetentionScheduleText(),
             BuildRetentionCompactionText()
         };
@@ -2631,6 +2988,9 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
             ? Loc.T("repo_settings.retention_simple_manual_enabled")
             : Loc.T("repo_settings.retention_simple_manual_locked");
     }
+
+    private static string BuildRetentionProtectedTagsText()
+        => Loc.T("repo_settings.retention_simple_protected_tags");
 
     private string BuildRetentionStorageText()
     {
@@ -2711,11 +3071,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var v = value.Trim();
-        if (!v.StartsWith('.'))
-            v = "." + v;
-
-        return v.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeExtension(value) ?? string.Empty;
     }
 
     private static string NormalizeExclusionPattern(string? value)

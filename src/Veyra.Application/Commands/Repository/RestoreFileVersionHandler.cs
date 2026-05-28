@@ -19,29 +19,29 @@ public sealed class RestoreFileVersionHandler(
         {
             var repo = await repositories.GetRepositoryByIdAsync(request.RepositoryId, ct);
             if (repo is null || repo.IsDeleted)
-                return OperationResult<string>.Fail("Репозиторий не найден.");
+                return OperationResult<string>.Fail("Repository was not found.");
 
             var restoreData = await snapshots.GetFileVersionRestoreDataAsync(request.FileVersionId, ct);
             if (restoreData is null)
-                return OperationResult<string>.Fail("Версия файла не найдена.");
+                return OperationResult<string>.Fail("File version was not found.");
 
             if (restoreData.RepositoryId != request.RepositoryId)
-                return OperationResult<string>.Fail("Версия файла не принадлежит репозиторию.");
+                return OperationResult<string>.Fail("File version does not belong to the selected repository.");
 
             var expectedPath = NormalizeRelativePath(request.RelativePath);
             if (!restoreData.RelativePath.Equals(expectedPath, StringComparison.OrdinalIgnoreCase))
-                return OperationResult<string>.Fail("Версия файла не соответствует указанному пути.");
+                return OperationResult<string>.Fail("File version does not match the requested path.");
 
             if (restoreData.IsDeletionMarker)
-                return OperationResult<string>.Fail("Эта версия помечена как удаление и не содержит данных для восстановления.");
+                return OperationResult<string>.Fail("This version is a deletion marker and does not contain restore data.");
 
             if (restoreData.Blocks.Count == 0 && restoreData.SizeBytes > 0)
-                return OperationResult<string>.Fail("Для версии отсутствуют блоки содержимого.");
+                return OperationResult<string>.Fail("Content blocks are missing for this version.");
 
             var targetPath = ResolveTargetPath(repo.DirectoryPath, restoreData.RelativePath, request.OverwriteCurrent, request.TargetPath);
             var overwrite = request.OverwriteCurrent;
 
-            await contentStore.RestoreFileAsync(restoreData.Blocks, targetPath, overwrite, ct);
+            await contentStore.RestoreFileAsync(restoreData.Blocks, targetPath, overwrite, restoreData.ContentHashSha256, ct);
 
             log.LogInformation(
                 "File version restored. RepositoryId {RepositoryId}. VersionId {VersionId}. Target {Target}. Overwrite {Overwrite}",

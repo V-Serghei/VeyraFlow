@@ -14,4 +14,7 @@ public sealed record RepositoryRetentionPolicyDto(
     string StorageMode = RepositoryRetentionStorageModes.Delete,
     bool AllowManualSnapshotCleanup = false,
     bool AutomaticCompactionEnabled = false,
-    int? AutomaticCompactionWindowHours = null);
+    int? AutomaticCompactionWindowHours = null,
+    bool HasLocalOverride = true,
+    string PolicySource = RepositoryRetentionPolicySources.Repository,
+    int? SourceRepositoryId = null);

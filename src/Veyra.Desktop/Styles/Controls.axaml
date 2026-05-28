@@ -10,6 +10,7 @@
                     <SolidColorBrush x:Key="VeyraSurfaceSoftBrush" Color="#F1F1EF"/>
                     <SolidColorBrush x:Key="VeyraBorderBrush" Color="#D8D8D3"/>
                     <SolidColorBrush x:Key="VeyraBorderSoftBrush" Color="#E6E6E1"/>
+                    <SolidColorBrush x:Key="VeyraPopupBorderBrush" Color="#8FAFDC"/>
                     <SolidColorBrush x:Key="VeyraAccentBrush" Color="#2F76D2"/>
                     <SolidColorBrush x:Key="VeyraAccentStrongBrush" Color="#245CA8"/>
                     <SolidColorBrush x:Key="VeyraAccentSubtleBrush" Color="#EAF1FA"/>
@@ -62,6 +63,7 @@
                     <SolidColorBrush x:Key="VeyraSurfaceSoftBrush" Color="#181B1E"/>
                     <SolidColorBrush x:Key="VeyraBorderBrush" Color="#32363C"/>
                     <SolidColorBrush x:Key="VeyraBorderSoftBrush" Color="#2A2E34"/>
+                    <SolidColorBrush x:Key="VeyraPopupBorderBrush" Color="#5F7EA8"/>
                     <SolidColorBrush x:Key="VeyraAccentBrush" Color="#669AE8"/>
                     <SolidColorBrush x:Key="VeyraAccentStrongBrush" Color="#4C7DCA"/>
                     <SolidColorBrush x:Key="VeyraAccentSubtleBrush" Color="#253241"/>
@@ -196,10 +198,11 @@
 
     <Style Selector="Border.popover-panel">
         <Setter Property="Background" Value="{DynamicResource VeyraSurfaceRaisedBrush}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraPopupBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
         <Setter Property="Padding" Value="12"/>
+        <Setter Property="BoxShadow" Value="0 18 44 0 #66000000"/>
     </Style>
 
     <Style Selector="Border.segmented-control">
@@ -259,6 +262,18 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="{DynamicResource VeyraRadiusLarge}"/>
         <Setter Property="Padding" Value="14"/>
+    </Style>
+
+    <Style Selector="Border.filter-sheet.floating-panel">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraPopupBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="BoxShadow" Value="0 18 44 0 #66000000"/>
+    </Style>
+
+    <Style Selector="Border.dialog-shell.floating-panel">
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraPopupBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="BoxShadow" Value="0 22 56 0 #77000000"/>
     </Style>
 
     <Style Selector="Border.guided-tour-bubble">
@@ -403,6 +418,31 @@
         <Setter Property="Height" Value="34"/>
         <Setter Property="Padding" Value="0"/>
         <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/>
+    </Style>
+
+    <Style Selector="Button.help-inline">
+        <Setter Property="Width" Value="16"/>
+        <Setter Property="Height" Value="16"/>
+        <Setter Property="MinWidth" Value="16"/>
+        <Setter Property="MinHeight" Value="16"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Margin" Value="2,0,0,0"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextMutedBrush}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+    <Style Selector="Button.help-inline:pointerover">
+        <Setter Property="Background" Value="{DynamicResource VeyraSurfaceSoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource VeyraBorderSoftBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource VeyraTextPrimaryBrush}"/>
     </Style>
 
     <Style Selector="Button.compact">

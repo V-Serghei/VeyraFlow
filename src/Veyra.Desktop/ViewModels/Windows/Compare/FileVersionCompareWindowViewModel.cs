@@ -46,6 +46,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private PendingBinaryDiffSummaryDto? _lastBinarySummary;
     private PendingImageDiffPreviewDto? _lastImagePreview;
     private PendingAudioDiffPreviewDto? _lastAudioPreview;
+    private PendingArchiveDiffPreviewDto? _lastArchivePreview;
+    private readonly List<ArchiveDiffEntryItemViewModel> _allArchiveEntries = [];
     private bool _isSvgCodePreviewActive;
     private byte[] _lastRenderedOverlayPngBytes = Array.Empty<byte>();
     private int _lastRenderedChangedPixelCount;
@@ -54,6 +56,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private bool _suspendImageDiffRerender;
     private readonly Stopwatch _loadingStopwatch = new();
     private readonly DispatcherTimer _loadingStatusTimer;
+    private readonly DispatcherTimer _audioPlaybackTimer;
+    private bool _suppressAudioSeek;
 
     private int _repositoryId;
     private string _repositoryPath = string.Empty;
@@ -61,6 +65,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private string _displayName = string.Empty;
     private string? _audioPlaybackStatusKey;
     private object[] _audioPlaybackStatusArgs = Array.Empty<object>();
+    private ArchiveDiffFilterMode _archiveFilter = ArchiveDiffFilterMode.All;
 
     public event Action? RequestClose;
     public event Action? RequestSaveImageDiffPreview;
@@ -119,6 +124,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsBinaryPreview))]
     [NotifyPropertyChangedFor(nameof(IsImagePreview))]
     [NotifyPropertyChangedFor(nameof(IsAudioPreview))]
+    [NotifyPropertyChangedFor(nameof(IsArchivePreview))]
     [NotifyPropertyChangedFor(nameof(IsWordRichPreview))]
     [NotifyPropertyChangedFor(nameof(ShowDiffRowsPanel))]
     [NotifyPropertyChangedFor(nameof(ShowWordDiffRowsPanel))]
@@ -126,6 +132,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(HasNoPreviewContent))]
     [NotifyPropertyChangedFor(nameof(CanToggleFullFilePreview))]
     [NotifyPropertyChangedFor(nameof(CanToggleSvgCodePreview))]
+    [NotifyPropertyChangedFor(nameof(ShowNonImagePreviewToolbar))]
     private PendingDiffPreviewKind _previewKind = PendingDiffPreviewKind.None;
 
     [ObservableProperty]
@@ -157,20 +164,32 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAudioSpectrogramPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowAudioSpectralHero))]
     private Bitmap? _audioSpectrogramPreview;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAudioSpectralDeltaPreview))]
+    [NotifyPropertyChangedFor(nameof(ShowAudioSpectralHero))]
     private Bitmap? _audioSpectralDeltaPreview;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StopAudioPlaybackCommand))]
     [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
     private bool _isAudioPlaybackActive;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasAudioPlaybackStatus))]
     private string _audioPlaybackStatus = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
+    private double _audioPlaybackPositionSeconds;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AudioPlaybackTimerText))]
+    [NotifyPropertyChangedFor(nameof(IsAudioPlaybackSeekEnabled))]
+    private double _audioPlaybackDurationSeconds;
 
     [ObservableProperty] private string _leftImageCaption = string.Empty;
     [ObservableProperty] private string _rightImageCaption = string.Empty;
@@ -179,12 +198,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageSensitivityLabel))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
-    private double _imageDiffSensitivity = 72;
+    private double _imageDiffSensitivity = ImageDiffPreviewDefaults.SensitivityPercent;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SplitPositionLabel))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactSummary))]
-    private double _comparisonSplitPercent = 50;
+    private double _comparisonSplitPercent = ImageDiffPreviewDefaults.SplitPercent;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSplitImageDiffMode))]
@@ -195,21 +214,26 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageRegionBoxesLabel))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
-    private bool _showImageDiffRegionBoxes = true;
+    private bool _showImageDiffRegionBoxes = ImageDiffPreviewDefaults.ShowRegionBoxes;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SourceImagePanelsLabel))]
     [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
     [NotifyPropertyChangedFor(nameof(ImageDiffCompactStateText))]
-    private bool _showSourceImagePanels = false;
+    private bool _showSourceImagePanels = ImageDiffPreviewDefaults.ShowSourceImagePanels;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageDiffSettingsToggleLabel))]
+    [NotifyPropertyChangedFor(nameof(ShowSourceImagePanelsSection))]
     private bool _showImageDiffSettings;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ImageDiffDetailsToggleLabel))]
     private bool _showImageDiffDetails;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowNonImagePreviewToolbar))]
+    private bool _showPreviewToolbar;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WrapToggleLabel))]
@@ -245,6 +269,21 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     [ObservableProperty] private string _fullPreviewSummary = string.Empty;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedArchiveEntry))]
+    private ArchiveDiffEntryItemViewModel? _selectedArchiveEntry;
+
+    [ObservableProperty]
+    private ArchiveDiffTreeNodeViewModel? _selectedArchiveTreeNode;
+
+    [ObservableProperty]
+    private string _archiveSearchQuery = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsArchiveListViewEnabled))]
+    [NotifyPropertyChangedFor(nameof(ArchiveViewModeLabel))]
+    private bool _isArchiveTreeViewEnabled;
+
     public ObservableCollection<FileVersionCompareListItemViewModel> Versions { get; } = [];
     public ObservableCollection<DiffPreviewRowViewModel> PreviewRows { get; } = [];
     public ObservableCollection<DiffPreviewRowViewModel> FullPreviewRows { get; } = [];
@@ -252,6 +291,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public ObservableCollection<SnapshotPreviewMetricItemViewModel> PreviewMetrics { get; } = [];
     public ObservableCollection<ImageDiffModeOptionViewModel> ImageDiffModes { get; } = [];
     public ObservableCollection<AudioChangedSegmentItemViewModel> AudioChangedSegments { get; } = [];
+    public ObservableCollection<ArchiveDiffEntryItemViewModel> ArchiveEntries { get; } = [];
+    public ObservableCollection<ArchiveDiffTreeNodeViewModel> ArchiveTreeRoots { get; } = [];
 
     public FileVersionCompareWindowViewModel(
         IServiceScopeExecutor scopeExecutor,
@@ -266,6 +307,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         _nativeWordCompare = nativeWordCompare;
         _audioPlayback = audioPlayback;
         _loadingStatusTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, OnLoadingStatusTimerTick);
+        _audioPlaybackTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, OnAudioPlaybackTimerTick);
 
         Versions.CollectionChanged += OnVersionsCollectionChanged;
         PreviewRows.CollectionChanged += OnPreviewRowsCollectionChanged;
@@ -273,6 +315,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         WordPreviewRows.CollectionChanged += OnWordPreviewRowsCollectionChanged;
         PreviewMetrics.CollectionChanged += OnPreviewMetricsCollectionChanged;
         AudioChangedSegments.CollectionChanged += OnAudioChangedSegmentsCollectionChanged;
+        ArchiveEntries.CollectionChanged += OnArchiveEntriesCollectionChanged;
+        ArchiveTreeRoots.CollectionChanged += OnArchiveTreeRootsCollectionChanged;
         _localization.LanguageChanged += OnLanguageChanged;
         _audioPlayback.PlaybackStateChanged += OnAudioPlaybackStateChanged;
         RefreshLocalizationState();
@@ -299,6 +343,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ImageDiffCompactSummary));
         OnPropertyChanged(nameof(ImageDiffCompactStateText));
         OnPropertyChanged(nameof(ImageDiffSettingsToggleLabel));
+        OnPropertyChanged(nameof(ArchiveAllFilterLabel));
+        OnPropertyChanged(nameof(ArchiveAddedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveRemovedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveChangedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveViewModeLabel));
         RefreshImageDiffModes();
         RefreshAudioPlaybackStatusLocalization();
 
@@ -353,6 +402,13 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
     partial void OnComparisonSplitPercentChanged(double value)
     {
+        var clamped = Math.Clamp(value, ImageDiffPreviewDefaults.MinSplitPercent, ImageDiffPreviewDefaults.MaxSplitPercent);
+        if (Math.Abs(clamped - value) > 0.001d)
+        {
+            ComparisonSplitPercent = clamped;
+            return;
+        }
+
         if (_suspendImageDiffRerender)
             return;
     }
@@ -383,6 +439,38 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         }
 
         SelectedImageDiffMode = option;
+    }
+
+    [RelayCommand]
+    private void ShowAllArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.All);
+
+    [RelayCommand]
+    private void ShowAddedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Added);
+
+    [RelayCommand]
+    private void ShowRemovedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Removed);
+
+    [RelayCommand]
+    private void ShowChangedArchiveEntries()
+        => SetArchiveFilter(ArchiveDiffFilterMode.Changed);
+
+    [RelayCommand]
+    private void ToggleArchiveTreeView()
+    {
+        IsArchiveTreeViewEnabled = !IsArchiveTreeViewEnabled;
+        RebuildArchiveEntries();
+    }
+
+    partial void OnArchiveSearchQueryChanged(string value)
+        => RebuildArchiveEntries();
+
+    partial void OnSelectedArchiveTreeNodeChanged(ArchiveDiffTreeNodeViewModel? value)
+    {
+        if (value?.Entry is not null)
+            SelectedArchiveEntry = value.Entry;
     }
 
     partial void OnShowImageDiffRegionBoxesChanged(bool value)
@@ -442,6 +530,11 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             ? Versions.FirstOrDefault(x => x.FileVersionId == rightId.Value)
             : null;
         ApplySelectionStates();
+
+        foreach (var entry in _allArchiveEntries)
+            entry.RefreshLocalization();
+
+        RebuildArchiveEntries();
     }
 
     public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
@@ -461,6 +554,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool IsBinaryPreview => PreviewKind == PendingDiffPreviewKind.Binary && HasPreviewMetrics;
     public bool IsImagePreview => PreviewKind == PendingDiffPreviewKind.Image;
     public bool IsAudioPreview => PreviewKind == PendingDiffPreviewKind.Audio;
+    public bool IsArchivePreview => PreviewKind == PendingDiffPreviewKind.Archive;
     public bool IsSvgFile => string.Equals(Path.GetExtension(_relativePath), ".svg", StringComparison.OrdinalIgnoreCase);
     public bool HasImagePreviews => LeftImagePreview is not null || RightImagePreview is not null;
     public bool HasOverlayImagePreview => OverlayImagePreview is not null;
@@ -469,18 +563,28 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     public bool HasAudioWaveformPreview => AudioWaveformPreview is not null;
     public bool HasAudioSpectrogramPreview => AudioSpectrogramPreview is not null;
     public bool HasAudioSpectralDeltaPreview => AudioSpectralDeltaPreview is not null;
+    public bool ShowAudioSpectralHero => HasAudioSpectrogramPreview || HasAudioSpectralDeltaPreview;
     public bool HasAudioChangedSegments => AudioChangedSegments.Count > 0;
+    public bool HasArchiveEntries => ArchiveEntries.Count > 0;
+    public bool HasArchiveTreeRoots => ArchiveTreeRoots.Count > 0;
+    public bool HasSelectedArchiveEntry => SelectedArchiveEntry is not null;
     public bool HasAudioPlaybackStatus => !string.IsNullOrWhiteSpace(AudioPlaybackStatus);
-    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview;
+    public bool IsAudioPlaybackSeekEnabled => AudioPlaybackDurationSeconds > 0.05d;
+    public string AudioPlaybackTimerText =>
+        $"{FormatAudioTime(TimeSpan.FromSeconds(Math.Max(0d, AudioPlaybackPositionSeconds)))} / {FormatAudioTime(TimeSpan.FromSeconds(Math.Max(0d, AudioPlaybackDurationSeconds)))}";
+    public bool HasNoPreviewContent => !IsPreviewLoading && !IsTextPreview && !IsBinaryPreview && !IsImagePreview && !IsAudioPreview && !IsArchivePreview;
+    public bool ShowNonImagePreviewToolbar => ShowPreviewToolbar && !IsImagePreview;
     public bool IsSplitImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Split;
     public bool IsHeatmapImageDiffMode => SelectedImageDiffMode?.Mode == ImageDiffVisualizationMode.Heatmap;
-    public bool ShowSourceImagePanelsSection => HasImagePreviews && ShowSourceImagePanels;
+    public bool ShowSourceImagePanelsSection => false;
     public bool CanSaveImageDiffPreview => IsImagePreview && HasOverlayImagePreview && _lastRenderedOverlayPngBytes.Length > 0;
     public string ImageSensitivityLabel => $"{Math.Round(ImageDiffSensitivity):0}%";
     public string ImageDiffCompactSummary => (SelectedImageDiffMode?.Mode ?? ImageDiffVisualizationMode.Overlay) == ImageDiffVisualizationMode.Split
         ? Loc.F("compare.image_quick_summary_split", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel, SplitPositionLabel)
         : Loc.F("compare.image_quick_summary", SelectedImageDiffMode?.Label ?? Loc.T("compare.image_mode.overlay"), ImageSensitivityLabel);
-    public string ImageDiffCompactStateText => $"{ImageRegionBoxesLabel} | {SourceImagePanelsLabel}";
+    public string ImageDiffCompactStateText => ImageRegionBoxesLabel;
+    public double MinComparisonSplitPercent => ImageDiffPreviewDefaults.MinSplitPercent;
+    public double MaxComparisonSplitPercent => ImageDiffPreviewDefaults.MaxSplitPercent;
     public string ImageDiffSettingsToggleLabel => ShowImageDiffSettings
         ? Loc.T("compare.hide_diff_settings")
         : Loc.T("compare.show_diff_settings");
@@ -506,7 +610,8 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
            && !HasWordPreviewRows
            && !IsBinaryPreview
            && !IsImagePreview
-           && !IsAudioPreview;
+           && !IsAudioPreview
+           && !IsArchivePreview;
     public bool ShowFullFilePreviewPanel => IsFullFilePreviewMode && !IsWordRichPreview;
     public bool ShowNoFullFilePreviewMessage => IsFullFilePreviewMode && !IsFullFilePreviewLoading && !HasFullFilePreviewContent;
     public bool ShowFullPreviewTextFallback => ShowFullFilePreviewPanel && !HasFullPreviewRows;
@@ -517,6 +622,21 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
            && !IsNativeWordPreferredForPreview
            && _leftVersion is not null
            && _rightVersion is not null;
+
+    public bool IsArchiveListViewEnabled => !IsArchiveTreeViewEnabled;
+    public string ArchiveViewModeLabel => IsArchiveTreeViewEnabled
+        ? Loc.T("compare.archive_view_list")
+        : Loc.T("compare.archive_view_tree");
+    public string ArchiveAllFilterLabel => BuildArchiveFilterLabel(Loc.T("filter.option.all"), _allArchiveEntries.Count);
+    public string ArchiveAddedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.added"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Added));
+    public string ArchiveRemovedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.removed"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Removed));
+    public string ArchiveChangedFilterLabel => BuildArchiveFilterLabel(
+        Loc.T("filter.option.modified"),
+        _allArchiveEntries.Count(x => x.ChangeKind == PendingArchiveEntryChangeKind.Changed));
     public bool CanToggleSvgCodePreview
         => IsSvgFile
            && !IsPreviewLoading
@@ -611,11 +731,18 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 new GetFileVersionHistoryQuery(repositoryId, _relativePath, 500),
                 ct);
 
-            foreach (var version in versions.OrderByDescending(v => v.CreatedAtUtc).ThenByDescending(v => v.FileVersionId))
+            var orderedVersions = versions
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .ThenByDescending(v => v.FileVersionId)
+                .ToList();
+            var totalVersionCount = orderedVersions.Count;
+            for (var i = 0; i < totalVersionCount; i++)
             {
+                var version = orderedVersions[i];
                 Versions.Add(new FileVersionCompareListItemViewModel
                 {
                     FileVersionId = version.FileVersionId,
+                    VersionOrdinal = totalVersionCount - i,
                     CreatedAtUtc = version.CreatedAtUtc,
                     SizeBytes = version.SizeBytes,
                     IsDeletionMarker = version.IsDeletionMarker,
@@ -731,11 +858,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void ToggleShowImageDiffSettings()
     {
         ShowImageDiffSettings = !ShowImageDiffSettings;
+        if (ShowImageDiffSettings)
+            ShowPreviewToolbar = false;
     }
 
     public void HideImageDiffSettingsPane()
     {
         ShowImageDiffSettings = false;
+        ShowPreviewToolbar = false;
     }
 
     [RelayCommand]
@@ -745,16 +875,24 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ToggleImagePreviewToolbar()
+    {
+        ShowPreviewToolbar = !ShowPreviewToolbar;
+        if (ShowPreviewToolbar)
+            ShowImageDiffSettings = false;
+    }
+
+    [RelayCommand]
     private async Task ResetImageDiffSettingsAsync()
     {
         _suspendImageDiffRerender = true;
         try
         {
             SelectedImageDiffMode = ImageDiffModes.FirstOrDefault(x => x.Mode == ImageDiffVisualizationMode.Overlay) ?? ImageDiffModes.FirstOrDefault();
-            ImageDiffSensitivity = 72;
-            ComparisonSplitPercent = 50;
-            ShowImageDiffRegionBoxes = true;
-            ShowSourceImagePanels = false;
+            ImageDiffSensitivity = ImageDiffPreviewDefaults.SensitivityPercent;
+            ComparisonSplitPercent = ImageDiffPreviewDefaults.SplitPercent;
+            ShowImageDiffRegionBoxes = ImageDiffPreviewDefaults.ShowRegionBoxes;
+            ShowSourceImagePanels = ImageDiffPreviewDefaults.ShowSourceImagePanels;
             ShowImageDiffDetails = false;
         }
         finally
@@ -1094,9 +1232,14 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         Dispatcher.UIThread.Post(() =>
         {
             if (!_audioPlayback.IsPlaying)
+            {
                 ClearAudioPlaybackStatus();
-            else if (!IsAudioPlaybackActive)
+            }
+            else
+            {
                 IsAudioPlaybackActive = true;
+                StartAudioPlaybackUi();
+            }
         });
     }
 
@@ -1108,6 +1251,7 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             ? Loc.T(localizationKey)
             : Loc.F(localizationKey, args);
         IsAudioPlaybackActive = true;
+        StartAudioPlaybackUi();
     }
 
     private void ClearAudioPlaybackStatus()
@@ -1116,7 +1260,62 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         _audioPlaybackStatusArgs = Array.Empty<object>();
         AudioPlaybackStatus = string.Empty;
         IsAudioPlaybackActive = false;
+        StopAudioPlaybackUi();
     }
+
+    partial void OnAudioPlaybackPositionSecondsChanged(double value)
+    {
+        if (_suppressAudioSeek || !IsAudioPlaybackSeekEnabled)
+            return;
+
+        _audioPlayback.Seek(TimeSpan.FromSeconds(Math.Clamp(value, 0d, AudioPlaybackDurationSeconds)));
+        UpdateAudioPlaybackPositionState();
+    }
+
+    private void OnAudioPlaybackTimerTick(object? sender, EventArgs e)
+        => UpdateAudioPlaybackPositionState();
+
+    private void StartAudioPlaybackUi()
+    {
+        UpdateAudioPlaybackPositionState();
+        if (!_audioPlaybackTimer.IsEnabled)
+            _audioPlaybackTimer.Start();
+    }
+
+    private void StopAudioPlaybackUi()
+    {
+        _audioPlaybackTimer.Stop();
+        _suppressAudioSeek = true;
+        try
+        {
+            AudioPlaybackPositionSeconds = 0d;
+            AudioPlaybackDurationSeconds = 0d;
+        }
+        finally
+        {
+            _suppressAudioSeek = false;
+        }
+    }
+
+    private void UpdateAudioPlaybackPositionState()
+    {
+        _suppressAudioSeek = true;
+        try
+        {
+            AudioPlaybackDurationSeconds = Math.Max(0d, _audioPlayback.TotalTime.TotalSeconds);
+            var maxPosition = Math.Max(0d, AudioPlaybackDurationSeconds);
+            AudioPlaybackPositionSeconds = Math.Clamp(_audioPlayback.CurrentTime.TotalSeconds, 0d, maxPosition);
+        }
+        finally
+        {
+            _suppressAudioSeek = false;
+        }
+    }
+
+    private static string FormatAudioTime(TimeSpan value)
+        => value.TotalHours >= 1d
+            ? value.ToString(@"h\:mm\:ss")
+            : value.ToString(@"m\:ss");
 
     private void RefreshAudioPlaybackStatusLocalization()
     {
@@ -1357,8 +1556,10 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
 
                     PreviewKind = PendingDiffPreviewKind.Text;
                     var previewSummary = string.IsNullOrWhiteSpace(preview.Message)
-                        ? $"{preview.AddedLines} added / {preview.RemovedLines} removed"
-                            + (preview.IsTruncated ? " (preview truncated)" : string.Empty)
+                        ? Loc.F(
+                            preview.IsTruncated ? "compare.diff_line_summary_truncated" : "compare.diff_line_summary",
+                            preview.AddedLines,
+                            preview.RemovedLines)
                         : preview.Message;
                     PreviewSummary = IsNativeWordPreferredForPreview
                         ? $"{previewSummary} {Loc.T("compare.preview.use_word_native")}"
@@ -1374,6 +1575,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = null;
                     _lastAudioPreview = null;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
                     _lastRenderedChangedPixelCount = 0;
                     _lastRenderedChangedPixelRatio = null;
                     _lastRenderedChangedRegionCount = 0;
@@ -1393,6 +1600,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = preview.ImagePreview;
                     _lastAudioPreview = null;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
                     await LoadImagePreviewAsync(preview.ImagePreview, cts.Token);
                     SetLoadingState(
                         Loc.T("compare.loading.title"),
@@ -1421,6 +1634,12 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     _lastBinarySummary = preview.BinarySummary;
                     _lastImagePreview = null;
                     _lastAudioPreview = preview.AudioPreview;
+                    _lastArchivePreview = null;
+                    _allArchiveEntries.Clear();
+                    ArchiveEntries.Clear();
+                    ArchiveTreeRoots.Clear();
+                    SelectedArchiveEntry = null;
+                    SelectedArchiveTreeNode = null;
                     await LoadAudioPreviewAsync(preview.AudioPreview, cts.Token);
                     SetLoadingState(
                         Loc.T("compare.loading.title"),
@@ -1431,6 +1650,36 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                     PreviewKind = PendingDiffPreviewKind.Audio;
                     PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
                         ? Loc.T("compare.preview.audio_ready")
+                        : preview.Message;
+                    break;
+
+                case PendingDiffPreviewKind.Archive:
+                    SetLoadingState(
+                        Loc.T("compare.loading.title"),
+                        Loc.T("compare.loading.archive"),
+                        0,
+                        indeterminate: true);
+                    _lastBinarySummary = preview.BinarySummary;
+                    _lastImagePreview = null;
+                    _lastAudioPreview = null;
+                    _lastArchivePreview = preview.ArchivePreview;
+                    _allArchiveEntries.Clear();
+                    ArchiveSearchQuery = string.Empty;
+                    if (preview.ArchivePreview is not null)
+                    {
+                        _allArchiveEntries.AddRange(preview.ArchivePreview.Entries
+                            .Select(dto => new ArchiveDiffEntryItemViewModel(dto))
+                            .OrderBy(x => x.ChangeKind == PendingArchiveEntryChangeKind.Unchanged ? 1 : 0)
+                            .ThenBy(x => x.EntryPath, StringComparer.OrdinalIgnoreCase)
+                            .ThenBy(x => x.EntryPath, StringComparer.Ordinal));
+                    }
+
+                    _archiveFilter = ArchiveDiffFilterMode.All;
+                    RebuildArchiveEntries();
+                    RebuildPreviewMetrics();
+                    PreviewKind = PendingDiffPreviewKind.Archive;
+                    PreviewSummary = string.IsNullOrWhiteSpace(preview.Message)
+                        ? Loc.T("compare.preview.archive_ready")
                         : preview.Message;
                     break;
 
@@ -2073,6 +2322,23 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
             return;
         }
 
+        if (_lastArchivePreview is not null)
+        {
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.archive_entries"),
+                $"{_lastArchivePreview.BaselineEntryCount} -> {_lastArchivePreview.CurrentEntryCount}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("metric.archive_changes"),
+                $"+{_lastArchivePreview.AddedEntryCount} / -{_lastArchivePreview.RemovedEntryCount} / ~{_lastArchivePreview.ChangedEntryCount} / = {_lastArchivePreview.UnchangedEntryCount}"));
+
+            PreviewMetrics.Add(new SnapshotPreviewMetricItemViewModel(
+                Loc.T("common.type"),
+                _lastArchivePreview.ArchiveFormat.ToUpperInvariant()));
+
+            return;
+        }
+
         if (_lastImagePreview is null)
             return;
 
@@ -2118,6 +2384,130 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
                 Loc.T("metric.svg_attributes"),
                 $"{_lastImagePreview.ChangedAttributeCount:N0}"));
         }
+    }
+
+    private void SetArchiveFilter(ArchiveDiffFilterMode filter)
+    {
+        if (_archiveFilter == filter)
+            return;
+
+        _archiveFilter = filter;
+        RebuildArchiveEntries();
+    }
+
+    private void RebuildArchiveEntries()
+    {
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+
+        IEnumerable<ArchiveDiffEntryItemViewModel> query = _allArchiveEntries;
+        query = _archiveFilter switch
+        {
+            ArchiveDiffFilterMode.Added => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Added),
+            ArchiveDiffFilterMode.Removed => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Removed),
+            ArchiveDiffFilterMode.Changed => query.Where(x => x.ChangeKind == PendingArchiveEntryChangeKind.Changed),
+            _ => query
+        };
+
+        var search = ArchiveSearchQuery.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(x => x.EntryPath.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+        var entries = query.ToList();
+        foreach (var entry in entries)
+            ArchiveEntries.Add(entry);
+
+        foreach (var root in BuildArchiveTree(entries))
+            ArchiveTreeRoots.Add(root);
+
+        SelectedArchiveEntry = ArchiveEntries.FirstOrDefault();
+        SelectedArchiveTreeNode = FindTreeNodeForEntry(ArchiveTreeRoots, SelectedArchiveEntry);
+        OnPropertyChanged(nameof(ArchiveAllFilterLabel));
+        OnPropertyChanged(nameof(ArchiveAddedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveRemovedFilterLabel));
+        OnPropertyChanged(nameof(ArchiveChangedFilterLabel));
+    }
+
+    private static string BuildArchiveFilterLabel(string label, int count)
+        => $"{label} ({count})";
+
+    private static IReadOnlyList<ArchiveDiffTreeNodeViewModel> BuildArchiveTree(
+        IReadOnlyList<ArchiveDiffEntryItemViewModel> entries)
+    {
+        var roots = new List<ArchiveDiffTreeNodeViewModel>();
+        var directories = new Dictionary<string, ArchiveDiffTreeNodeViewModel>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in entries.OrderBy(x => x.EntryPath, StringComparer.OrdinalIgnoreCase))
+        {
+            var parts = entry.EntryPath
+                .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (parts.Length == 0)
+                continue;
+
+            IList<ArchiveDiffTreeNodeViewModel> parentChildren = roots;
+            var path = string.Empty;
+
+            for (var i = 0; i < parts.Length; i++)
+            {
+                var isLeaf = i == parts.Length - 1;
+                path = string.IsNullOrEmpty(path) ? parts[i] : $"{path}/{parts[i]}";
+
+                if (isLeaf)
+                {
+                    parentChildren.Add(new ArchiveDiffTreeNodeViewModel(parts[i], entry.EntryPath, entry.IsDirectory, entry));
+                    continue;
+                }
+
+                if (!directories.TryGetValue(path, out var directory))
+                {
+                    directory = new ArchiveDiffTreeNodeViewModel(parts[i], path, isDirectory: true);
+                    directories[path] = directory;
+                    parentChildren.Add(directory);
+                }
+
+                parentChildren = directory.Children;
+            }
+        }
+
+        SortArchiveTree(roots);
+        return roots;
+    }
+
+    private static void SortArchiveTree(IList<ArchiveDiffTreeNodeViewModel> nodes)
+    {
+        var sorted = nodes
+            .OrderByDescending(x => x.IsDirectory)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ToList();
+
+        nodes.Clear();
+        foreach (var node in sorted)
+        {
+            SortArchiveTree(node.Children);
+            nodes.Add(node);
+        }
+    }
+
+    private static ArchiveDiffTreeNodeViewModel? FindTreeNodeForEntry(
+        IEnumerable<ArchiveDiffTreeNodeViewModel> nodes,
+        ArchiveDiffEntryItemViewModel? entry)
+    {
+        if (entry is null)
+            return null;
+
+        foreach (var node in nodes)
+        {
+            if (ReferenceEquals(node.Entry, entry))
+                return node;
+
+            var child = FindTreeNodeForEntry(node.Children, entry);
+            if (child is not null)
+                return child;
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<DiffPreviewRowViewModel> BuildDiffPreviewRows(
@@ -2443,10 +2833,17 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         AudioChangedSegments.Clear();
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+        SelectedArchiveEntry = null;
+        SelectedArchiveTreeNode = null;
+        _allArchiveEntries.Clear();
+        ArchiveSearchQuery = string.Empty;
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
         _lastImagePreview = null;
         _lastAudioPreview = null;
+        _lastArchivePreview = null;
         _lastRenderedOverlayPngBytes = Array.Empty<byte>();
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
@@ -2466,11 +2863,18 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
         WordPreviewRows.Clear();
         PreviewMetrics.Clear();
         AudioChangedSegments.Clear();
+        ArchiveEntries.Clear();
+        ArchiveTreeRoots.Clear();
+        SelectedArchiveEntry = null;
+        SelectedArchiveTreeNode = null;
+        _allArchiveEntries.Clear();
+        ArchiveSearchQuery = string.Empty;
         PreviewKind = PendingDiffPreviewKind.None;
         _isWordSemanticPreview = false;
         _lastBinarySummary = null;
         _lastImagePreview = null;
         _lastAudioPreview = null;
+        _lastArchivePreview = null;
         _lastRenderedOverlayPngBytes = Array.Empty<byte>();
         _lastRenderedChangedPixelCount = 0;
         _lastRenderedChangedPixelRatio = null;
@@ -2960,5 +3364,16 @@ public sealed partial class FileVersionCompareWindowViewModel : ObservableObject
     private void OnAudioChangedSegmentsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         OnPropertyChanged(nameof(HasAudioChangedSegments));
+    }
+
+    private void OnArchiveEntriesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasArchiveEntries));
+        OnPropertyChanged(nameof(HasNoPreviewContent));
+    }
+
+    private void OnArchiveTreeRootsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasArchiveTreeRoots));
     }
 }

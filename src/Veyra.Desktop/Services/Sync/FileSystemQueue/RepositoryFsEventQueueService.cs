@@ -125,7 +125,12 @@ public sealed class RepositoryFsEventQueueService(
                 repositoryId,
                 lease.Count,
                 state.Items.Count);
-            return new RepositoryFsEventLease(lease.Select(x => x.Id).ToArray(), lease.Count);
+            return new RepositoryFsEventLease(
+                lease.Select(static item => new RepositoryFsEventLeaseItem(
+                        item.Id,
+                        item.FullPath,
+                        item.EventKind))
+                    .ToArray());
         }
         finally
         {

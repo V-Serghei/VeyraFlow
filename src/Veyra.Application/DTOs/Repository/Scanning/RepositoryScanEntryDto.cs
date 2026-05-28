@@ -8,4 +8,5 @@ public sealed record RepositoryScanEntryDto(
     string? Extension,
     long SizeBytes,
     DateTime LastWriteUtc,
-    string? ContentHashSha256);
+    string? ContentHashSha256,
+    DateTime? IndexedAtUtc = null);

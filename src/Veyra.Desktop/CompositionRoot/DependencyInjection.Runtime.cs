@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Desktop.Services.Observability;
 using Veyra.Desktop.Services.Scheduling;
+using Veyra.Desktop.Services.Scanning;
 using Veyra.Desktop.Services.State;
 using Veyra.Desktop.Services.Onboarding;
 using Veyra.Domain.Observability;
@@ -21,9 +22,11 @@ public static partial class DependencyInjection
         services.AddSingleton(runtimeObservabilitySettingsStore);
         services.AddSingleton<IRuntimeObservabilityControlService>(runtimeObservability);
         services.AddSingleton<IRuntimeObservabilityState>(runtimeObservability);
+        services.AddSingleton<IRepositoryScanStatusService, RepositoryScanStatusService>();
         services.AddSingleton<ISnapshotScheduler, SnapshotSchedulerService>();
         services.AddSingleton<IRepositoryDashboardFilterStore, RepositoryDashboardFilterStore>();
         services.AddSingleton<IRepositoryExplorerFilterStore, RepositoryExplorerFilterStore>();
+        services.AddSingleton<IGlobalSearchFilterStore, GlobalSearchFilterStore>();
         services.AddSingleton<OnboardingStateService>();
         return services;
     }

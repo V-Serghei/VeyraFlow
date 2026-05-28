@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using MediatR;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
-using Veyra.Application.Queries;
+using Veyra.Application.Queries.Repository;
 
 namespace Veyra.Desktop.Services.Maintenance;
 
@@ -55,7 +55,9 @@ public sealed class RepositoryRetentionDefaultsApplier(
                 StorageMode: policy.StorageMode,
                 AllowManualSnapshotCleanup: detail.RetentionPolicy.AllowManualSnapshotCleanup,
                 AutomaticCompactionEnabled: detail.RetentionPolicy.AutomaticCompactionEnabled,
-                AutomaticCompactionWindowHours: detail.RetentionPolicy.AutomaticCompactionWindowHours);
+                AutomaticCompactionWindowHours: detail.RetentionPolicy.AutomaticCompactionWindowHours,
+                HasLocalOverride: false,
+                PolicySource: RepositoryRetentionPolicySources.Global);
 
             var result = await mediator.Send(new UpdateRepositoryConfigurationCommand(
                 detail.Id,

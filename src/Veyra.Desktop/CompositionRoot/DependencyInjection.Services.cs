@@ -1,6 +1,7 @@
 using System;
 using Microsoft.Extensions.DependencyInjection;
 using Veyra.Application.Abstractions.Auth;
+using Veyra.Application.Abstractions.Sync;
 using Veyra.Desktop.Services.Auth;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Execution;
@@ -8,6 +9,7 @@ using Veyra.Desktop.Services.Maintenance;
 using Veyra.Desktop.Services.Monitoring;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Preview;
+using Veyra.Desktop.Services.Repositories;
 using Veyra.Desktop.Services.Security;
 using Veyra.Desktop.Services.Shell.Tray;
 using Veyra.Desktop.Services.Storage;
@@ -24,17 +26,24 @@ public static partial class DependencyInjection
         services.AddSingleton<INavigationService, NavigationService>();
         services.AddSingleton<IAppTrayService, AppTrayService>();
         services.AddSingleton<IConnectivityStatusService, ConnectivityStatusService>();
+        services.AddSingleton<ICloudAvailabilityService, CloudAvailabilityService>();
         services.AddSingleton<ICloudSyncRuntimeSettingsStore, CloudSyncRuntimeSettingsStore>();
         services.AddSingleton<ICloudSyncRuntimeControlService, CloudSyncRuntimeControlService>();
+        services.AddSingleton<IMonitoringSettingsStore, MonitoringSettingsStore>();
+        services.AddSingleton<IMonitoringControlService, MonitoringControlService>();
         services.AddSingleton<ILocalCredentialStore, LocalCredentialStore>();
         services.AddSingleton<IServiceScopeExecutor, ServiceScopeExecutor>();
         services.AddSingleton<IRetentionDefaultsStore, RetentionDefaultsStore>();
         services.AddSingleton<IAppTransientStateMaintenanceService, AppTransientStateMaintenanceService>();
+        services.AddSingleton<IProcessResourceMonitorService, ProcessResourceMonitorService>();
+        services.AddSingleton<IProcessResourceStatusStore, ProcessResourceStatusStore>();
         services.AddTransient<IRepositoryRetentionDefaultsApplier, RepositoryRetentionDefaultsApplier>();
         services.AddTransient<ISensitiveActionGuard, SensitiveActionGuard>();
         services.AddTransient<IAudioPreviewPlaybackService, AudioPreviewPlaybackService>();
         services.AddTransient<IOperationMonitorService, OperationMonitorService>();
-        services.AddScoped<ILocalBlockStorageMetricsService, LocalBlockStorageMetricsService>();
+        services.AddSingleton<IRepositoryLiveSyncStatusStore, RepositoryLiveSyncStatusStore>();
+        services.AddTransient<IRepositoryLiveSyncDeltaBuilder, RepositoryLiveSyncDeltaBuilder>();
+        services.AddTransient<IRepositoryRelocationDetector, RepositoryRelocationDetector>();
         services.AddSingleton<IWindowsAutostartService>(_ =>
             OperatingSystem.IsWindows()
                 ? new WindowsAutostartService()

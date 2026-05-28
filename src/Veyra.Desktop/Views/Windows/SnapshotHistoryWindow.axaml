@@ -23,7 +23,7 @@
                         CornerRadius="16">
                     <Grid RowDefinitions="Auto,*" RowSpacing="14">
                         <Border Grid.Row="0" Classes="hero">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
                                 <StackPanel Spacing="4">
                                     <TextBlock Text="{loc:Tr explorer.snapshot_history}" Classes="h2"/>
                                     <TextBlock Classes="muted"
@@ -33,6 +33,20 @@
                                 </StackPanel>
 
                                 <Button Grid.Column="1"
+                                        Content="{loc:Tr snapshot_history.rollback_repository}"
+                                        Command="{Binding RollbackRepositoryToSelectedSnapshotCommand}"
+                                        IsEnabled="{Binding CanRestoreSelectedSnapshot}"
+                                        Classes="danger compact"
+                                        VerticalAlignment="Top"/>
+
+                                <Button Grid.Column="2"
+                                        Content="{loc:Tr snapshot_history.restore_as_copies}"
+                                        Command="{Binding RestoreSelectedSnapshotAsCopiesCommand}"
+                                        IsEnabled="{Binding CanRestoreSelectedSnapshot}"
+                                        Classes="subtle compact"
+                                        VerticalAlignment="Top"/>
+
+                                <Button Grid.Column="3"
                                         Content="{loc:Tr common.close}"
                                         Command="{Binding CloseSnapshotHistoryMenuCommand}"
                                         Classes="subtle"
@@ -47,9 +61,25 @@
 
                                     <Border Grid.Row="1" Classes="filter-sheet" Padding="12">
                                         <StackPanel Spacing="10">
-                                            <TextBox Text="{Binding SnapshotHistorySearchQuery, Mode=TwoWay}"
-                                                     Classes="compact"
-                                                     Watermark="{loc:Tr explorer.search_commits}"/>
+                                            <Grid>
+                                                <TextBox Text="{Binding SnapshotHistorySearchQuery, Mode=TwoWay}"
+                                                         Classes="compact"
+                                                         Padding="12,7,38,7"
+                                                         Watermark="{loc:Tr explorer.search_commits}"/>
+                                                <Button Command="{Binding ClearSnapshotHistorySearchCommand}"
+                                                        Classes="subtle compact"
+                                                        Width="28"
+                                                        Height="28"
+                                                        Padding="0"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center"
+                                                        Margin="0,0,6,0"
+                                                        IsVisible="{Binding HasSnapshotHistorySearchQuery}">
+                                                    <TextBlock Text="&#xE711;"
+                                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                               FontSize="12"/>
+                                                </Button>
+                                            </Grid>
                                             <WrapPanel Orientation="Horizontal">
                                                 <ComboBox Width="152"
                                                           Margin="0,0,8,8"
@@ -170,9 +200,25 @@
 
                                     <Border Grid.Row="1" Classes="filter-sheet" Padding="12">
                                         <StackPanel Spacing="10">
-                                            <TextBox Text="{Binding SnapshotFilesSearchQuery, Mode=TwoWay}"
-                                                     Classes="compact"
-                                                     Watermark="{loc:Tr explorer.search_commit_files}"/>
+                                            <Grid>
+                                                <TextBox Text="{Binding SnapshotFilesSearchQuery, Mode=TwoWay}"
+                                                         Classes="compact"
+                                                         Padding="12,7,38,7"
+                                                         Watermark="{loc:Tr explorer.search_commit_files}"/>
+                                                <Button Command="{Binding ClearSnapshotFilesSearchCommand}"
+                                                        Classes="subtle compact"
+                                                        Width="28"
+                                                        Height="28"
+                                                        Padding="0"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center"
+                                                        Margin="0,0,6,0"
+                                                        IsVisible="{Binding HasSnapshotFilesSearchQuery}">
+                                                    <TextBlock Text="&#xE711;"
+                                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                               FontSize="12"/>
+                                                </Button>
+                                            </Grid>
                                             <WrapPanel Orientation="Horizontal">
                                                 <ComboBox Width="160"
                                                           Margin="0,0,8,8"

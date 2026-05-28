@@ -279,6 +279,7 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.TotalSizeBytes).HasDefaultValue(0L);
             entity.Property(e => e.AutoCaptureFileVersions).HasDefaultValue(false);
             entity.Property(e => e.ProtectCloudMetadata).HasDefaultValue(true);
+            entity.Property(e => e.RetentionPolicyOverrideEnabled).HasDefaultValue(false);
             entity.Property(e => e.RetentionEnabled).HasDefaultValue(false);
             entity.Property(e => e.RetentionMaxAgeDays).IsRequired(false);
             entity.Property(e => e.RetentionMaxSnapshots).IsRequired(false);
@@ -297,11 +298,13 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.SyncConflictStrategy).HasMaxLength(32).HasDefaultValue(Repository.DefaultSyncConflictStrategy);
             entity.Property(e => e.SyncRetryMaxAttempts).HasDefaultValue(5);
             entity.Property(e => e.SyncRetryBaseDelaySeconds).HasDefaultValue(30);
+            entity.Property(e => e.CloudRepositoryId).IsRequired(false);
             entity.Property(e => e.CloudLastSyncedAt).IsRequired(false);
             entity.Property(e => e.CloudLastLocalSnapshotId).IsRequired(false);
             entity.Property(e => e.CloudLastRemoteSnapshotId).IsRequired(false);
             entity.Property(e => e.CloudSyncLastStatus).HasMaxLength(128);
             entity.Property(e => e.CloudSyncLastError).HasMaxLength(2048);
+            entity.HasIndex(e => e.CloudRepositoryId);
             entity.HasIndex(e => new { e.CloudLastSyncedAt, e.CloudLastRemoteSnapshotId });
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasQueryFilter(e => !e.IsDeleted);

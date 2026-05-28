@@ -170,6 +170,93 @@ public sealed class CloudSyncHttpService : ICloudSyncService
         var parseTimer = Stopwatch.StartNew();
         var payload = await resp.Content.ReadFromJsonAsync<GetLatestSnapshotResponse>(JsonOptions, ct);
         parseTimer.Stop();
+        var package = MapSnapshotPackage(payload);
+        if (package is null)
+            return null;
+
+        _log.LogInformation(
+            "Cloud API request completed. Operation {Operation}. RepositoryId {RepositoryId}. Entries {Entries}. FileVersions {FileVersions}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            "get_latest_snapshot",
+            repositoryId,
+            package.Entries.Count,
+            package.FileVersions.Count,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
+        return package;
+    }
+
+    public async Task<IReadOnlyList<CloudSnapshotPackageDto>> GetRepositorySnapshotsAsync(
+        string accessToken,
+        int repositoryId,
+        CancellationToken ct = default)
+    {
+        var requestTimer = Stopwatch.StartNew();
+        _log.LogInformation(
+            "Cloud API request started. Operation {Operation}. RepositoryId {RepositoryId}",
+            "list_repository_snapshots",
+            repositoryId);
+        using var req = BuildRequest(HttpMethod.Get, $"/api/sync/repositories/{repositoryId}/snapshots", accessToken);
+        using var resp = await _http.SendAsync(req, ct);
+        requestTimer.Stop();
+
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
+        {
+            _log.LogWarning(
+                "Cloud API request returned empty result. Operation {Operation}. RepositoryId {RepositoryId}. StatusCode {StatusCode}. DurationMs {DurationMs}",
+                "list_repository_snapshots",
+                repositoryId,
+                (int)resp.StatusCode,
+                requestTimer.ElapsedMilliseconds);
+            return [];
+        }
+
+        if (resp.StatusCode == HttpStatusCode.MethodNotAllowed)
+        {
+            var body = await ReadResponseBodySafeAsync(resp, ct);
+            _log.LogWarning(
+                "Cloud API does not support full snapshot history endpoint. Operation {Operation}. RepositoryId {RepositoryId}. StatusCode {StatusCode}. DurationMs {DurationMs}. ResponseBody {ResponseBody}",
+                "list_repository_snapshots",
+                repositoryId,
+                (int)resp.StatusCode,
+                requestTimer.ElapsedMilliseconds,
+                body);
+
+            throw new HttpRequestException(
+                "Cloud API is outdated and does not support full history restore yet. Restart/rebuild the cloud-api service so GET /api/sync/repositories/{repositoryId}/snapshots is available.",
+                null,
+                resp.StatusCode);
+        }
+
+        await EnsureSuccessAsync(resp, "list_repository_snapshots", ct, ("RepositoryId", repositoryId));
+
+        var parseTimer = Stopwatch.StartNew();
+        var payload = await resp.Content.ReadFromJsonAsync<ListRepositorySnapshotsResponse>(JsonOptions, ct);
+        parseTimer.Stop();
+        if (payload is null || !payload.Ok || payload.Snapshots is null)
+            return [];
+
+        var snapshots = payload.Snapshots
+            .Select(MapSnapshotPackage)
+            .Where(p => p is not null)
+            .Select(p => p!)
+            .ToList();
+
+        _log.LogInformation(
+            "Cloud API request completed. Operation {Operation}. RepositoryId {RepositoryId}. Snapshots {Snapshots}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
+            "list_repository_snapshots",
+            repositoryId,
+            snapshots.Count,
+            requestTimer.ElapsedMilliseconds,
+            parseTimer.ElapsedMilliseconds,
+            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
+
+        return snapshots;
+    }
+
+    private CloudSnapshotPackageDto? MapSnapshotPackage(GetLatestSnapshotResponse? payload)
+    {
         if (payload is null || !payload.Ok || payload.Repository is null || payload.Snapshot is null)
             return null;
 
@@ -222,16 +309,6 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                         .ToList() ?? []);
             })
             .ToList() ?? [];
-
-        _log.LogInformation(
-            "Cloud API request completed. Operation {Operation}. RepositoryId {RepositoryId}. Entries {Entries}. FileVersions {FileVersions}. RequestMs {RequestMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
-            "get_latest_snapshot",
-            repositoryId,
-            entries.Count,
-            fileVersions.Count,
-            requestTimer.ElapsedMilliseconds,
-            parseTimer.ElapsedMilliseconds,
-            requestTimer.ElapsedMilliseconds + parseTimer.ElapsedMilliseconds);
 
         return new CloudSnapshotPackageDto(
             new CloudRepositoryMetadataDto(
@@ -433,7 +510,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
 
         var totalBytes = blocks.Sum(static b => Math.Max(0, b.ContentLength));
         var uploadTimer = Stopwatch.StartNew();
-        _log.LogInformation(
+        _log.LogDebug(
             "Cloud batch block upload started. Blocks {Blocks}. TotalBytes {TotalBytes}",
             blocks.Count,
             totalBytes);
@@ -478,7 +555,7 @@ public sealed class CloudSyncHttpService : ICloudSyncService
             return null;
 
         uploadTimer.Stop();
-        _log.LogInformation(
+        _log.LogDebug(
             "Cloud batch block upload completed. Blocks {Blocks}. StoredBlocks {StoredBlocks}. SkippedBlocks {SkippedBlocks}. SendMs {SendMs}. ParseMs {ParseMs}. TotalMs {TotalMs}",
             blocks.Count,
             payload.StoredBlocks,
@@ -750,6 +827,25 @@ public sealed class CloudSyncHttpService : ICloudSyncService
                 payload.Repair.BrokenPackRefs,
                 payload.Repair.Compacted),
             metrics);
+    }
+
+    public async Task<bool> DeleteRepositoryAsync(
+        string accessToken,
+        int repositoryId,
+        CancellationToken ct = default)
+    {
+        _log.LogWarning(
+            "Cloud repository delete requested. RepositoryId {RepositoryId}",
+            repositoryId);
+
+        using var req = BuildRequest(HttpMethod.Delete, $"/api/sync/repositories/{repositoryId}", accessToken);
+        using var resp = await _http.SendAsync(req, ct);
+
+        if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized)
+            return false;
+
+        await EnsureSuccessAsync(resp, "delete_repository", ct, ("RepositoryId", repositoryId));
+        return true;
     }
 
     private HttpRequestMessage BuildRequest(HttpMethod method, string path, string accessToken, string? idempotencyKey = null)

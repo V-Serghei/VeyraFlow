@@ -12,7 +12,7 @@
         x:DataType="windows:FileVersionCompareWindowViewModel"
         Width="1180"
         Height="800"
-        MinWidth="780"
+        MinWidth="980"
         MinHeight="600"
         WindowStartupLocation="CenterOwner"
         SystemDecorations="Full"
@@ -23,25 +23,73 @@
 
     <Grid RowDefinitions="Auto,*,Auto" Margin="16" RowSpacing="12">
         <Border Grid.Row="0" Classes="dialog-shell" Padding="12">
-            <StackPanel Spacing="4">
-                <TextBlock Text="{loc:Tr compare.window_title}"
-                           FontSize="16"
-                           FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding SelectedPairSummary}"
-                           Classes="muted"
-                           FontSize="11"
-                           TextTrimming="CharacterEllipsis"
-                           TextWrapping="Wrap"
-                           IsVisible="{Binding IsImagePreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
-                <TextBlock Text="{Binding ErrorMessage}"
-                           Foreground="{DynamicResource VeyraDangerBrush}"
-                           IsVisible="{Binding HasErrorMessage}"
-                           TextWrapping="Wrap"/>
-            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="{loc:Tr compare.window_title}"
+                               FontSize="16"
+                               FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding SelectedPairSummary}"
+                               Classes="muted"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding IsImagePreview, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                    <TextBlock Text="{Binding ErrorMessage}"
+                               Foreground="{DynamicResource VeyraDangerBrush}"
+                               IsVisible="{Binding HasErrorMessage}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <WrapPanel Grid.Column="1"
+                           Orientation="Horizontal"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center">
+                    <Button Classes="subtle compact"
+                            Command="{Binding ToggleSvgCodePreviewCommand}"
+                            IsVisible="{Binding IsSvgFile}"
+                            IsEnabled="{Binding CanToggleSvgCodePreview}"
+                            Margin="0,0,8,0">
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE943;"/>
+                            <TextBlock Classes="button-label" Text="{Binding SvgCodePreviewToggleLabel}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="subtle compact"
+                            Command="{Binding ToggleShowImageDiffDetailsCommand}"
+                            Margin="0,0,8,0"
+                            IsVisible="{Binding IsImagePreview}">
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="i"/>
+                            <TextBlock Classes="button-label" Text="{Binding ImageDiffDetailsToggleLabel}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="subtle compact"
+                            Command="{Binding ToggleShowImageDiffSettingsCommand}"
+                            Margin="0,0,8,0"
+                            IsVisible="{Binding IsImagePreview}">
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE713;"/>
+                            <TextBlock Classes="button-label" Text="{Binding ImageDiffSettingsToggleLabel}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="subtle compact"
+                            Command="{Binding ToggleImagePreviewToolbarCommand}">
+                        <StackPanel Classes="button-content">
+                            <TextBlock Classes="button-icon" Text="&#xE70F;"/>
+                            <TextBlock Classes="button-label" Text="{loc:Tr compare.image_controls}"/>
+                        </StackPanel>
+                    </Button>
+                </WrapPanel>
+            </Grid>
         </Border>
 
-        <Grid Grid.Row="1" ColumnDefinitions="280,8,*" ColumnSpacing="0">
-            <Border Grid.Column="0" Classes="dialog-shell" MinWidth="220">
+        <Grid Grid.Row="1" ColumnSpacing="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320" MinWidth="280" MaxWidth="520"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*" MinWidth="720"/>
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Classes="dialog-shell" MinWidth="280" MaxWidth="520">
                 <Grid RowSpacing="0">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
@@ -153,13 +201,13 @@
             </Border>
 
             <GridSplitter Grid.Column="1"
-                          Width="8"
+                          Width="10"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
                           ResizeDirection="Columns"
                           ResizeBehavior="PreviousAndNext"/>
 
-            <Border Grid.Column="2" Classes="dialog-shell" Margin="12,0,0,0" MinWidth="360">
+            <Border Grid.Column="2" Classes="dialog-shell" Margin="10,0,0,0" MinWidth="720" Padding="8">
                     <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
                         <StackPanel Grid.Row="0"
                                     Spacing="2"
@@ -780,41 +828,337 @@
                                     </ItemsControl>
                                 </Border>
 
+                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsArchivePreview}">
+                                    <Grid RowDefinitions="Auto,*" RowSpacing="10">
+                                        <Grid Grid.Row="0"
+                                              RowDefinitions="Auto,Auto"
+                                              RowSpacing="8">
+                                            <WrapPanel Grid.Row="0"
+                                                       Orientation="Horizontal"
+                                                       HorizontalAlignment="Left"
+                                                       ItemHeight="40">
+                                                <Button Classes="subtle compact"
+                                                        Command="{Binding ShowAllArchiveEntriesCommand}"
+                                                        Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding ArchiveAllFilterLabel}"/>
+                                                </Button>
+                                                <Button Classes="subtle compact"
+                                                        Command="{Binding ShowAddedArchiveEntriesCommand}"
+                                                        Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding ArchiveAddedFilterLabel}"/>
+                                                </Button>
+                                                <Button Classes="subtle compact"
+                                                        Command="{Binding ShowRemovedArchiveEntriesCommand}"
+                                                        Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding ArchiveRemovedFilterLabel}"/>
+                                                </Button>
+                                                <Button Classes="subtle compact"
+                                                        Command="{Binding ShowChangedArchiveEntriesCommand}"
+                                                        Margin="0,0,0,8">
+                                                    <TextBlock Text="{Binding ArchiveChangedFilterLabel}"/>
+                                                </Button>
+                                            </WrapPanel>
+
+                                            <Grid Grid.Row="1"
+                                                  ColumnDefinitions="*,Auto"
+                                                  ColumnSpacing="10">
+                                                <TextBox Grid.Column="0"
+                                                         Text="{Binding ArchiveSearchQuery, Mode=TwoWay}"
+                                                         Classes="compact"
+                                                         Watermark="{loc:Tr compare.archive_search_placeholder}"/>
+                                                <Button Grid.Column="1"
+                                                        Classes="subtle compact"
+                                                        Command="{Binding ToggleArchiveTreeViewCommand}">
+                                                    <StackPanel Classes="button-content">
+                                                        <TextBlock Classes="button-icon" Text="&#xE8B7;"/>
+                                                        <TextBlock Classes="button-label" Text="{Binding ArchiveViewModeLabel}"/>
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" ColumnDefinitions="2*,12,*" ColumnSpacing="0">
+                                            <Border Grid.Column="0"
+                                                    Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10">
+                                                <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                                    <TextBlock Grid.Row="0"
+                                                               Text="{loc:Tr compare.archive_contents}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="13"/>
+
+                                                    <Grid Grid.Row="1">
+                                                        <ListBox Classes="clean-list"
+                                                                 ItemsSource="{Binding ArchiveEntries}"
+                                                                 SelectedItem="{Binding SelectedArchiveEntry, Mode=TwoWay}"
+                                                                 IsVisible="{Binding IsArchiveListViewEnabled}">
+                                                            <ListBox.ItemTemplate>
+                                                                <DataTemplate x:DataType="windows:ArchiveDiffEntryItemViewModel">
+                                                                    <Border Classes="metric-card" Padding="10" Margin="0,0,0,6">
+                                                                        <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="6">
+                                                                            <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                                                                <Border Grid.Column="0"
+                                                                                        CornerRadius="8"
+                                                                                        Background="{Binding StatusBadgeBackground}"
+                                                                                        Padding="8,4">
+                                                                                    <TextBlock Text="{Binding StatusLabel}"
+                                                                                               Foreground="{Binding StatusBadgeForeground}"
+                                                                                               FontWeight="SemiBold"
+                                                                                               FontSize="11"/>
+                                                                                </Border>
+                                                                                <TextBlock Grid.Column="1"
+                                                                                           Text="{Binding EntryPath}"
+                                                                                           FontWeight="SemiBold"
+                                                                                           TextWrapping="Wrap"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                                <TextBlock Grid.Column="2"
+                                                                                           Text="{Binding TypeLabel}"
+                                                                                           Classes="muted"
+                                                                                           FontSize="11"/>
+                                                                            </Grid>
+
+                                                                            <Grid Grid.Row="1" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                                                <TextBlock Grid.Column="0" Text="{loc:Tr common.size}" Classes="muted" FontSize="11"/>
+                                                                                <TextBlock Grid.Column="1" Text="{Binding SizeLabel}" FontSize="11" TextWrapping="Wrap"/>
+                                                                            </Grid>
+
+                                                                            <Grid Grid.Row="2" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                                                <TextBlock Grid.Column="0" Text="CRC32" Classes="muted" FontSize="11"/>
+                                                                                <TextBlock Grid.Column="1" Text="{Binding CrcLabel}" FontSize="11" TextWrapping="Wrap"/>
+                                                                            </Grid>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ListBox.ItemTemplate>
+                                                        </ListBox>
+
+                                                        <TreeView ItemsSource="{Binding ArchiveTreeRoots}"
+                                                                  SelectedItem="{Binding SelectedArchiveTreeNode, Mode=TwoWay}"
+                                                                  IsVisible="{Binding IsArchiveTreeViewEnabled}">
+                                                            <TreeView.DataTemplates>
+                                                                <TreeDataTemplate DataType="windows:ArchiveDiffTreeNodeViewModel"
+                                                                                  ItemsSource="{Binding Children}">
+                                                                    <Border Classes="metric-card" Padding="8" Margin="0,0,0,4">
+                                                                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                                                            <TextBlock Grid.Column="0"
+                                                                                       Text="{Binding Icon}"
+                                                                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                                                       Foreground="{DynamicResource VeyraAccentBrush}"
+                                                                                       VerticalAlignment="Center"/>
+                                                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                                                <TextBlock Text="{Binding Name}"
+                                                                                           FontWeight="SemiBold"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                                <TextBlock Text="{Binding DetailLabel}"
+                                                                                           Classes="muted"
+                                                                                           FontSize="11"
+                                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                            </StackPanel>
+                                                                            <Border Grid.Column="2"
+                                                                                    CornerRadius="8"
+                                                                                    Background="{Binding StatusBadgeBackground}"
+                                                                                    Padding="8,4"
+                                                                                    VerticalAlignment="Center"
+                                                                                    IsVisible="{Binding HasEntry}">
+                                                                                <TextBlock Text="{Binding StatusLabel}"
+                                                                                           Foreground="{Binding StatusBadgeForeground}"
+                                                                                           FontWeight="SemiBold"
+                                                                                           FontSize="11"/>
+                                                                            </Border>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                </TreeDataTemplate>
+                                                            </TreeView.DataTemplates>
+                                                        </TreeView>
+
+                                                        <TextBlock Text="{loc:Tr compare.archive_no_entries}"
+                                                                   Classes="muted"
+                                                                   TextWrapping="Wrap"
+                                                                   IsVisible="{Binding HasArchiveEntries, Converter={x:Static conv:BoolInvertConverter.Instance}}"/>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+
+                                            <GridSplitter Grid.Column="1"
+                                                          Width="8"
+                                                          Background="{DynamicResource VeyraSplitBrush}"
+                                                          ResizeDirection="Columns"
+                                                          ResizeBehavior="PreviousAndNext"
+                                                          HorizontalAlignment="Stretch"
+                                                          VerticalAlignment="Stretch"/>
+
+                                            <ScrollViewer Grid.Column="2"
+                                                          VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled">
+                                                <StackPanel Spacing="10">
+                                                    <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="10"
+                                                            Padding="10">
+                                                        <ItemsControl ItemsSource="{Binding PreviewMetrics}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="windows:SnapshotPreviewMetricItemViewModel">
+                                                                    <Grid ColumnDefinitions="150,*" ColumnSpacing="10" Margin="0,0,0,6">
+                                                                        <TextBlock Grid.Column="0"
+                                                                                   Text="{Binding Label}"
+                                                                                   FontWeight="SemiBold"
+                                                                                   Foreground="{DynamicResource VeyraDiffHunkFgBrush}"/>
+                                                                        <TextBlock Grid.Column="1"
+                                                                                   Text="{Binding Value}"
+                                                                                   TextWrapping="Wrap"/>
+                                                                    </Grid>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Border>
+
+                                                    <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
+                                                            BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="10"
+                                                            Padding="10"
+                                                            IsVisible="{Binding HasSelectedArchiveEntry}">
+                                                        <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                                                            <TextBlock Grid.Row="0"
+                                                                       Text="{loc:Tr common.details}"
+                                                                       FontWeight="SemiBold"
+                                                                       FontSize="13"/>
+
+                                                            <StackPanel Grid.Row="1" Spacing="8">
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr common.path}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.EntryPath}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr common.type}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.TypeLabel}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr common.size}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.SizeLabel}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr metric.compressed_size}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.CompressedSizeLabel}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr metric.crc32}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.CrcLabel}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                                <Grid ColumnDefinitions="90,*" ColumnSpacing="10">
+                                                                    <TextBlock Grid.Column="0" Text="{loc:Tr common.modified}" FontWeight="SemiBold"/>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding SelectedArchiveEntry.ModifiedLabel}" TextWrapping="Wrap"/>
+                                                                </Grid>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
                                 <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsAudioPreview}">
                                     <ScrollViewer VerticalScrollBarVisibility="Auto"
                                                   HorizontalScrollBarVisibility="Disabled">
                                         <StackPanel Spacing="12">
-                                            <TextBlock Text="{loc:Tr compare.audio_waveform}"
-                                                       FontWeight="SemiBold"
-                                                       FontSize="14"/>
+                                            <Grid ColumnDefinitions="*,Auto"
+                                                  ColumnSpacing="12">
+                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                    <TextBlock Text="{loc:Tr compare.audio_waveform}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="14"/>
+                                                    <TextBlock Text="{Binding AudioPlaybackStatus}"
+                                                               Classes="muted"
+                                                               TextWrapping="Wrap"
+                                                               IsVisible="{Binding HasAudioPlaybackStatus}"/>
+                                                </StackPanel>
 
-                                            <WrapPanel Orientation="Horizontal">
-                                                <Button Classes="subtle"
-                                                        Command="{Binding PlayBeforeAudioCommand}"
-                                                        Margin="0,0,8,8">
-                                                    <TextBlock Text="{loc:Tr compare.audio_play_before}"/>
-                                                </Button>
-                                                <Button Classes="subtle"
-                                                        Command="{Binding PlayAfterAudioCommand}"
-                                                        Margin="0,0,8,8">
-                                                    <TextBlock Text="{loc:Tr compare.audio_play_after}"/>
-                                                </Button>
-                                                <Button Classes="subtle"
-                                                        Command="{Binding PlayDifferenceAudioCommand}"
-                                                        Margin="0,0,8,8">
-                                                    <TextBlock Text="{loc:Tr compare.audio_play_difference}"/>
-                                                </Button>
-                                                <Button Classes="subtle"
-                                                        Command="{Binding StopAudioPlaybackCommand}"
-                                                        Margin="0,0,8,8">
-                                                    <TextBlock Text="{loc:Tr compare.audio_play_stop}"/>
-                                                </Button>
-                                                <TextBlock Text="{Binding AudioPlaybackStatus}"
-                                                           Classes="muted"
-                                                           VerticalAlignment="Center"
-                                                           Margin="0,4,0,8"
-                                                           IsVisible="{Binding HasAudioPlaybackStatus}"/>
-                                            </WrapPanel>
+                                                <WrapPanel Grid.Column="1"
+                                                           Orientation="Horizontal"
+                                                           HorizontalAlignment="Right">
+                                                    <Button Classes="subtle"
+                                                            Command="{Binding PlayBeforeAudioCommand}"
+                                                            Margin="0,0,8,8">
+                                                        <TextBlock Text="{loc:Tr compare.audio_play_before}"/>
+                                                    </Button>
+                                                    <Button Classes="subtle"
+                                                            Command="{Binding PlayAfterAudioCommand}"
+                                                            Margin="0,0,8,8">
+                                                        <TextBlock Text="{loc:Tr compare.audio_play_after}"/>
+                                                    </Button>
+                                                    <Button Classes="subtle"
+                                                            Command="{Binding PlayDifferenceAudioCommand}"
+                                                            Margin="0,0,8,8">
+                                                        <TextBlock Text="{loc:Tr compare.audio_play_difference}"/>
+                                                    </Button>
+                                                    <Button Classes="subtle"
+                                                            Command="{Binding StopAudioPlaybackCommand}"
+                                                            Margin="0,0,0,8">
+                                                        <TextBlock Text="{loc:Tr compare.audio_play_stop}"/>
+                                                    </Button>
+                                                </WrapPanel>
+                                            </Grid>
+
+                                            <Border Background="{DynamicResource VeyraCanvasBrush}"
+                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="14"
+                                                    Padding="12">
+                                                <Grid RowDefinitions="Auto,Auto,Auto"
+                                                      RowSpacing="10">
+                                                    <Grid Grid.Row="0"
+                                                          ColumnDefinitions="*,Auto"
+                                                          ColumnSpacing="12">
+                                                        <TextBlock Text="{Binding AudioPlaybackStatus}"
+                                                                   Classes="muted"
+                                                                   TextWrapping="Wrap"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding AudioPlaybackTimerText}"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource VeyraTextBrush}"
+                                                                   HorizontalAlignment="Right"/>
+                                                    </Grid>
+
+                                                    <Slider Grid.Row="1"
+                                                            Minimum="0"
+                                                            Maximum="{Binding AudioPlaybackDurationSeconds}"
+                                                            Value="{Binding AudioPlaybackPositionSeconds, Mode=TwoWay}"
+                                                            IsEnabled="{Binding IsAudioPlaybackSeekEnabled}"/>
+
+                                                    <Grid Grid.Row="2"
+                                                          ColumnDefinitions="*,12,*"
+                                                          IsVisible="{Binding ShowAudioSpectralHero}">
+                                                        <Border Grid.Column="0"
+                                                                Background="{DynamicResource VeyraSurfaceBrush}"
+                                                                CornerRadius="10"
+                                                                ClipToBounds="True"
+                                                                MinHeight="140"
+                                                                IsVisible="{Binding HasAudioSpectrogramPreview}">
+                                                            <Image Source="{Binding AudioSpectrogramPreview}"
+                                                                   Stretch="UniformToFill"
+                                                                   HorizontalAlignment="Stretch"
+                                                                   VerticalAlignment="Stretch"/>
+                                                        </Border>
+
+                                                        <Border Grid.Column="2"
+                                                                Background="{DynamicResource VeyraSurfaceBrush}"
+                                                                CornerRadius="10"
+                                                                ClipToBounds="True"
+                                                                MinHeight="140"
+                                                                IsVisible="{Binding HasAudioSpectralDeltaPreview}">
+                                                            <Image Source="{Binding AudioSpectralDeltaPreview}"
+                                                                   Stretch="UniformToFill"
+                                                                   HorizontalAlignment="Stretch"
+                                                                   VerticalAlignment="Stretch"/>
+                                                        </Border>
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
 
                                             <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
                                                     BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
@@ -968,9 +1312,9 @@
                                 </Border>
 
                                 
-                                <Border Grid.Row="0" Classes="diff-surface" IsVisible="{Binding IsImagePreview}">
-                                    <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
-                                        <StackPanel Grid.Row="0" Spacing="10">
+                                <Grid Grid.Row="0" IsVisible="{Binding IsImagePreview}">
+                                    <Grid RowDefinitions="Auto,*,Auto" RowSpacing="6">
+                                        <StackPanel Grid.Row="0" Spacing="10" IsVisible="False">
                                             <StackPanel Spacing="2">
                                                 <TextBlock Text="{Binding ImageDiffCompactSummary}"
                                                            FontWeight="SemiBold"
@@ -1008,15 +1352,16 @@
                                             </WrapPanel>
                                         </StackPanel>
 
-                                        <Grid Grid.Row="1">
-                                            <Border Background="{DynamicResource VeyraSurfaceSoftBrush}"
-                                                    BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="10"
-                                                    Padding="8"
+                                        <Grid Grid.Row="1"
+                                              ZIndex="20">
+                                            <Border Background="{DynamicResource VeyraCanvasBrush}"
+                                                    BorderThickness="0"
+                                                    CornerRadius="8"
+                                                    Padding="0"
+                                                    ClipToBounds="False"
                                                     IsVisible="{Binding HasAnyImagePreview}">
-                                                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="8">
-                                                    <StackPanel Grid.Row="0" Spacing="2">
+                                                <Grid RowDefinitions="Auto,Auto,*" RowSpacing="0">
+                                                    <StackPanel Grid.Row="0" Spacing="2" IsVisible="False">
                                                         <TextBlock Text="{Binding OverlayImageCaption}"
                                                                    FontWeight="SemiBold"
                                                                    FontSize="12"
@@ -1026,7 +1371,7 @@
                                                                    FontSize="11"/>
                                                     </StackPanel>
 
-                                                    <StackPanel Grid.Row="1" Spacing="8">
+                                                    <StackPanel Grid.Row="1" Spacing="8" IsVisible="False">
                                                         <WrapPanel Orientation="Horizontal"
                                                                    HorizontalAlignment="Left"
                                                                    VerticalAlignment="Center"
@@ -1037,7 +1382,6 @@
                                                                 <Button.Content>
                                                                     <StackPanel Classes="button-content">
                                                                         <TextBlock Classes="button-icon" Text="-"/>
-                                                                        <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_out}"/>
                                                                     </StackPanel>
                                                                 </Button.Content>
                                                             </Button>
@@ -1050,14 +1394,14 @@
                                                                            Classes="muted"
                                                                            FontSize="11"
                                                                            VerticalAlignment="Center"/>
-                                                                <Slider x:Name="OverlayZoomSlider"
+                                                                <Slider
                                                                         Width="140"
                                                                         Minimum="1"
                                                                         Maximum="500"
                                                                         Value="100"
                                                                         TickFrequency="10"
                                                                         ValueChanged="OnOverlayZoomSliderValueChanged"/>
-                                                                <TextBlock x:Name="OverlayZoomValueText"
+                                                                <TextBlock
                                                                            Width="52"
                                                                            Text="100%"
                                                                            HorizontalAlignment="Right"
@@ -1070,7 +1414,6 @@
                                                                 <Button.Content>
                                                                     <StackPanel Classes="button-content">
                                                                         <TextBlock Classes="button-icon" Text="+"/>
-                                                                        <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_in}"/>
                                                                     </StackPanel>
                                                                 </Button.Content>
                                                             </Button>
@@ -1092,34 +1435,24 @@
                                                             </Button>
 
                                                             <Button Classes="subtle compact"
-                                                                Click="OnResetOverlayImageToHundredClicked"
-                                                                Margin="0,0,8,8">
-                                                                <Button.Content>
-                                                                    <StackPanel Classes="button-content">
-                                                                        <TextBlock Classes="button-icon" Text="100"/>
-                                                                        <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_reset}"/>
-                                                                    </StackPanel>
-                                                                </Button.Content>
-                                                            </Button>
-
-                                                            <Button Classes="subtle compact"
                                                                 Click="OnOpenDetachedImagePreviewClicked"
                                                                 Margin="0,0,0,8">
                                                                 <Button.Content>
                                                                     <StackPanel Classes="button-content">
                                                                         <TextBlock Classes="button-icon" Text="&#xE740;"/>
-                                                                        <TextBlock Classes="button-label persistent" Text="{loc:Tr compare.open_detached_preview}"/>
                                                                     </StackPanel>
                                                                 </Button.Content>
                                                             </Button>
                                                         </WrapPanel>
                                                     </StackPanel>
 
-                                                    <Grid Grid.Row="2">
+                                                    <Grid Grid.Row="2" ClipToBounds="False">
                                                         <ScrollViewer x:Name="OverlayImageScrollViewer"
                                                                       Focusable="True"
                                                                       HorizontalScrollBarVisibility="Auto"
                                                                       VerticalScrollBarVisibility="Auto"
+                                                                      HorizontalContentAlignment="Center"
+                                                                      VerticalContentAlignment="Center"
                                                                       PointerPressed="OnOverlayImagePointerPressed"
                                                                       PointerMoved="OnOverlayImagePointerMoved"
                                                                       PointerReleased="OnOverlayImagePointerReleased"
@@ -1176,11 +1509,155 @@
                                                             </Grid>
                                                         </ScrollViewer>
 
+                                                        <Border Background="#D914171B"
+                                                                BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
+                                                                BorderThickness="1"
+                                                                CornerRadius="10"
+                                                                Padding="10,8"
+                                                                Margin="10"
+                                                                HorizontalAlignment="Left"
+                                                                VerticalAlignment="Top"
+                                                                IsHitTestVisible="False">
+                                                            <StackPanel Spacing="2">
+                                                                <TextBlock Text="{Binding OverlayImageCaption}"
+                                                                           FontWeight="SemiBold"
+                                                                           FontSize="12"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding ImageDiffCompactSummary}"
+                                                                           Classes="muted"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{loc:Tr compare.zoom_hint}"
+                                                                           Classes="muted"
+                                                                           FontSize="11"/>
+                                                            </StackPanel>
+                                                        </Border>
+
                                                         <Border Background="#01000000"
+                                                                IsVisible="{Binding ShowPreviewToolbar}"
+                                                                PointerPressed="OnImageDiffSettingsBackdropPressed"/>
+
+                                                        <Border Classes="popover-panel"
+                                                                Width="520"
+                                                                MaxWidth="560"
+                                                                Margin="0,10,10,0"
+                                                                HorizontalAlignment="Right"
+                                                                VerticalAlignment="Top"
+                                                                IsVisible="{Binding ShowPreviewToolbar}">
+                                                            <StackPanel Spacing="10">
+                                                                <WrapPanel Orientation="Horizontal"
+                                                                           HorizontalAlignment="Left"
+                                                                           VerticalAlignment="Center"
+                                                                           ItemHeight="40">
+                                                                    <Button Classes="subtle compact"
+                                                                            Click="OnZoomOutOverlayImageClicked"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="-"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <StackPanel Orientation="Horizontal"
+                                                                                Spacing="8"
+                                                                                VerticalAlignment="Center"
+                                                                                Margin="0,0,8,8">
+                                                                        <TextBlock Text="{loc:Tr compare.zoom}"
+                                                                                   Classes="muted"
+                                                                                   FontSize="11"
+                                                                                   VerticalAlignment="Center"/>
+                                                                        <Slider x:Name="OverlayZoomSlider"
+                                                                                Width="150"
+                                                                                Minimum="1"
+                                                                                Maximum="500"
+                                                                                Value="100"
+                                                                                TickFrequency="10"
+                                                                                ValueChanged="OnOverlayZoomSliderValueChanged"/>
+                                                                        <TextBlock x:Name="OverlayZoomValueText"
+                                                                                   Width="52"
+                                                                                   Text="100%"
+                                                                                   HorizontalAlignment="Right"
+                                                                                   VerticalAlignment="Center"
+                                                                                   FontWeight="SemiBold"/>
+                                                                    </StackPanel>
+
+                                                                    <Button Classes="subtle compact"
+                                                                            Click="OnZoomInOverlayImageClicked"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="+"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <Button Classes="subtle compact"
+                                                                            Click="OnFitOverlayImageToViewClicked"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE9A6;"/>
+                                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.zoom_fit}"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+                                                                </WrapPanel>
+
+                                                                <WrapPanel Orientation="Horizontal"
+                                                                           HorizontalAlignment="Left"
+                                                                           ItemHeight="40">
+                                                                    <Button Classes="subtle compact"
+                                                                            Command="{Binding SaveImageDiffPreviewCommand}"
+                                                                            IsEnabled="{Binding CanSaveImageDiffPreview}"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE74E;"/>
+                                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.save_diff_preview}"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <Button Classes="subtle compact"
+                                                                            Click="OnOpenDetachedImagePreviewClicked"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE740;"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <Button Classes="subtle compact"
+                                                                            Command="{Binding OpenSourceFileCommand}"
+                                                                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE8A7;"/>
+                                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.open_file}"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <Button Classes="subtle compact"
+                                                                            Command="{Binding OpenSourceFileInExplorerCommand}"
+                                                                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"
+                                                                            Margin="0,0,8,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE838;"/>
+                                                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.show_in_explorer}"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+
+                                                                    <Button Classes="primary compact"
+                                                                            Command="{Binding CloseCommand}"
+                                                                            Margin="0,0,0,8">
+                                                                        <StackPanel Classes="button-content">
+                                                                            <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                                                            <TextBlock Classes="button-label" Text="{loc:Tr common.close}"/>
+                                                                        </StackPanel>
+                                                                    </Button>
+                                                                </WrapPanel>
+                                                            </StackPanel>
+                                                        </Border>
+
+                                                        <Border Background="#01000000"
+                                                                ZIndex="900"
                                                                 IsVisible="{Binding ShowImageDiffSettings}"
                                                                 PointerPressed="OnImageDiffSettingsBackdropPressed"/>
 
                                                         <Border Classes="popover-panel"
+                                                                ZIndex="901"
                                                                 Width="430"
                                                                 MaxWidth="430"
                                                                 Margin="0,12,12,12"
@@ -1229,8 +1706,8 @@
                                                                         <StackPanel Spacing="4"
                                                                                     IsVisible="{Binding IsSplitImageDiffMode}">
                                                                             <TextBlock Text="{loc:Tr compare.image_split}" Classes="muted" FontSize="11"/>
-                                                                            <Slider Minimum="0"
-                                                                                    Maximum="100"
+                                                                            <Slider Minimum="{Binding MinComparisonSplitPercent}"
+                                                                                    Maximum="{Binding MaxComparisonSplitPercent}"
                                                                                     Value="{Binding ComparisonSplitPercent}"/>
                                                                             <TextBlock Text="{Binding SplitPositionLabel}" Classes="muted" FontSize="11"/>
                                                                         </StackPanel>
@@ -1244,16 +1721,6 @@
                                                                                 <StackPanel Classes="button-content">
                                                                                     <TextBlock Classes="button-icon" Text="&#xE81E;"/>
                                                                                     <TextBlock Classes="button-label persistent" Text="{Binding ImageRegionBoxesLabel}"/>
-                                                                                </StackPanel>
-                                                                            </Button.Content>
-                                                                        </Button>
-                                                                        <Button Classes="subtle compact"
-                                                                                Margin="0,0,8,8"
-                                                                                Command="{Binding ToggleShowSourceImagePanelsCommand}">
-                                                                            <Button.Content>
-                                                                                <StackPanel Classes="button-content">
-                                                                                    <TextBlock Classes="button-icon" Text="&#xE7B3;"/>
-                                                                                    <TextBlock Classes="button-label persistent" Text="{Binding SourceImagePanelsLabel}"/>
                                                                                 </StackPanel>
                                                                             </Button.Content>
                                                                         </Button>
@@ -1282,6 +1749,7 @@
                                         </Grid>
 
                                         <Border Grid.Row="2"
+                                                ZIndex="0"
                                                 Background="{DynamicResource VeyraCanvasBrush}"
                                                 BorderBrush="{DynamicResource VeyraBorderSoftBrush}"
                                                 BorderThickness="1"
@@ -1330,7 +1798,7 @@
                                             </Grid>
                                         </Border>
                                     </Grid>
-                                </Border>
+                                </Grid>
                                 <TextBlock Grid.Row="1" 
                                            Text="{Binding PreviewSummary}"
                                            Classes="muted"
@@ -1381,6 +1849,100 @@
                                     </StackPanel>
                                 </Border>
                             </Border>
+
+                            <Border Grid.RowSpan="2"
+                                    Background="#01000000"
+                                    IsVisible="{Binding ShowNonImagePreviewToolbar}"
+                                    PointerPressed="OnImageDiffSettingsBackdropPressed"/>
+
+                            <Border Grid.RowSpan="2"
+                                    Classes="popover-panel"
+                                    Width="520"
+                                    MaxWidth="560"
+                                    Margin="0,10,10,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    IsVisible="{Binding ShowNonImagePreviewToolbar}">
+                                <WrapPanel Orientation="Horizontal"
+                                           HorizontalAlignment="Left"
+                                           ItemHeight="40">
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding ToggleWrapModeCommand}"
+                                            IsVisible="{Binding IsTextPreview}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE8A9;"/>
+                                            <TextBlock Classes="button-label" Text="{Binding WrapToggleLabel}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding ToggleFullFilePreviewCommand}"
+                                            IsEnabled="{Binding CanToggleFullFilePreview}"
+                                            IsVisible="{Binding CanToggleFullFilePreview}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE8A9;"/>
+                                            <TextBlock Classes="button-label" Text="{Binding FullPreviewToggleLabel}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding ToggleSvgCodePreviewCommand}"
+                                            IsVisible="{Binding IsSvgFile}"
+                                            IsEnabled="{Binding CanToggleSvgCodePreview}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE943;"/>
+                                            <TextBlock Classes="button-label" Text="{Binding SvgCodePreviewToggleLabel}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding OpenNativeWordCompareCommand}"
+                                            IsVisible="{Binding IsWordDocument}"
+                                            IsEnabled="{Binding CanOpenNativeWordCompare}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE70F;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.open_word_compare}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding OpenNativeWordCompareWithFormattingCommand}"
+                                            IsVisible="{Binding IsWordDocument}"
+                                            IsEnabled="{Binding CanOpenNativeWordCompare}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE8A7;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.word_compare_styles}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding OpenSourceFileCommand}"
+                                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE8A7;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.open_file}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="subtle compact"
+                                            Command="{Binding OpenSourceFileInExplorerCommand}"
+                                            IsEnabled="{Binding CanOpenSourceFileOnDisk}"
+                                            Margin="0,0,8,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE838;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr compare.show_in_explorer}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Classes="primary compact"
+                                            Command="{Binding CloseCommand}"
+                                            Margin="0,0,0,8">
+                                        <StackPanel Classes="button-content">
+                                            <TextBlock Classes="button-icon" Text="&#xE711;"/>
+                                            <TextBlock Classes="button-label" Text="{loc:Tr common.close}"/>
+                                        </StackPanel>
+                                    </Button>
+                                </WrapPanel>
+                            </Border>
                         </Grid>
                     </Grid>
             </Border>
@@ -1390,7 +1952,8 @@
                 Classes="dialog-shell"
                 Background="{DynamicResource VeyraSurfaceSoftBrush}"
                 BorderBrush="{DynamicResource VeyraBorderBrush}"
-                Padding="12">
+                Padding="12"
+                IsVisible="False">
             <StackPanel Spacing="10">
                 <StackPanel Spacing="2"
                             IsVisible="{Binding IsImagePreview, Converter={x:Static conv:BoolInvertConverter.Instance}}">
@@ -1504,4 +2067,3 @@
         </Border>
     </Grid>
 </Window>
-

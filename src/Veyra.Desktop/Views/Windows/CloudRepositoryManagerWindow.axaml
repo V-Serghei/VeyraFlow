@@ -1,0 +1,138 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.CloudRepositoryManagerWindow"
+        x:DataType="vm:CloudRepositoryManagerWindowViewModel"
+        x:Name="Root"
+        Width="1180"
+        Height="760"
+        MinWidth="980"
+        MinHeight="640"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Title="{loc:Tr cloud_manager.title}">
+    <Border Classes="dialog-shell" Margin="16" Padding="18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="hero">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{loc:Tr cloud_manager.title}" Classes="h2"/>
+                        <TextBlock Text="{Binding SummaryText}" Classes="muted" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="{loc:Tr common.refresh}" Command="{Binding RefreshCommand}" Classes="subtle"/>
+                    <Button Grid.Column="2" Content="{loc:Tr common.close}" Command="{Binding CloseCommand}" Classes="subtle"/>
+                </Grid>
+            </Border>
+
+            <WrapPanel Grid.Row="1" ItemWidth="220" ItemHeight="88">
+                <Border Classes="metric-card" Margin="0,0,10,10">
+                    <StackPanel>
+                        <TextBlock Text="{loc:Tr cloud_manager.account}" Classes="muted"/>
+                        <TextBlock Text="{Binding AccountName}" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding AccountEmail}" Classes="muted" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasAccountEmail}"/>
+                    </StackPanel>
+                </Border>
+                <Border Classes="metric-card" Margin="0,0,10,10">
+                    <StackPanel>
+                        <TextBlock Text="{loc:Tr cloud_manager.connection}" Classes="muted"/>
+                        <TextBlock Text="{Binding ConnectionText}" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </Border>
+                <Border Classes="metric-card" Margin="0,0,10,10">
+                    <StackPanel>
+                        <TextBlock Text="{loc:Tr cloud_manager.cloud_storage}" Classes="muted"/>
+                        <TextBlock Text="{Binding StorageText}" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </Border>
+                <Border Classes="metric-card" Margin="0,0,10,10">
+                    <StackPanel>
+                        <TextBlock Text="{loc:Tr cloud_manager.status}" Classes="muted"/>
+                        <TextBlock Text="{Binding StatusText}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+            </WrapPanel>
+
+            <Grid Grid.Row="2" ColumnDefinitions="2*,*" ColumnSpacing="12">
+                <Border Classes="card" Padding="12">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                        <TextBlock Text="{loc:Tr cloud_manager.repositories}" Classes="section-title"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Repositories}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CloudRepositoryManagerRepositoryItemViewModel">
+                                        <Border Classes="card" Padding="12" Margin="0,0,0,10">
+                                            <StackPanel Spacing="8">
+                                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding DisplayPath}" Classes="muted" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                    <Border Grid.Column="1" Classes="badge">
+                                                        <TextBlock Text="{Binding RestoreStatus}" FontWeight="SemiBold"/>
+                                                    </Border>
+                                                    <Border Grid.Column="2" Classes="badge">
+                                                        <TextBlock Text="{Binding ConflictStatus}" FontWeight="SemiBold"/>
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock Text="{Binding CloudIdText}" Classes="muted"/>
+                                                <TextBlock Text="{Binding LatestSnapshotText}" Classes="muted"/>
+                                                <WrapPanel>
+                                                    <Button Content="{loc:Tr cloud_manager.restore}" Classes="primary compact" Margin="0,0,8,8"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).OpenRestoreWizardCommand}"
+                                                            CommandParameter="{Binding .}"/>
+                                                    <Button Content="{loc:Tr cloud_manager.compare_with_local}" Classes="subtle compact" Margin="0,0,8,8"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).CompareCommand}"
+                                                            CommandParameter="{Binding .}"/>
+                                                    <Button Content="{loc:Tr cloud_manager.sync_now}" Classes="subtle compact" Margin="0,0,8,8"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).SyncNowCommand}"
+                                                            CommandParameter="{Binding .}"/>
+                                                    <Button Content="{loc:Tr cloud_manager.delete_from_cloud}" Classes="danger compact" Margin="0,0,8,8"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).DeleteFromCloudCommand}"
+                                                            CommandParameter="{Binding .}"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Column="1" Classes="card" Padding="12">
+                    <Grid RowDefinitions="Auto,*" RowSpacing="8">
+                        <TextBlock Text="{loc:Tr cloud_manager.background_operations}" Classes="section-title"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Operations}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CloudRepositoryOperationItemViewModel">
+                                        <Border Classes="metric-card" Padding="10" Margin="0,0,0,8">
+                                            <StackPanel Spacing="6">
+                                                <Grid ColumnDefinitions="*,Auto">
+                                                    <TextBlock Text="{Binding OperationKind}" FontWeight="SemiBold"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" Classes="muted"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding Status}" Classes="muted"/>
+                                                <TextBlock Text="{Binding Phase}" Classes="muted"/>
+                                                <ProgressBar Minimum="0" Maximum="100"
+                                                             Value="{Binding Percent}"
+                                                             IsIndeterminate="{Binding IsIndeterminate}"
+                                                             Height="8"/>
+                                                <TextBlock Text="{Binding Summary}" Classes="muted" TextWrapping="Wrap"/>
+                                                <TextBlock Text="{Binding Error}"
+                                                           IsVisible="{Binding HasError}"
+                                                           Foreground="{DynamicResource VeyraWarningBrush}"
+                                                           TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

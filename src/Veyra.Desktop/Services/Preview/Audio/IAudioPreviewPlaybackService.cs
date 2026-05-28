@@ -10,12 +10,18 @@ public interface IAudioPreviewPlaybackService : IDisposable
 
     bool IsPlaying { get; }
 
+    TimeSpan CurrentTime { get; }
+
+    TimeSpan TotalTime { get; }
+
     Task PlayAsync(
         string path,
         TimeSpan? startTime = null,
         TimeSpan? duration = null,
         bool loop = false,
         CancellationToken ct = default);
+
+    void Seek(TimeSpan position);
 
     void Stop();
 }
