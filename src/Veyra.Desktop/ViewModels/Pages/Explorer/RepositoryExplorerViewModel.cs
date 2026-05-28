@@ -16,6 +16,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Repository;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
@@ -4133,11 +4134,10 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (_liveSyncExtensions.Count == 0)
             return true;
 
-        var ext = Path.GetExtension(fullPath);
-        if (string.IsNullOrWhiteSpace(ext))
+        if (Directory.Exists(fullPath))
             return true;
 
-        var normalized = ext.StartsWith('.') ? ext.ToLowerInvariant() : "." + ext.ToLowerInvariant();
+        var normalized = KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(fullPath));
         return _liveSyncExtensions.Contains(normalized);
     }
 
@@ -4346,9 +4346,9 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         return values
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim())
-            .Select(v => v.StartsWith('.') ? v : "." + v)
-            .Select(v => v.ToLowerInvariant())
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -4670,7 +4670,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     {
         var selected = NormalizeSnapshotFileExtensionFilter(SelectedSnapshotFileExtensionFilter);
         var ext = _snapshotFilesSource
-            .Select(x => NormalizeSnapshotFileExtensionFilter(Path.GetExtension(x.RelativePath)))
+            .Select(x => NormalizeSnapshotFileExtensionFilter(KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(x.RelativePath))))
             .Where(x => x != "all")
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
@@ -4822,7 +4822,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         {
             filtered = filtered.Where(x =>
                 string.Equals(
-                    NormalizeSnapshotFileExtensionFilter(Path.GetExtension(x.RelativePath)),
+                    NormalizeSnapshotFileExtensionFilter(KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(x.RelativePath))),
                     extensionFilter,
                     StringComparison.OrdinalIgnoreCase));
         }
@@ -5034,11 +5034,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
         if (trackedExtensions.Count == 0)
             return "new";
 
-        var extension = fileSystemInfo.Extension;
-        if (string.IsNullOrWhiteSpace(extension))
-            return "untracked";
-
-        var normalized = extension.StartsWith('.') ? extension.ToLowerInvariant() : "." + extension.ToLowerInvariant();
+        var normalized = KnownFileExtensions.NormalizeTrackedFileFormat(fileSystemInfo.Extension);
         return trackedExtensions.Contains(normalized, StringComparer.OrdinalIgnoreCase)
             ? "new"
             : "untracked";
@@ -5075,7 +5071,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             GetParentRelativePath(relativePath),
             fileSystemInfo.Name,
             isDirectory,
-            isDirectory ? null : fileSystemInfo.Extension,
+            isDirectory ? null : KnownFileExtensions.NormalizeTrackedFileFormat(fileSystemInfo.Extension),
             sizeBytes,
             fileSystemInfo.LastWriteTimeUtc,
             ContentHashSha256: null);
@@ -5425,11 +5421,7 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
     private static ExplorerItemViewModel MapToItem(ExplorerEntryRow row)
     {
         var entry = row.Entry;
-        var type = entry.IsDirectory
-            ? Loc.T("explorer.type.folder")
-            : string.IsNullOrWhiteSpace(entry.Extension)
-                ? Loc.T("explorer.type.file")
-                : entry.Extension.TrimStart('.').ToUpperInvariant();
+        var type = FormatEntryType(entry);
         var statusText = LocalizeExplorerFileStatus(row.StatusKind);
         var (statusBackground, statusForeground) = ResolveExplorerStatusColors(row.StatusKind);
         var statusGlyph = ResolveExplorerStatusGlyph(row.StatusKind);
@@ -5453,6 +5445,20 @@ public sealed partial class RepositoryExplorerViewModel : ObservableObject
             RowOpacity = row.IsTracked ? 1d : 0.58d,
             TooltipText = BuildExplorerItemTooltip(entry, type, statusText)
         };
+    }
+
+    private static string FormatEntryType(RepositoryScanEntryDto entry)
+    {
+        if (entry.IsDirectory)
+            return Loc.T("explorer.type.folder");
+
+        if (string.IsNullOrWhiteSpace(entry.Extension)
+            || KnownFileExtensions.IsExtensionlessFileFormat(entry.Extension))
+        {
+            return Loc.T("explorer.type.file");
+        }
+
+        return entry.Extension.TrimStart('.').ToUpperInvariant();
     }
 
     private static string BuildExplorerItemTooltip(RepositoryScanEntryDto entry, string type, string statusText)

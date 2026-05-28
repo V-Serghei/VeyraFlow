@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
@@ -134,7 +135,7 @@ public sealed class EfRepositoryBundleService(
                 ParentRelativePath = e.ParentRelativePath,
                 Name = e.Name,
                 IsDirectory = e.IsDirectory,
-                Extension = e.Extension,
+                Extension = e.IsDirectory ? null : NormalizeExtension(e.Extension),
                 SizeBytes = e.SizeBytes,
                 LastWriteUtc = e.LastWriteUtc,
                 ContentHashSha256 = e.ContentHashSha256,
@@ -152,7 +153,7 @@ public sealed class EfRepositoryBundleService(
                 Id = i.Id,
                 RelativePath = i.RelativePath,
                 Name = i.Name,
-                Extension = i.Extension,
+                Extension = NormalizeExtension(i.Extension),
                 CreatedAtUtc = i.CreatedAt,
                 UpdatedAtUtc = i.UpdatedAt
             })
@@ -501,7 +502,7 @@ public sealed class EfRepositoryBundleService(
                 ParentRelativePath = e.ParentRelativePath,
                 Name = e.Name,
                 IsDirectory = e.IsDirectory,
-                Extension = e.Extension,
+                Extension = e.IsDirectory ? null : NormalizeExtension(e.Extension),
                 SizeBytes = e.SizeBytes,
                 LastWriteUtc = e.LastWriteUtc,
                 ContentHashSha256 = e.ContentHashSha256,
@@ -525,7 +526,7 @@ public sealed class EfRepositoryBundleService(
                     RepositoryId = repository.Id,
                     RelativePath = i.RelativePath,
                     Name = i.Name,
-                    Extension = i.Extension,
+                    Extension = NormalizeExtension(i.Extension),
                     CreatedAt = i.CreatedAtUtc,
                     UpdatedAt = i.UpdatedAtUtc,
                     IsDeleted = false,
@@ -1355,14 +1356,7 @@ public sealed class EfRepositoryBundleService(
 
     private static string NormalizeExtension(string? extension)
     {
-        if (string.IsNullOrWhiteSpace(extension))
-            return string.Empty;
-
-        var normalized = extension.Trim();
-        if (!normalized.StartsWith('.'))
-            normalized = "." + normalized;
-
-        return normalized.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeTrackedFileFormat(extension);
     }
 
     private static string TruncateForColumn(string? value, int maxLength)

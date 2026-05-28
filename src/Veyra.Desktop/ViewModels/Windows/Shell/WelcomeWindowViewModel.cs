@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
     private readonly OnboardingStateService _onboardingState;
     private readonly ILogger<WelcomeWindowViewModel> _log;
     private readonly UserExperienceManager _experience = UserExperienceManager.Instance;
+    private readonly LocalizationManager _localization = LocalizationManager.Instance;
 
     public WelcomeWindowViewModel(
         IServiceProvider sp,
@@ -45,11 +47,53 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
         _cloudSync = cloudSync;
         _onboardingState = onboardingState;
         _log = log;
+        _localization.LanguageChanged += OnLanguageChanged;
+        RefreshLanguageState();
         NavigateToIntro();
     }
 
     [ObservableProperty] private object? _currentPage;
+    [ObservableProperty] private string _languageToggleLabel = "EN";
     public bool EnableTipsSelected { get; private set; }
+
+    [RelayCommand]
+    private void ToggleLanguage()
+    {
+        var languages = _localization.AvailableLanguages;
+        if (languages.Count == 0)
+            return;
+
+        var currentIndex = -1;
+        for (var i = 0; i < languages.Count; i++)
+        {
+            if (string.Equals(languages[i].Code, _localization.CurrentLanguageCode, StringComparison.OrdinalIgnoreCase))
+            {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        var nextIndex = currentIndex < 0
+            ? 0
+            : (currentIndex + 1) % languages.Count;
+
+        _localization.SetLanguage(languages[nextIndex].Code);
+        RefreshLanguageState();
+        _log.LogInformation("Welcome language toggled. CurrentLanguage {Language}", _localization.CurrentLanguageCode);
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        RefreshLanguageState();
+    }
+
+    private void RefreshLanguageState()
+    {
+        var code = _localization.CurrentLanguageCode;
+        LanguageToggleLabel = string.IsNullOrWhiteSpace(code)
+            ? "EN"
+            : code.ToUpperInvariant();
+    }
 
     private void NavigateToIntro()
     {
@@ -75,6 +119,8 @@ public sealed partial class WelcomeWindowViewModel : ObservableObject
 
         NavigateToLogin();
     }
+
+    public void NavigateToLoginDirectly() => NavigateToLogin();
 
     private void NavigateToLogin()
     {

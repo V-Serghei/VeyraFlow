@@ -86,7 +86,8 @@ public sealed class EfUserProfileRepository(VeyraDbContext db) : IUserProfileRep
                 .SetProperty(u => u.UpdatedAt, now), ct);
 
         var existing = await db.Set<UserProfile>()
-            .FirstOrDefaultAsync(u => u.Username == normalizedUsername, ct);
+            .FirstOrDefaultAsync(u => u.Username == normalizedUsername
+                || (normalizedEmail != null && u.Email == normalizedEmail), ct);
 
         if (existing is not null)
         {

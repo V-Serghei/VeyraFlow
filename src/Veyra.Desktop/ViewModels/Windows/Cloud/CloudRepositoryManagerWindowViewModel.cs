@@ -17,7 +17,8 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
     ICloudRepositoryManagementService cloudManager,
     IWindowService windows) : ObservableObject
 {
-    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(1.5) };
+    private readonly DispatcherTimer _refreshTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    private bool _isAutoRefreshInFlight;
 
     [ObservableProperty] private string _accountName = Loc.T("cloud_manager.not_signed_in");
     [ObservableProperty] private string _accountEmail = string.Empty;
@@ -49,10 +50,18 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
 
     private async void OnRefreshTimerTick(object? sender, EventArgs e)
     {
-        if (IsBusy)
+        if (IsBusy || _isAutoRefreshInFlight || !HasActiveBackgroundOperations())
             return;
 
-        await RefreshCoreAsync(isAutomatic: true);
+        try
+        {
+            _isAutoRefreshInFlight = true;
+            await RefreshCoreAsync(isAutomatic: true);
+        }
+        finally
+        {
+            _isAutoRefreshInFlight = false;
+        }
     }
 
     [RelayCommand]
@@ -104,6 +113,9 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
         }
     }
 
+    private bool HasActiveBackgroundOperations()
+        => Operations.Any(operation => operation.IsActive);
+
     [RelayCommand]
     private async Task OpenRestoreWizardAsync(CloudRepositoryManagerRepositoryItemViewModel? repository)
     {
@@ -120,7 +132,7 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
         else
             await windows.ShowDialogAsync(wizard, owner);
 
-        await RefreshAsync();
+        ScheduleBackgroundRefresh();
     }
 
     [RelayCommand]
@@ -130,7 +142,7 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
             return;
 
         await cloudManager.QueueSyncNowAsync(repository.CloudRepositoryId);
-        await RefreshAsync();
+        ScheduleBackgroundRefresh();
     }
 
     [RelayCommand]
@@ -140,7 +152,7 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
             return;
 
         await cloudManager.QueueCompareWithLocalAsync(repository.CloudRepositoryId, repository.CurrentLocalPath);
-        await RefreshAsync();
+        ScheduleBackgroundRefresh();
     }
 
     [RelayCommand]
@@ -155,7 +167,29 @@ public sealed partial class CloudRepositoryManagerWindowViewModel(
         await cloudManager.QueueDeleteCloudRepositoryAsync(
             repository.CloudRepositoryId,
             $"DELETE {repository.CloudRepositoryId}");
-        await RefreshAsync();
+        ScheduleBackgroundRefresh();
+    }
+
+    private void ScheduleBackgroundRefresh()
+    {
+        if (_isAutoRefreshInFlight)
+            return;
+
+        Dispatcher.UIThread.Post(async () =>
+        {
+            if (_isAutoRefreshInFlight || IsBusy)
+                return;
+
+            try
+            {
+                _isAutoRefreshInFlight = true;
+                await RefreshCoreAsync(isAutomatic: true);
+            }
+            finally
+            {
+                _isAutoRefreshInFlight = false;
+            }
+        });
     }
 
     private async Task<bool> ConfirmCloudDeleteAsync(CloudRepositoryManagerRepositoryItemViewModel repository)
@@ -292,6 +326,7 @@ public sealed class CloudRepositoryOperationItemViewModel
         PercentText = HasKnownPercent ? $"{Percent}%" : Loc.T("cloud_manager.progress_unknown");
         Error = source.Error ?? string.Empty;
         HasError = !string.IsNullOrWhiteSpace(Error);
+        IsActive = source.Status is "queued" or "running";
         Summary = source.Status == "completed"
             ? Loc.T("cloud_manager.operation_completed_summary")
             : string.Empty;
@@ -304,6 +339,7 @@ public sealed class CloudRepositoryOperationItemViewModel
     public int Percent { get; }
     public bool HasKnownPercent { get; }
     public bool IsIndeterminate => !HasKnownPercent;
+    public bool IsActive { get; }
     public string PercentText { get; }
     public string Error { get; }
     public bool HasError { get; }

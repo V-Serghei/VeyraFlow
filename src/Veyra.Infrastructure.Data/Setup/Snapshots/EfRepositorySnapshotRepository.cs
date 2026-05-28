@@ -4327,7 +4327,8 @@ public sealed class EfRepositorySnapshotRepository(
         return entry with
         {
             RelativePath = relativePath,
-            ParentRelativePath = string.IsNullOrWhiteSpace(parentRelativePath) ? null : parentRelativePath
+            ParentRelativePath = string.IsNullOrWhiteSpace(parentRelativePath) ? null : parentRelativePath,
+            Extension = entry.IsDirectory ? null : KnownFileExtensions.NormalizeTrackedFileFormat(entry.Extension)
         };
     }
 

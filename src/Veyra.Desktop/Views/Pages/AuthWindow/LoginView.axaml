@@ -11,9 +11,12 @@
     Background="{DynamicResource VeyraCanvasBrush}">
 
     <Grid>
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
         <Border MaxWidth="980"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,20,0,20"
                 Classes="dialog-shell"
                 Padding="18">
             <Grid ColumnDefinitions="1.1*,14,0.9*" ColumnSpacing="0">
@@ -116,6 +119,7 @@
                 </Border>
             </Grid>
         </Border>
+        </ScrollViewer>
 
         <Border Classes="loading-overlay"
                 IsVisible="{Binding IsBusy}">

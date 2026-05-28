@@ -135,7 +135,7 @@ public sealed partial class CloudRestoreWizardWindowViewModel(
 
     partial void OnRestoreFullHistoryChanged(bool value)
     {
-        CanStartRestore = HasPlan;
+        InvalidatePlan();
     }
 
     partial void OnRestoreToAnotherFolderChanged(bool value)
@@ -143,9 +143,25 @@ public sealed partial class CloudRestoreWizardWindowViewModel(
         if (value)
             TargetPath = null;
 
+        InvalidatePlan();
+    }
+
+    partial void OnRestoreMetadataOnlyChanged(bool value)
+    {
+        InvalidatePlan();
+    }
+
+    partial void OnRelinkExistingLocalFolderChanged(bool value)
+    {
+        InvalidatePlan();
+    }
+
+    private void InvalidatePlan()
+    {
         HasPlan = false;
         CanStartRestore = false;
         PlanText = Loc.T("cloud_restore.build_plan_first");
+        Conflicts.Clear();
     }
 
     private CloudRepositoryRestoreOptionsDto BuildOptions()

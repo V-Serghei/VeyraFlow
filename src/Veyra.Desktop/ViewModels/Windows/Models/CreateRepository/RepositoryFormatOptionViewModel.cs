@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Veyra.Application.Common.Files;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 
@@ -19,10 +20,6 @@ public sealed partial class RepositoryFormatOptionViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var v = value.Trim();
-        if (!v.StartsWith('.'))
-            v = "." + v;
-
-        return v.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeExtension(value) ?? string.Empty;
     }
 }

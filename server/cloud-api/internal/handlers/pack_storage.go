@@ -134,13 +134,37 @@ LIMIT 1;
 	if err != nil {
 		return err
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 
 	currentSize := pack.BytesWritten
 	if stat, statErr := target.Stat(); statErr == nil {
 		switch {
 		case stat.Size() < currentSize:
-			return fmt.Errorf("pack file %s is smaller than recorded size", packPath)
+			// Pack file was lost or truncated (e.g. container restart on ephemeral storage).
+			// Seal the broken pack record and start a fresh one so this upload can proceed.
+			_ = target.Close()
+			_ = os.Remove(packPath)
+			if _, sealErr := tx.Exec(ctx, `
+UPDATE cloud_block_packs
+SET state = 'sealed', updated_at = now(), sealed_at = COALESCE(sealed_at, now())
+WHERE id = $1;
+`, pack.ID); sealErr != nil {
+				return fmt.Errorf("seal broken pack: %w", sealErr)
+			}
+			newPack, newPackErr := h.createWritablePackTx(ctx, tx)
+			if newPackErr != nil {
+				return fmt.Errorf("create replacement pack: %w", newPackErr)
+			}
+			pack = newPack
+			packPath = h.blockPackPath(pack.RelativePath)
+			if mkdirErr := os.MkdirAll(filepath.Dir(packPath), 0o755); mkdirErr != nil {
+				return mkdirErr
+			}
+			target, err = os.OpenFile(packPath, os.O_CREATE|os.O_RDWR, 0o644)
+			if err != nil {
+				return err
+			}
+			currentSize = 0
 		case stat.Size() > currentSize:
 			if truncateErr := target.Truncate(currentSize); truncateErr != nil {
 				return fmt.Errorf("truncate pack %s: %w", packPath, truncateErr)
@@ -420,6 +444,25 @@ FOR UPDATE;
 		return blockPackRecord{}, err
 	}
 
+	if pack.ID != 0 {
+		appendable, appendableErr := h.isPackAppendable(pack)
+		if appendableErr != nil {
+			return blockPackRecord{}, appendableErr
+		}
+		if !appendable {
+			if _, err = tx.Exec(ctx, `
+UPDATE cloud_block_packs
+SET state = 'sealed',
+    updated_at = now(),
+    sealed_at = COALESCE(sealed_at, now())
+WHERE id = $1;
+`, pack.ID); err != nil {
+				return blockPackRecord{}, err
+			}
+			pack = blockPackRecord{}
+		}
+	}
+
 	if err == nil && pack.BlockCount > 0 && pack.BytesWritten+incomingBytes > h.packTargetBytes {
 		if _, err = tx.Exec(ctx, `
 UPDATE cloud_block_packs
@@ -438,6 +481,23 @@ WHERE id = $1;
 	}
 
 	return h.createWritablePackTx(ctx, tx)
+}
+
+func (h *Handler) isPackAppendable(pack blockPackRecord) (bool, error) {
+	if pack.ID == 0 || pack.BytesWritten <= 0 {
+		return true, nil
+	}
+
+	info, err := os.Stat(h.blockPackPath(pack.RelativePath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return info.Size() >= pack.BytesWritten, nil
 }
 
 func (h *Handler) markBlockMissing(ctx context.Context, hash string) error {
