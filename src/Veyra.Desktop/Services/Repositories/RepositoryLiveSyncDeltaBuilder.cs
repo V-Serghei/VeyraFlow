@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Services.Sync;
@@ -197,9 +198,9 @@ public sealed class RepositoryLiveSyncDeltaBuilder : IRepositoryLiveSyncDeltaBui
                 if (string.IsNullOrWhiteSpace(childRelativePath) || IsExcluded(childRelativePath, excludedPatterns))
                     continue;
 
-                var normalizedExtension = NormalizeExtension(childFile.Extension);
+                var normalizedExtension = KnownFileExtensions.NormalizeTrackedFileFormat(childFile.Extension);
                 if (trackedExtensions.Count > 0
-                    && (string.IsNullOrWhiteSpace(normalizedExtension) || !trackedExtensions.Contains(normalizedExtension)))
+                    && !trackedExtensions.Contains(normalizedExtension))
                 {
                     continue;
                 }
@@ -251,7 +252,7 @@ public sealed class RepositoryLiveSyncDeltaBuilder : IRepositoryLiveSyncDeltaBui
         RepositoryScanEntryDto? currentEntry)
     {
         var info = new FileInfo(fullPath);
-        var extension = NormalizeExtension(info.Extension);
+        var extension = KnownFileExtensions.NormalizeTrackedFileFormat(info.Extension);
         var lastWriteUtc = info.LastWriteTimeUtc;
 
         var hash = currentEntry is not null
@@ -351,8 +352,8 @@ public sealed class RepositoryLiveSyncDeltaBuilder : IRepositoryLiveSyncDeltaBui
         if (trackedExtensions.Count == 0)
             return true;
 
-        var extension = NormalizeExtension(Path.GetExtension(relativePath));
-        return !string.IsNullOrWhiteSpace(extension) && trackedExtensions.Contains(extension);
+        var extension = KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(relativePath));
+        return trackedExtensions.Contains(extension);
     }
 
     private static IReadOnlySet<string> NormalizeTrackedExtensions(IReadOnlyCollection<string> linkedFormats)
@@ -360,7 +361,7 @@ public sealed class RepositoryLiveSyncDeltaBuilder : IRepositoryLiveSyncDeltaBui
         return linkedFormats
             .Where(static format => !string.IsNullOrWhiteSpace(format))
             .Select(static format => format.Trim())
-            .Select(NormalizeExtension)
+            .Select(KnownFileExtensions.NormalizeExtension)
             .Where(static extension => !string.IsNullOrWhiteSpace(extension))
             .Select(static extension => extension!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -427,15 +428,6 @@ public sealed class RepositoryLiveSyncDeltaBuilder : IRepositoryLiveSyncDeltaBui
         var normalized = NormalizeRelativePath(relativePath);
         var idx = normalized.LastIndexOf('/');
         return idx <= 0 ? null : normalized[..idx];
-    }
-
-    private static string? NormalizeExtension(string? extension)
-    {
-        if (string.IsNullOrWhiteSpace(extension))
-            return null;
-
-        var normalized = extension.Trim().ToLowerInvariant();
-        return normalized.StartsWith('.') ? normalized : "." + normalized;
     }
 
     private static bool IsPathOrDescendant(string candidatePath, string ancestorPath)

@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Infrastructure.Native.Diagnostics;
 using Veyra.Infrastructure.Native.Execution;
@@ -130,6 +131,20 @@ public sealed class RustRepositoryScanner(
                 }, ct);
 
                 entries = nativeResult.Entries;
+                if (TracksExtensionlessFiles(repo.LinkedFormats))
+                {
+                    var extensionlessEntries = await BuildManagedEntriesAsync(
+                        repo.DirectoryPath,
+                        [KnownFileExtensions.ExtensionlessFileFormat],
+                        repo.ExcludedPatterns,
+                        scanOptions.MaxReadBytesPerSecond,
+                        scanOptions.MaxIoOperationsPerSecond,
+                        progress,
+                        ct);
+
+                    entries = MergeScanEntries(entries, extensionlessEntries);
+                }
+
                 scanStageMs = nativeResult.NativeScanMs;
                 entryProjectionMs = nativeResult.EntryProjectionMs;
 
@@ -323,7 +338,7 @@ public sealed class RustRepositoryScanner(
             src.ParentRelativePath,
             src.Name,
             src.IsDirectory,
-            src.Extension,
+            src.IsDirectory ? null : KnownFileExtensions.NormalizeTrackedFileFormat(src.Extension),
             src.SizeBytes,
             lastWrite,
             src.ContentHashSha256);
@@ -340,8 +355,9 @@ public sealed class RustRepositoryScanner(
     {
         var normalizedExt = linkedFormats
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim().ToLowerInvariant())
-            .Select(v => v.StartsWith('.') ? v : "." + v)
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var root = new DirectoryInfo(rootPath);
@@ -430,8 +446,8 @@ public sealed class RustRepositoryScanner(
         {
             ct.ThrowIfCancellationRequested();
 
-            var ext = NormalizeExtension(file.Extension);
-            if (extFilter.Count > 0 && (ext is null || !extFilter.Contains(ext)))
+            var ext = KnownFileExtensions.NormalizeTrackedFileFormat(file.Extension);
+            if (extFilter.Count > 0 && !extFilter.Contains(ext))
                 continue;
 
             string? hash;
@@ -501,13 +517,30 @@ public sealed class RustRepositoryScanner(
         return relativePath[..idx];
     }
 
-    private static string? NormalizeExtension(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return null;
+    private static bool TracksExtensionlessFiles(IEnumerable<string> linkedFormats)
+        => linkedFormats.Any(KnownFileExtensions.IsExtensionlessFileFormat);
 
-        var v = value.Trim().ToLowerInvariant();
-        return v.StartsWith('.') ? v : "." + v;
+    private static List<RepositoryScanEntryDto> MergeScanEntries(
+        IEnumerable<RepositoryScanEntryDto> primaryEntries,
+        IEnumerable<RepositoryScanEntryDto> supplementalEntries)
+    {
+        var byPath = new Dictionary<string, RepositoryScanEntryDto>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in primaryEntries)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.RelativePath))
+                byPath[entry.RelativePath] = entry;
+        }
+
+        foreach (var entry in supplementalEntries)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.RelativePath))
+                byPath.TryAdd(entry.RelativePath, entry);
+        }
+
+        return byPath.Values
+            .OrderBy(e => e.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static async Task<string> ComputeSha256Async(string filePath, int maxReadBytesPerSecond, CancellationToken ct)

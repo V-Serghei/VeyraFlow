@@ -27,7 +27,7 @@ public partial class WelcomeIntroViewModel : ObservableObject
     private void Start() => StartRequested?.Invoke();
 
     [RelayCommand]
-    private async Task LearnMore() => await _navigationService.ShowInfoAsync();
+    private async Task LearnMore() => await _navigationService.ShowProgramOverviewAsync();
 
     public string Title => Loc.T("welcome.intro_title");
     public string Subtitle => Loc.T("welcome.intro_subtitle");

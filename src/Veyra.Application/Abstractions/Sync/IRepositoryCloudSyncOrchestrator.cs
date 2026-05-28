@@ -11,6 +11,7 @@ public interface IRepositoryCloudSyncOrchestrator
         string? targetRootDirectory = null,
         bool restoreFullHistory = false,
         bool restoreToAnotherFolder = false,
+        bool restoreMetadataOnly = false,
         CancellationToken ct = default);
     Task ProcessPendingQueueAsync(CancellationToken ct = default);
     Task<RepositoryCloudRepairResultDto> RepairRepositoryCloudDataAsync(int repositoryId, CancellationToken ct = default);

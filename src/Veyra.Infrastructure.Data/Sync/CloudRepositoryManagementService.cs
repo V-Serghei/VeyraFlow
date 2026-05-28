@@ -73,8 +73,12 @@ public sealed class CloudRepositoryManagementService(
             }
         }
 
-        var localById = activeRepos.ToDictionary(r => r.Id);
-        var allById = allRepos.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+        var localById = activeRepos
+            .GroupBy(GetCloudRepositoryId)
+            .ToDictionary(g => g.Key, g => g.First());
+        var allById = allRepos
+            .GroupBy(GetCloudRepositoryId)
+            .ToDictionary(g => g.Key, g => g.First());
         var repositories = remoteRepositories
             .Select(remote => BuildRepositoryRow(remote, localById, allById))
             .OrderBy(row => row.HasLocalLink)
@@ -169,21 +173,25 @@ public sealed class CloudRepositoryManagementService(
         {
             try
             {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var scopedManager = scope.ServiceProvider.GetRequiredService<ICloudRepositoryManagementService>();
+                var orchestrator = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
+
                 operations.Update(operationId, phase: "building_plan", percent: 5);
-                var plan = await BuildRestorePlanAsync(options, CancellationToken.None);
+                var plan = await scopedManager.BuildRestorePlanAsync(options, CancellationToken.None);
                 operations.Update(
                     operationId,
                     phase: plan.BlocksToDownload > 0 ? "downloading_blocks" : "linking_repository",
                     percent: plan.BlocksToDownload > 0 ? 20 : 35,
                     downloadedBlocks: plan.BlocksAlreadyLocal);
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var orchestrator = scope.ServiceProvider.GetRequiredService<IRepositoryCloudSyncOrchestrator>();
+
                 var ok = await orchestrator.RestoreRepositoryFromCloudAsync(
                     options.CloudRepositoryId,
-                    options.TargetPath,
+                    plan.TargetPath,
                     restoreFullHistory: options.RestoreFullHistory,
-                    restoreToAnotherFolder: options.RestoreToAnotherFolder,
-                    CancellationToken.None);
+                    restoreToAnotherFolder: false,
+                    restoreMetadataOnly: options.RestoreMetadataOnly,
+                    ct: CancellationToken.None);
 
                 if (ok)
                     operations.Complete(operationId, "restored");
@@ -376,10 +384,13 @@ public sealed class CloudRepositoryManagementService(
             .IgnoreQueryFilters()
             .Include(r => r.Directory)
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == cloudRepositoryId, ct);
+            .FirstOrDefaultAsync(r => r.CloudRepositoryId == cloudRepositoryId || r.Id == cloudRepositoryId, ct);
 
         return local?.Directory.Path;
     }
+
+    private static int GetCloudRepositoryId(Repository repository)
+        => repository.CloudRepositoryId ?? repository.Id;
 
     private string ResolveTargetPath(
         CloudRepositoryRestoreOptionsDto options,

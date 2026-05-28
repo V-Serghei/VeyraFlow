@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="appsettings.json" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.11" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
     <PackageReference Include="Avalonia.Labs.CommandManager" Version="11.3.1" />

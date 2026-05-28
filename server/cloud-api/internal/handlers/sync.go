@@ -3,8 +3,8 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql/driver"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -41,14 +41,14 @@ type pushSnapshotRequest struct {
 }
 
 type pushSnapshotResponse struct {
-	Ok                bool     `json:"ok"`
+	Ok                 bool     `json:"ok"`
 	MissingBlockHashes []string `json:"missingBlockHashes"`
 }
 
 type putBlocksBatchResponse struct {
-	Ok           bool `json:"ok"`
-	StoredBlocks int  `json:"storedBlocks"`
-	SkippedBlocks int `json:"skippedBlocks"`
+	Ok            bool `json:"ok"`
+	StoredBlocks  int  `json:"storedBlocks"`
+	SkippedBlocks int  `json:"skippedBlocks"`
 }
 
 type syncRepositoryMeta struct {
@@ -58,26 +58,26 @@ type syncRepositoryMeta struct {
 }
 
 type syncSnapshotMeta struct {
-	ID              int64     `json:"id"`
-	Title           string    `json:"title"`
-	Trigger         string    `json:"trigger"`
-	CreatedAt       syncTimestamp `json:"createdAt"`
-	TotalEntries    int       `json:"totalEntries"`
-	FileEntries     int       `json:"fileEntries"`
-	DirectoryEntries int      `json:"directoryEntries"`
-	TotalFileBytes  int64     `json:"totalFileBytes"`
-	PayloadSHA256   string    `json:"payloadSha256"`
+	ID               int64         `json:"id"`
+	Title            string        `json:"title"`
+	Trigger          string        `json:"trigger"`
+	CreatedAt        syncTimestamp `json:"createdAt"`
+	TotalEntries     int           `json:"totalEntries"`
+	FileEntries      int           `json:"fileEntries"`
+	DirectoryEntries int           `json:"directoryEntries"`
+	TotalFileBytes   int64         `json:"totalFileBytes"`
+	PayloadSHA256    string        `json:"payloadSha256"`
 }
 
 type syncSnapshotEntry struct {
-	RelativePath       string    `json:"relativePath"`
-	ParentRelativePath string    `json:"parentRelativePath"`
-	Name               string    `json:"name"`
-	IsDirectory        bool      `json:"isDirectory"`
-	Extension          string    `json:"extension"`
-	SizeBytes          int64     `json:"sizeBytes"`
+	RelativePath       string        `json:"relativePath"`
+	ParentRelativePath string        `json:"parentRelativePath"`
+	Name               string        `json:"name"`
+	IsDirectory        bool          `json:"isDirectory"`
+	Extension          string        `json:"extension"`
+	SizeBytes          int64         `json:"sizeBytes"`
 	LastWriteUTC       syncTimestamp `json:"lastWriteUtc"`
-	ContentHashSHA256  string    `json:"contentHashSha256"`
+	ContentHashSHA256  string        `json:"contentHashSha256"`
 }
 
 type syncFileVersion struct {
@@ -373,7 +373,7 @@ WHERE snapshot_id IN (SELECT id FROM snapshots WHERE repository_id = $1);
 		"repository_id="+fmt.Sprintf("%d", repositoryID),
 		"snapshots="+fmt.Sprintf("%d", snapshotCount))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":              true,
+		"ok":               true,
 		"deletedSnapshots": snapshotCount,
 	})
 }
@@ -742,7 +742,7 @@ WHERE block_hash = ANY($1)
 	}
 
 	response := pushSnapshotResponse{
-		Ok:                true,
+		Ok:                 true,
 		MissingBlockHashes: missing,
 	}
 
@@ -1273,7 +1273,11 @@ func (h *Handler) PutBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err = h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
+		logHTTPRequestEvent(r, "error", "put_block", "failed to persist block payload",
+			"block_hash="+quoteLogValue(hash),
+			"size_bytes="+fmt.Sprintf("%d", sizeBytes),
+			"error="+quoteLogValue(err.Error()))
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload", "blockHash": hash})
 		return
 	}
 
@@ -1418,7 +1422,13 @@ func (h *Handler) PutBlocksBatch(w http.ResponseWriter, r *http.Request) {
 		storeErr := h.storeBlockInPack(r.Context(), hash, stagedPath, sizeBytes)
 		_ = os.Remove(stagedPath)
 		if storeErr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload"})
+			logHTTPRequestEvent(r, "error", "put_blocks_batch", "failed to persist block payload",
+				"block_hash="+quoteLogValue(hash),
+				"size_bytes="+fmt.Sprintf("%d", sizeBytes),
+				"stored_blocks="+fmt.Sprintf("%d", storedBlocks),
+				"skipped_blocks="+fmt.Sprintf("%d", skippedBlocks),
+				"error="+quoteLogValue(storeErr.Error()))
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "failed to persist block payload", "blockHash": hash})
 			return
 		}
 
@@ -1531,10 +1541,10 @@ func ensureSyncProtocol(w http.ResponseWriter, r *http.Request) bool {
 		"required_protocol="+quoteLogValue(supportedSyncProtocol))
 	w.Header().Set("X-Veyra-Sync-Protocol-Supported", supportedSyncProtocol)
 	writeJSON(w, http.StatusPreconditionFailed, map[string]any{
-		"ok":                false,
-		"message":           "sync protocol mismatch",
-		"requiredProtocol":  supportedSyncProtocol,
-		"providedProtocol":  clientVersion,
+		"ok":               false,
+		"message":          "sync protocol mismatch",
+		"requiredProtocol": supportedSyncProtocol,
+		"providedProtocol": clientVersion,
 	})
 	return false
 }

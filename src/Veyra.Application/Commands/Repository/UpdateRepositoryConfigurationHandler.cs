@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 
@@ -208,9 +209,9 @@ public sealed class UpdateRepositoryConfigurationHandler(
     {
         return values
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim())
-            .Select(v => v.StartsWith('.') ? v : "." + v)
-            .Select(v => v.ToLowerInvariant())
+            .Select(KnownFileExtensions.NormalizeExtension)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

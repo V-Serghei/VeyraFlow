@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
@@ -866,7 +867,7 @@ public sealed partial class CreateRepositoryWindowViewModel : ObservableObject
                 {
                     ct.ThrowIfCancellationRequested();
                     totalFiles++;
-                    var ext = RepositoryFormatOptionViewModel.NormalizeFormat(file.Extension);
+                    var ext = KnownFileExtensions.NormalizeTrackedFileFormat(file.Extension);
                     if (trackedFormats.Count == 0 || trackedFormats.Contains(ext))
                         trackedFiles++;
                 }

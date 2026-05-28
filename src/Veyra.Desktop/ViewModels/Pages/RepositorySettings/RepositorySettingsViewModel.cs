@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries.Repository;
@@ -217,7 +218,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     public bool IsProfessionalMode => _experience.IsProfessionalMode;
     public bool ShowAdvancedSyncSettings => IsProfessionalMode;
     public bool ShowAdvancedRetentionSettings => IsProfessionalMode;
-    public bool CanSave => RepositoryId > 0 && !IsLoading && HasUnsavedSettingsChanges;
+    public bool CanSave => RepositoryId > 0 && !IsLoading && (HasUnsavedSettingsChanges || HasPendingCustomFormat);
     public string CloudSyncSectionHint => !HasCloudAccess
         ? Loc.T("repo_settings.sync_guest_hint")
         : IsBasicMode
@@ -593,6 +594,8 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSave))]
     private async Task SaveAsync()
     {
+        ApplyPendingCustomFormat();
+
         if (!HasUnsavedSettingsChanges)
         {
             _log.LogInformation("Repository settings save skipped because nothing changed. RepositoryId {RepositoryId}", RepositoryId);
@@ -1300,6 +1303,12 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
 
     partial void OnDirectoryPathChanged(string value) => RefreshSettingsDirtyState();
 
+    partial void OnCustomFormatChanged(string value)
+    {
+        SaveCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanSave));
+    }
+
     partial void OnAutoCaptureFileVersionsChanged(bool value) => RefreshSettingsDirtyState();
 
     partial void OnProtectCloudMetadataChanged(bool value) => RefreshSettingsDirtyState();
@@ -1958,6 +1967,30 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
                                     && !BuildSettingsSnapshot().Equals(_lastSavedSettingsSnapshot);
         SaveCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanSave));
+    }
+
+    private bool HasPendingCustomFormat
+    {
+        get
+        {
+            var normalized = NormalizeFormat(CustomFormat);
+            return !string.IsNullOrWhiteSpace(normalized)
+                   && !SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void ApplyPendingCustomFormat()
+    {
+        var normalized = NormalizeFormat(CustomFormat);
+        if (string.IsNullOrWhiteSpace(normalized)
+            || SelectedFormats.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _allFormatOptions.Add(normalized);
+        SelectedFormats.Add(normalized);
+        CustomFormat = string.Empty;
     }
 
     private static string BuildNormalizedFormatsKey(IEnumerable<string> values)
@@ -3038,11 +3071,7 @@ public sealed partial class RepositorySettingsViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(value))
             return string.Empty;
 
-        var v = value.Trim();
-        if (!v.StartsWith('.'))
-            v = "." + v;
-
-        return v.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeExtension(value) ?? string.Empty;
     }
 
     private static string NormalizeExclusionPattern(string? value)

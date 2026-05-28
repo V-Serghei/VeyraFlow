@@ -44,6 +44,7 @@ internal static class DatabaseStartupBootstrapper
         EnsureTextDiffStorageV2(db);
         EnsureSoftDeleteCascadeColumns(db);
         EnsureRepositoryRetentionColumns(db);
+        EnsureRepositoryCloudIdentityColumns(db);
         EnsureUserProfileSessionColumns(db);
         EnsureRepositorySyncQueueCheckpointColumns(db);
         EnsureOperationJournalSchema(db);
@@ -773,6 +774,32 @@ CREATE TABLE IF NOT EXISTS ""OperationJournalEntries"" (
 
             using var createIdx = connection.CreateCommand();
             createIdx.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_Repositories_RetentionEnabled_RetentionLastRunAt\" ON \"Repositories\" (\"RetentionEnabled\", \"RetentionLastRunAt\");";
+            createIdx.ExecuteNonQuery();
+        }
+        finally
+        {
+            if (shouldClose)
+                connection.Close();
+        }
+    }
+
+    private static void EnsureRepositoryCloudIdentityColumns(VeyraDbContext db)
+    {
+        if (!db.Database.IsSqlite())
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+
+        if (shouldClose)
+            connection.Open();
+
+        try
+        {
+            EnsureSqliteColumnExists(connection, "Repositories", "CloudRepositoryId", "INTEGER NULL");
+
+            using var createIdx = connection.CreateCommand();
+            createIdx.CommandText = "CREATE INDEX IF NOT EXISTS \"IX_Repositories_CloudRepositoryId\" ON \"Repositories\" (\"CloudRepositoryId\");";
             createIdx.ExecuteNonQuery();
         }
         finally
