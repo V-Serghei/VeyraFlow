@@ -115,6 +115,7 @@ public sealed class ScanRepositoryHandlerTests
             string? targetRootDirectory = null,
             bool restoreFullHistory = false,
             bool restoreToAnotherFolder = false,
+            bool restoreMetadataOnly = false,
             CancellationToken ct = default)
             => Task.FromResult(false);
 

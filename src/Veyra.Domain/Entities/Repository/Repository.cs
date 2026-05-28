@@ -38,6 +38,7 @@ public class Repository
     public string SyncConflictStrategy { get; set; } = DefaultSyncConflictStrategy;
     public int SyncRetryMaxAttempts { get; set; } = 5;
     public int SyncRetryBaseDelaySeconds { get; set; } = 30;
+    public int? CloudRepositoryId { get; set; }
     public DateTime? CloudLastSyncedAt { get; set; }
     public long? CloudLastLocalSnapshotId { get; set; }
     public long? CloudLastRemoteSnapshotId { get; set; }

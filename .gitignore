@@ -42,6 +42,7 @@ ScaffoldingReadMe.txt
 CodeCoverage/
 .codex-temp/
 docs/defense/
+.codex_tmp/
 
 # MSBuild Binary and Structured Log
 *.binlog

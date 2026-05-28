@@ -2,6 +2,8 @@ namespace Veyra.Application.Common.Files;
 
 public static class KnownFileExtensions
 {
+    public const string ExtensionlessFileFormat = ".file";
+
     public static IReadOnlyList<string> TrackedDocumentFormats { get; } =
     [
         ".doc", ".docx", ".pdf", ".txt", ".rtf", ".odt", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"
@@ -102,4 +104,10 @@ public static class KnownFileExtensions
 
         return normalized.ToLowerInvariant();
     }
+
+    public static string NormalizeTrackedFileFormat(string? extension)
+        => NormalizeExtension(extension) ?? ExtensionlessFileFormat;
+
+    public static bool IsExtensionlessFileFormat(string? extension)
+        => string.Equals(NormalizeExtension(extension), ExtensionlessFileFormat, StringComparison.OrdinalIgnoreCase);
 }

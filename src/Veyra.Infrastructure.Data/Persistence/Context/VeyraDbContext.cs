@@ -298,11 +298,13 @@ public class VeyraDbContext : DbContext
             entity.Property(e => e.SyncConflictStrategy).HasMaxLength(32).HasDefaultValue(Repository.DefaultSyncConflictStrategy);
             entity.Property(e => e.SyncRetryMaxAttempts).HasDefaultValue(5);
             entity.Property(e => e.SyncRetryBaseDelaySeconds).HasDefaultValue(30);
+            entity.Property(e => e.CloudRepositoryId).IsRequired(false);
             entity.Property(e => e.CloudLastSyncedAt).IsRequired(false);
             entity.Property(e => e.CloudLastLocalSnapshotId).IsRequired(false);
             entity.Property(e => e.CloudLastRemoteSnapshotId).IsRequired(false);
             entity.Property(e => e.CloudSyncLastStatus).HasMaxLength(128);
             entity.Property(e => e.CloudSyncLastError).HasMaxLength(2048);
+            entity.HasIndex(e => e.CloudRepositoryId);
             entity.HasIndex(e => new { e.CloudLastSyncedAt, e.CloudLastRemoteSnapshotId });
             entity.Property(e => e.IsDeleted).HasDefaultValue(false);
             entity.HasQueryFilter(e => !e.IsDeleted);

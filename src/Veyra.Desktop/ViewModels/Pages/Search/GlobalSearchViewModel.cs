@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Application.Queries.Repository;
 using Veyra.Application.Queries.Search;
@@ -489,6 +490,9 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
             IsFilterPanelVisible = false;
             IsSectionPanelVisible = false;
             RebuildTagPickerItems();
+
+            if (!HasLoadedData)
+                _ = LoadAsync();
         }
     }
 
@@ -1528,7 +1532,7 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
     private GlobalSearchFileResultItemViewModel MapSnapshotFileChange(GlobalSearchIndexedSnapshotFileChange row)
     {
         var parentPath = NormalizeParent(Path.GetDirectoryName(row.Change.RelativePath)?.Replace(Path.DirectorySeparatorChar, '/')) ?? string.Empty;
-        var extension = NormalizeExtensionFilter(Path.GetExtension(row.Change.Name));
+        var extension = NormalizeExtensionFilter(KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(row.Change.Name)));
         var tags = GetFileTagsText(row.Repository.Id, row.Change.RelativePath);
 
         return new GlobalSearchFileResultItemViewModel(
@@ -1663,7 +1667,10 @@ public sealed partial class GlobalSearchViewModel : ObservableObject
         if (extensionFilter == "all")
             return true;
 
-        return string.Equals(NormalizeExtensionFilter(Path.GetExtension(change.Name)), extensionFilter, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(
+            NormalizeExtensionFilter(KnownFileExtensions.NormalizeTrackedFileFormat(Path.GetExtension(change.Name))),
+            extensionFilter,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool MatchesModifiedWindow(RepositoryScanEntryDto entry, DateTime thresholdUtc)

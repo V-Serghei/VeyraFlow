@@ -79,16 +79,16 @@
                                                 <TextBlock Text="{Binding LatestSnapshotText}" Classes="muted"/>
                                                 <WrapPanel>
                                                     <Button Content="{loc:Tr cloud_manager.restore}" Classes="primary compact" Margin="0,0,8,8"
-                                                            Command="{Binding #Root.DataContext.OpenRestoreWizardCommand}"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).OpenRestoreWizardCommand}"
                                                             CommandParameter="{Binding .}"/>
                                                     <Button Content="{loc:Tr cloud_manager.compare_with_local}" Classes="subtle compact" Margin="0,0,8,8"
-                                                            Command="{Binding #Root.DataContext.CompareCommand}"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).CompareCommand}"
                                                             CommandParameter="{Binding .}"/>
                                                     <Button Content="{loc:Tr cloud_manager.sync_now}" Classes="subtle compact" Margin="0,0,8,8"
-                                                            Command="{Binding #Root.DataContext.SyncNowCommand}"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).SyncNowCommand}"
                                                             CommandParameter="{Binding .}"/>
                                                     <Button Content="{loc:Tr cloud_manager.delete_from_cloud}" Classes="danger compact" Margin="0,0,8,8"
-                                                            Command="{Binding #Root.DataContext.DeleteFromCloudCommand}"
+                                                            Command="{Binding #Root.((vm:CloudRepositoryManagerWindowViewModel)DataContext).DeleteFromCloudCommand}"
                                                             CommandParameter="{Binding .}"/>
                                                 </WrapPanel>
                                             </StackPanel>

@@ -22,6 +22,7 @@ public static partial class DependencyInjection
         services.AddTransient<TrayPanelWindowViewModel>();
         services.AddTransient<MainWindowViewModel>();
         services.AddTransient<InfoWindowViewModel>();
+        services.AddTransient<ProgramOverviewWindowViewModel>();
         services.AddTransient<CloudInformationWindowViewModel>();
         services.AddTransient<CloudRepositoryManagerWindowViewModel>();
         services.AddTransient<CloudRestoreWizardWindowViewModel>();

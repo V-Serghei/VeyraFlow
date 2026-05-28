@@ -447,6 +447,9 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
                     b.Property<long?>("CloudLastRemoteSnapshotId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("CloudRepositoryId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("CloudLastSyncedAt")
                         .HasColumnType("TEXT");
 
@@ -592,6 +595,8 @@ namespace Veyra.Infrastructure.Data.Persistence.Migrations
 
                     b.HasIndex("DirectoryId")
                         .IsUnique();
+
+                    b.HasIndex("CloudRepositoryId");
 
                     b.HasIndex("CloudLastSyncedAt", "CloudLastRemoteSnapshotId");
 

@@ -1,0 +1,112 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
+        x:Class="Veyra.Desktop.Views.Windows.ProgramOverviewWindow"
+        Width="900"
+        Height="660"
+        MinWidth="720"
+        MinHeight="520"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        SystemDecorations="Full"
+        Background="{DynamicResource VeyraCanvasBrush}"
+        Title="{loc:Tr program_overview.window_title}"
+        d:DataContext="{d:DesignInstance vm:ProgramOverviewWindowViewModel, IsDesignTimeCreatable=True}"
+        x:DataType="vm:ProgramOverviewWindowViewModel">
+    <Border Margin="16" Padding="18" Classes="dialog-shell">
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+            <Border Grid.Row="0" Classes="dialog-hero">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <Border Classes="badge" HorizontalAlignment="Left">
+                            <TextBlock Text="{loc:Tr program_overview.badge}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource VeyraInfoBrush}"/>
+                        </Border>
+                        <TextBlock Text="{loc:Tr program_overview.title}"
+                                   Classes="h2"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{loc:Tr program_overview.subtitle}"
+                                   Classes="muted"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="{loc:Tr common.close}"
+                            Command="{Binding CloseCommand}"
+                            Classes="subtle"
+                            VerticalAlignment="Top"/>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="12">
+                    <Border Classes="card" Padding="14">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="{loc:Tr program_overview.what_title}" Classes="section-title"/>
+                            <TextBlock Text="{loc:Tr program_overview.what_body}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                        <Border Classes="metric-card" Padding="14">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="{loc:Tr program_overview.can_do_title}" Classes="section-title"/>
+                                <TextBlock Text="{loc:Tr program_overview.can_do_versions}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.can_do_compare}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.can_do_restore}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.can_do_cloud}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1" Classes="metric-card" Padding="14">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="{loc:Tr program_overview.how_title}" Classes="section-title"/>
+                                <TextBlock Text="{loc:Tr program_overview.how_repository}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.how_snapshot}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.how_history}" TextWrapping="Wrap"/>
+                                <TextBlock Text="{loc:Tr program_overview.how_storage}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <Border Classes="card" Padding="14" BorderBrush="{DynamicResource VeyraWarningBrush}">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                <TextBlock Grid.Column="0"
+                                           Text="&#xE783;"
+                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                           Foreground="{DynamicResource VeyraWarningBrush}"
+                                           VerticalAlignment="Top"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{loc:Tr program_overview.policies_title}"
+                                           Classes="section-title"
+                                           TextWrapping="Wrap"/>
+                            </Grid>
+                            <TextBlock Text="{loc:Tr program_overview.policy_current_files}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{loc:Tr program_overview.policy_formats}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{loc:Tr program_overview.policy_retention}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{loc:Tr program_overview.policy_cloud}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{loc:Tr program_overview.policy_conflicts}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Classes="filter-sheet floating-panel" Padding="14">
+                        <TextBlock Text="{loc:Tr program_overview.footer_note}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border Grid.Row="2" Classes="toolbar" Padding="10">
+                <TextBlock Text="{loc:Tr program_overview.bottom_hint}"
+                           Classes="muted"
+                           TextWrapping="Wrap"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

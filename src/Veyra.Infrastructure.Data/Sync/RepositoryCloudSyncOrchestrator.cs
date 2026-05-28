@@ -19,6 +19,7 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
+using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
@@ -45,8 +46,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
     private static readonly TimeSpan RunningLeaseTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan UploadCheckpointPersistInterval = TimeSpan.FromSeconds(2);
     private const int UploadCheckpointPersistEveryBlocks = 128;
-    private const int UploadBatchMaxBlocks = 128;
-    private const long UploadBatchMaxBytes = 32L * 1024 * 1024;
+    private const int UploadBatchMaxBlocks = 8;
+    private const long UploadBatchMaxBytes = 2L * 1024 * 1024;
     private const int UploadBatchProgressLogEveryBlocks = 1024;
     private const int RepairProbeMaxConcurrency = 8;
     private const int RestoreDownloadMaxConcurrency = 8;
@@ -72,31 +73,38 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (repository is null)
             return;
 
-        var latestSnapshot = await db.RepositorySnapshots
+        var cloudRepositoryId = await EnsureRepositoryCloudIdAsync(repository, ct);
+
+        var snapshots = await db.RepositorySnapshots
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .Where(s => db.SnapshotFileLinks.Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
-            .OrderByDescending(s => s.CreatedAt)
-            .ThenByDescending(s => s.Id)
+            .OrderBy(s => s.CreatedAt)
+            .ThenBy(s => s.Id)
             .Select(s => new { s.Id, s.CreatedAt })
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
-        if (latestSnapshot is null)
+        if (snapshots.Count == 0)
             return;
 
-        var remoteSnapshotId = BuildRemoteSnapshotId(repositoryId, latestSnapshot.Id, latestSnapshot.CreatedAt);
-
-        await EnqueueSnapshotPushAsync(
-            repository,
-            latestSnapshot.Id,
-            remoteSnapshotId,
-            ct);
+        var latestSnapshot = snapshots[^1];
+        foreach (var snapshot in snapshots)
+        {
+            var remoteSnapshotId = BuildRemoteSnapshotId(cloudRepositoryId, snapshot.Id, snapshot.CreatedAt);
+            await EnqueueSnapshotPushAsync(
+                repository,
+                snapshot.Id,
+                remoteSnapshotId,
+                ct,
+                forceRequeueExisting: snapshot.Id == latestSnapshot.Id);
+        }
 
         if (cloudAvailability.ShouldSkipCloudOperation(out var skipReason))
         {
             await ApplyCloudUnavailableStatusToQueuedRepositoriesAsync(skipReason, ct);
             log.LogInformation(
-                "Queued latest snapshot for later cloud sync because cloud is unavailable. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Reason {Reason}",
+                "Queued repository snapshot history for later cloud sync because cloud is unavailable. RepositoryId {RepositoryId}. SnapshotCount {SnapshotCount}. LatestSnapshotId {SnapshotId}. Reason {Reason}",
                 repositoryId,
+                snapshots.Count,
                 latestSnapshot.Id,
                 skipReason);
             return;
@@ -427,6 +435,12 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         SnapshotTitle: $"cloud_restore_{DateTime.Now:yyyyMMdd_HHmmss}")),
                 ct);
 
+            await MarkRepositoryCloudLinkedAsync(
+                restoredRepositoryId,
+                prepared.CloudRepositoryId,
+                prepared.LatestRemoteSnapshotId,
+                ct);
+
             localNames.Add(prepared.RepositoryName);
             restoredCount++;
         }
@@ -445,6 +459,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
         string? targetRootDirectory = null,
         bool restoreFullHistory = false,
         bool restoreToAnotherFolder = false,
+        bool restoreMetadataOnly = false,
         CancellationToken ct = default)
     {
         if (runtimeControl.IsPaused)
@@ -463,11 +478,6 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (remote is null)
             return false;
 
-        var existing = await db.Set<Repository>()
-            .IgnoreQueryFilters()
-            .Include(r => r.Directory)
-            .FirstOrDefaultAsync(r => r.Id == cloudRepositoryId, ct);
-
         List<CloudSnapshotPackageDto> packages = restoreFullHistory
             ? (await cloudSync.GetRepositorySnapshotsAsync(accessToken, remote.RepositoryId, ct))
                 .OrderBy(p => p.Snapshot.CreatedAtUtc)
@@ -481,7 +491,14 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (package is null)
             return false;
 
-        if (restoreFullHistory)
+        var requestedRestorePath = ResolveSingleRepositoryRestorePath(
+            targetRootDirectory,
+            package.Repository.Name,
+            originalPath: null,
+            restoreToAnotherFolder);
+        var existing = await FindExistingRepositoryForCloudRestoreAsync(cloudRepositoryId, requestedRestorePath, ct);
+
+        if (restoreFullHistory && !restoreMetadataOnly)
         {
             var missingBlocks = await EnsureLocalBlocksForRestoreAsync(
                 accessToken,
@@ -510,9 +527,10 @@ public sealed class RepositoryCloudSyncOrchestrator(
             if (!targetExists)
             {
                 Directory.CreateDirectory(restorePath);
-                await RestoreFilesFromPackageAsync(accessToken, package, restorePath, ct);
+                if (!restoreMetadataOnly)
+                    await RestoreFilesFromPackageAsync(accessToken, package, restorePath, ct);
             }
-            else
+            else if (!restoreMetadataOnly)
             {
                 await EnsureLocalBlocksForRestoreAsync(
                     accessToken,
@@ -524,12 +542,15 @@ public sealed class RepositoryCloudSyncOrchestrator(
             if (existing.IsDeleted)
                 await repositories.RestoreRepositoryAsync(existing.Id, ct);
 
-            await RelinkExistingRepositoryAsync(existing.Id, restorePath, package, remote.LatestSnapshotId, ct);
-            if (restoreFullHistory)
-                await ImportCloudSnapshotHistoryAsync(existing.Id, packages, replaceExistingHistory: false, ct);
+            await RelinkExistingRepositoryAsync(existing.Id, cloudRepositoryId, restorePath, package, remote.LatestSnapshotId, ct);
+            if (restoreFullHistory || restoreMetadataOnly)
+            {
+                IReadOnlyList<CloudSnapshotPackageDto> packagesToImport = restoreFullHistory ? packages : [package];
+                await ImportCloudSnapshotHistoryAsync(existing.Id, packagesToImport, replaceExistingHistory: false, ct);
+            }
 
             var differsFromCloudHead = await LocalFolderDiffersFromCloudHeadAsync(package, restorePath, ct);
-            if (differsFromCloudHead)
+            if (!restoreMetadataOnly && differsFromCloudHead)
             {
                 await mediator.Send(
                     new ScanRepositoryCommand(
@@ -542,23 +563,20 @@ public sealed class RepositoryCloudSyncOrchestrator(
                     ct);
             }
 
-            await MarkRepositoryCloudLinkedAsync(existing.Id, remote.LatestSnapshotId, ct);
+            await MarkRepositoryCloudLinkedAsync(existing.Id, cloudRepositoryId, remote.LatestSnapshotId, ct);
 
             return true;
         }
 
-        var restorePathForNew = ResolveSingleRepositoryRestorePath(
-            targetRootDirectory,
-            package.Repository.Name,
-            originalPath: null,
-            restoreToAnotherFolder);
+        var restorePathForNew = requestedRestorePath;
         var targetPathExists = Directory.Exists(restorePathForNew);
         if (!targetPathExists)
         {
             Directory.CreateDirectory(restorePathForNew);
-            await RestoreFilesFromPackageAsync(accessToken, package, restorePathForNew, ct);
+            if (!restoreMetadataOnly)
+                await RestoreFilesFromPackageAsync(accessToken, package, restorePathForNew, ct);
         }
-        else
+        else if (!restoreMetadataOnly)
         {
             await EnsureLocalBlocksForRestoreAsync(
                 accessToken,
@@ -577,19 +595,23 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 formats),
             ct);
 
-        if (!createResult.Success || createResult.Value?.RepositoryId <= 0)
+        if (!createResult.Success || createResult.Value is null || createResult.Value.RepositoryId <= 0)
             return false;
 
-        if (restoreFullHistory)
-            await ImportCloudSnapshotHistoryAsync(createResult.Value.RepositoryId, packages, replaceExistingHistory: true, ct);
+        var createdRepositoryId = createResult.Value.RepositoryId;
+        if (restoreFullHistory || restoreMetadataOnly)
+        {
+            IReadOnlyList<CloudSnapshotPackageDto> packagesToImport = restoreFullHistory ? packages : [package];
+            await ImportCloudSnapshotHistoryAsync(createdRepositoryId, packagesToImport, replaceExistingHistory: true, ct);
+        }
 
-        await MarkRepositoryCloudLinkedAsync(createResult.Value.RepositoryId, remote.LatestSnapshotId, ct);
+        await MarkRepositoryCloudLinkedAsync(createdRepositoryId, cloudRepositoryId, remote.LatestSnapshotId, ct);
 
-        if (targetPathExists && await LocalFolderDiffersFromCloudHeadAsync(package, restorePathForNew, ct))
+        if (!restoreMetadataOnly && targetPathExists && await LocalFolderDiffersFromCloudHeadAsync(package, restorePathForNew, ct))
         {
             await mediator.Send(
                 new ScanRepositoryCommand(
-                    createResult.Value.RepositoryId,
+                    createdRepositoryId,
                     Progress: null,
                     new RepositoryScanOptionsDto(
                         SaveFileVersions: true,
@@ -636,6 +658,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         return new PreparedCloudRepositoryRestore(
             sortOrder,
+            remote.RepositoryId,
+            remote.LatestSnapshotId,
             package.Repository.Name,
             package.Repository.Description,
             restorePath,
@@ -644,6 +668,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private async Task RelinkExistingRepositoryAsync(
         int repositoryId,
+        int cloudRepositoryId,
         string restorePath,
         CloudSnapshotPackageDto package,
         long? remoteSnapshotId,
@@ -673,6 +698,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
         repository.Description = package.Repository.Description;
         repository.IsDeleted = false;
         repository.DeletedAt = null;
+        repository.CloudRepositoryId = cloudRepositoryId;
         repository.CloudLastRemoteSnapshotId = remoteSnapshotId;
         repository.CloudLastSyncedAt = DateTime.UtcNow;
         repository.CloudSyncLastStatus = "linked";
@@ -684,6 +710,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private async Task MarkRepositoryCloudLinkedAsync(
         int repositoryId,
+        int cloudRepositoryId,
         long? remoteSnapshotId,
         CancellationToken ct)
     {
@@ -701,6 +728,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             .Select(s => (long?)s.Id)
             .FirstOrDefaultAsync(ct);
 
+        repository.CloudRepositoryId = cloudRepositoryId;
         repository.CloudLastSyncedAt = DateTime.UtcNow;
         repository.CloudLastLocalSnapshotId = latestLocalSnapshotId;
         repository.CloudLastRemoteSnapshotId = remoteSnapshotId;
@@ -709,6 +737,42 @@ public sealed class RepositoryCloudSyncOrchestrator(
         repository.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<Repository?> FindExistingRepositoryForCloudRestoreAsync(
+        int cloudRepositoryId,
+        string? requestedRestorePath,
+        CancellationToken ct)
+    {
+        var candidates = await db.Set<Repository>()
+            .IgnoreQueryFilters()
+            .Include(r => r.Directory)
+            .Where(r => r.CloudRepositoryId == cloudRepositoryId || r.Id == cloudRepositoryId)
+            .ToListAsync(ct);
+
+        var byCloudId = candidates.FirstOrDefault(r => r.CloudRepositoryId == cloudRepositoryId);
+        if (byCloudId is not null)
+            return byCloudId;
+
+        var byLegacyId = candidates.FirstOrDefault(r => r.Id == cloudRepositoryId);
+        if (byLegacyId is not null)
+            return byLegacyId;
+
+        if (string.IsNullOrWhiteSpace(requestedRestorePath))
+            return null;
+
+        var normalizedRequestedPath = Path.GetFullPath(requestedRestorePath.Trim());
+        var pathCandidates = await db.Set<Repository>()
+            .IgnoreQueryFilters()
+            .Include(r => r.Directory)
+            .Where(r => !r.Directory.IsDeleted)
+            .ToListAsync(ct);
+
+        return pathCandidates.FirstOrDefault(r =>
+            string.Equals(
+                Path.GetFullPath(r.Directory.Path),
+                normalizedRequestedPath,
+                StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<bool> LocalFolderDiffersFromCloudHeadAsync(
@@ -785,6 +849,168 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         return formats.Count == 0 ? [".txt"] : formats;
     }
+
+    private async Task<int> EnsureRepositoryCloudIdAsync(Repository repository, CancellationToken ct)
+    {
+        if (repository.CloudRepositoryId is > 0)
+            return repository.CloudRepositoryId.Value;
+
+        repository.CloudRepositoryId = repository.Id;
+        repository.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return repository.Id;
+    }
+
+    private async Task<CloudDivergenceMergeResult> ApplyCloudDivergenceMergeAsync(
+        string accessToken,
+        Repository repository,
+        int cloudRepositoryId,
+        long observedRemoteSnapshotId,
+        CancellationToken ct)
+    {
+        var remotePackages = (await cloudSync.GetRepositorySnapshotsAsync(accessToken, cloudRepositoryId, ct))
+            .OrderBy(p => p.Snapshot.CreatedAtUtc)
+            .ThenBy(p => p.Snapshot.Id)
+            .ToList();
+        var remotePackage = remotePackages.LastOrDefault()
+                            ?? await cloudSync.GetLatestSnapshotAsync(accessToken, cloudRepositoryId, ct);
+        if (remotePackage is null)
+            return new CloudDivergenceMergeResult(0, null);
+
+        IReadOnlyList<CloudSnapshotPackageDto> packagesToImport = remotePackages.Count > 0
+            ? remotePackages
+            : [remotePackage];
+        await ImportCloudSnapshotHistoryAsync(repository.Id, packagesToImport, replaceExistingHistory: false, ct);
+
+        var restoreRoot = repository.Directory?.Path;
+        if (string.IsNullOrWhiteSpace(restoreRoot))
+        {
+            var loaded = await db.Set<Repository>()
+                .Include(r => r.Directory)
+                .FirstOrDefaultAsync(r => r.Id == repository.Id, ct);
+            restoreRoot = loaded?.Directory.Path;
+        }
+
+        if (string.IsNullOrWhiteSpace(restoreRoot) || !Directory.Exists(restoreRoot))
+        {
+            log.LogWarning(
+                "Cloud divergence merge skipped file copies because local repository path is unavailable. RepositoryId {RepositoryId}. CloudRepositoryId {CloudRepositoryId}. RemoteSnapshotId {RemoteSnapshotId}",
+                repository.Id,
+                cloudRepositoryId,
+                observedRemoteSnapshotId);
+            return new CloudDivergenceMergeResult(0, null);
+        }
+
+        var missingBlocks = await EnsureLocalBlocksForRestoreAsync(
+            accessToken,
+            remotePackage.Repository.Name,
+            GetRequiredRestoreBlockHashes(remotePackage),
+            ct);
+
+        var copiedFiles = await RestoreCloudMergeCopiesAsync(remotePackage, restoreRoot, missingBlocks, ct);
+        long? mergeSnapshotId = null;
+        if (copiedFiles > 0)
+        {
+            var scanResult = await mediator.Send(
+                new ScanRepositoryCommand(
+                    repository.Id,
+                    Progress: null,
+                    new RepositoryScanOptionsDto(
+                        SaveFileVersions: true,
+                        TriggerOverride: "cloud_merge_snapshot",
+                        SnapshotTitle: $"Cloud merge from snapshot {remotePackage.Snapshot.Id}")),
+                ct);
+
+            if (scanResult.Success && scanResult.Value?.SnapshotCreated == true)
+                mergeSnapshotId = await GetLatestLocalSnapshotIdAsync(repository.Id, ct);
+        }
+
+        log.LogInformation(
+            "Cloud divergence merged into local repository. RepositoryId {RepositoryId}. CloudRepositoryId {CloudRepositoryId}. RemoteSnapshotId {RemoteSnapshotId}. CopiedFiles {CopiedFiles}. MergeSnapshotId {MergeSnapshotId}",
+            repository.Id,
+            cloudRepositoryId,
+            observedRemoteSnapshotId,
+            copiedFiles,
+            mergeSnapshotId);
+
+        return new CloudDivergenceMergeResult(copiedFiles, mergeSnapshotId);
+    }
+
+    private async Task<int> RestoreCloudMergeCopiesAsync(
+        CloudSnapshotPackageDto package,
+        string restoreRoot,
+        IReadOnlySet<string> missingBlocks,
+        CancellationToken ct)
+    {
+        var copied = 0;
+        var latestByPath = package.FileVersions
+            .GroupBy(v => NormalizeRelativePath(v.RelativePath), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderByDescending(v => v.CreatedAtUtc)
+                .ThenByDescending(v => v.FileVersionId)
+                .First())
+            .Where(v => !v.IsDeletionMarker)
+            .ToList();
+
+        foreach (var version in latestByPath)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var originalPath = ResolvePath(restoreRoot, version.RelativePath);
+            if (originalPath is null)
+                continue;
+
+            var failedBlock = version.Blocks.FirstOrDefault(b => missingBlocks.Contains(b.BlockHash));
+            if (failedBlock is not null)
+            {
+                log.LogWarning(
+                    "Cloud merge copy skipped because a block is missing. File {File}. Block {BlockHash}",
+                    version.RelativePath,
+                    failedBlock.BlockHash);
+                continue;
+            }
+
+            if (File.Exists(originalPath) &&
+                !string.IsNullOrWhiteSpace(version.ContentHashSha256))
+            {
+                var localHash = await ComputeSha256Async(originalPath, ct);
+                if (string.Equals(localHash, version.ContentHashSha256, StringComparison.OrdinalIgnoreCase))
+                    continue;
+            }
+
+            var copyPath = BuildCloudMergeCopyPath(originalPath, package.Snapshot.Id);
+            var parent = Path.GetDirectoryName(copyPath);
+            if (!string.IsNullOrWhiteSpace(parent))
+                Directory.CreateDirectory(parent);
+
+            var blocks = version.Blocks
+                .OrderBy(b => b.Sequence)
+                .Select(block => new StoredFileBlockDto(
+                    block.Sequence,
+                    block.BlockHash,
+                    block.LengthBytes,
+                    block.StoredSizeBytes))
+                .ToList();
+
+            await fileContentStore.RestoreFileAsync(
+                blocks,
+                copyPath,
+                overwriteExisting: false,
+                expectedContentHash: string.IsNullOrWhiteSpace(version.ContentHashSha256) ? null : version.ContentHashSha256,
+                ct);
+            copied++;
+        }
+
+        return copied;
+    }
+
+    private async Task<long?> GetLatestLocalSnapshotIdAsync(int repositoryId, CancellationToken ct)
+        => await db.Set<RepositorySnapshot>()
+            .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
+            .OrderByDescending(s => s.CreatedAt)
+            .ThenByDescending(s => s.Id)
+            .Select(s => (long?)s.Id)
+            .FirstOrDefaultAsync(ct);
 
     private async Task ImportCloudSnapshotHistoryAsync(
         int repositoryId,
@@ -876,7 +1102,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 ParentRelativePath = string.IsNullOrWhiteSpace(e.ParentRelativePath) ? null : NormalizeRelativePath(e.ParentRelativePath),
                 Name = string.IsNullOrWhiteSpace(e.Name) ? Path.GetFileName(e.RelativePath) : e.Name,
                 IsDirectory = e.IsDirectory,
-                Extension = NormalizeFormat(e.Extension),
+                Extension = e.IsDirectory ? null : NormalizeFormat(e.Extension),
                 SizeBytes = e.SizeBytes,
                 LastWriteUtc = e.LastWriteUtc,
                 ContentHashSha256 = e.ContentHashSha256,
@@ -1173,7 +1399,8 @@ public sealed class RepositoryCloudSyncOrchestrator(
         Repository repository,
         long snapshotId,
         long remoteSnapshotId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool forceRequeueExisting = true)
     {
         var now = DateTime.UtcNow;
         var normalizedStrategy = RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy);
@@ -1187,6 +1414,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         if (existing is not null)
         {
+            if (!forceRequeueExisting && existing.Status == RepositorySyncQueueItem.StatusCompleted)
+                return;
+
             // "Sync now" should re-queue existing work for the same snapshot (including completed rows).
             existing.RemoteSnapshotId = remoteSnapshotId;
             existing.ConflictStrategy = normalizedStrategy;
@@ -1251,19 +1481,30 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (repository is null)
             return true;
 
-        var latestSnapshot = await db.RepositorySnapshots
+        var cloudRepositoryId = await EnsureRepositoryCloudIdAsync(repository, ct);
+
+        var snapshots = await db.RepositorySnapshots
             .Where(s => s.RepositoryId == repositoryId && !s.IsDeleted)
             .Where(s => db.SnapshotFileLinks.Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
-            .OrderByDescending(s => s.CreatedAt)
-            .ThenByDescending(s => s.Id)
+            .OrderBy(s => s.CreatedAt)
+            .ThenBy(s => s.Id)
             .Select(s => new { s.Id, s.CreatedAt })
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
-        if (latestSnapshot is null)
+        if (snapshots.Count == 0)
             return true;
 
-        var remoteSnapshotId = BuildRemoteSnapshotId(repositoryId, latestSnapshot.Id, latestSnapshot.CreatedAt);
-        await EnqueueSnapshotPushAsync(repository, latestSnapshot.Id, remoteSnapshotId, ct);
+        var latestSnapshot = snapshots[^1];
+        foreach (var snapshot in snapshots)
+        {
+            var remoteSnapshotId = BuildRemoteSnapshotId(cloudRepositoryId, snapshot.Id, snapshot.CreatedAt);
+            await EnqueueSnapshotPushAsync(
+                repository,
+                snapshot.Id,
+                remoteSnapshotId,
+                ct,
+                forceRequeueExisting: snapshot.Id == latestSnapshot.Id);
+        }
 
         repository.CloudSyncLastStatus = "paused";
         repository.CloudSyncLastError = null;
@@ -1271,8 +1512,9 @@ public sealed class RepositoryCloudSyncOrchestrator(
         await db.SaveChangesAsync(ct);
 
         log.LogInformation(
-            "Queued latest snapshot for later cloud sync because cloud actions are paused. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}",
+            "Queued repository snapshot history for later cloud sync because cloud actions are paused. RepositoryId {RepositoryId}. SnapshotCount {SnapshotCount}. LatestSnapshotId {SnapshotId}",
             repositoryId,
+            snapshots.Count,
             latestSnapshot.Id);
 
         return true;
@@ -1305,6 +1547,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
         var overallTimer = Stopwatch.StartNew();
         var queueItem = await db.Set<RepositorySyncQueueItem>()
             .Include(q => q.Repository)
+            .ThenInclude(r => r.Directory)
             .FirstOrDefaultAsync(q => q.Id == queueItemId, ct);
 
         if (queueItem is null)
@@ -1338,25 +1581,36 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
         try
         {
+            var cloudRepositoryId = await EnsureRepositoryCloudIdAsync(repository, itemCt);
             var remoteLatestSnapshotId = await GetRemoteLatestSnapshotIdAsync(
                 accessToken,
-                repository.Id,
+                cloudRepositoryId,
                 remoteSnapshotCache,
                 itemCt);
             var strategy = RepositorySyncConflictStrategies.Normalize(repository.SyncConflictStrategy);
+            var latestLocalSnapshotId = await db.RepositorySnapshots
+                .Where(s => s.RepositoryId == repository.Id && !s.IsDeleted)
+                .Where(s => db.SnapshotFileLinks.Any(l => l.SnapshotId == s.Id && !l.IsDeleted))
+                .OrderByDescending(s => s.CreatedAt)
+                .ThenByDescending(s => s.Id)
+                .Select(s => (long?)s.Id)
+                .FirstOrDefaultAsync(itemCt);
+            var isHistoricalBackfill = latestLocalSnapshotId.HasValue && queueItem.SnapshotId != latestLocalSnapshotId.Value;
 
-            var hasConflict = repository.CloudLastRemoteSnapshotId.HasValue
+            var hasConflict = !isHistoricalBackfill
+                              && repository.CloudLastRemoteSnapshotId.HasValue
                               && remoteLatestSnapshotId.HasValue
                               && remoteLatestSnapshotId.Value != repository.CloudLastRemoteSnapshotId.Value
                               && remoteLatestSnapshotId.Value != queueItem.RemoteSnapshotId;
             var expectedRemoteSnapshotId = repository.CloudLastRemoteSnapshotId.GetValueOrDefault();
             log.LogInformation(
-                "Cloud queue item resolved remote head. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. ExpectedRemoteSnapshotId {ExpectedRemoteSnapshotId}. ObservedRemoteSnapshotId {ObservedRemoteSnapshotId}. PendingRemoteSnapshotId {PendingRemoteSnapshotId}. HasConflict {HasConflict}. Strategy {Strategy}",
+                "Cloud queue item resolved remote head. QueueItemId {QueueItemId}. RepositoryId {RepositoryId}. ExpectedRemoteSnapshotId {ExpectedRemoteSnapshotId}. ObservedRemoteSnapshotId {ObservedRemoteSnapshotId}. PendingRemoteSnapshotId {PendingRemoteSnapshotId}. HistoricalBackfill {HistoricalBackfill}. HasConflict {HasConflict}. Strategy {Strategy}",
                 queueItem.Id,
                 repository.Id,
                 repository.CloudLastRemoteSnapshotId,
                 remoteLatestSnapshotId,
                 queueItem.RemoteSnapshotId,
+                isHistoricalBackfill,
                 hasConflict,
                 strategy);
 
@@ -1370,27 +1624,44 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 repository.CloudSyncLastStatus = "conflict";
                 repository.CloudSyncLastError = queueItem.LastError;
                 repository.UpdatedAt = DateTime.UtcNow;
-                remoteSnapshotCache.Set(repository.Id, remoteLatestSnapshotId);
+                remoteSnapshotCache.Set(cloudRepositoryId, remoteLatestSnapshotId);
 
                 await db.SaveChangesAsync(itemCt);
                 return;
             }
 
             string? titleSuffix = null;
-            if (hasConflict && strategy == RepositorySyncConflictStrategies.PreserveBoth)
+            if (hasConflict)
             {
-                var preserveBothRemoteSnapshotId = BuildConflictRemoteSnapshotId(
-                    repository.Id,
+                var mergeResult = await ApplyCloudDivergenceMergeAsync(
+                    accessToken,
+                    repository,
+                    cloudRepositoryId,
+                    remoteLatestSnapshotId ?? 0,
+                    itemCt);
+
+                if (mergeResult.MergeSnapshotId is > 0)
+                    queueItem.SnapshotId = mergeResult.MergeSnapshotId.Value;
+
+                queueItem.RemoteSnapshotId = BuildConflictRemoteSnapshotId(
+                    cloudRepositoryId,
                     queueItem.SnapshotId,
                     queueItem.RemoteSnapshotId,
                     remoteLatestSnapshotId ?? 0);
-
-                queueItem.RemoteSnapshotId = preserveBothRemoteSnapshotId;
-                titleSuffix = $"preserve_both_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+                queueItem.ObservedRemoteSnapshotId = remoteLatestSnapshotId;
+                titleSuffix = mergeResult.CopiedFiles > 0
+                    ? $"cloud_merge_{DateTime.UtcNow:yyyyMMdd_HHmmss}"
+                    : $"cloud_rebase_{DateTime.UtcNow:yyyyMMdd_HHmmss}";
+                repository.CloudSyncLastStatus = mergeResult.CopiedFiles > 0
+                    ? "syncing_merge"
+                    : "syncing_rebase";
+                repository.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(itemCt);
             }
 
             var package = await BuildCloudSnapshotPackageAsync(
                 repository.Id,
+                cloudRepositoryId,
                 queueItem.SnapshotId,
                 queueItem.RemoteSnapshotId,
                 titleSuffix,
@@ -1417,7 +1688,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
             var runAttempt = Math.Max(0, queueItem.AttemptCount) + 1;
             var initialIdempotencyKey = BuildPushIdempotencyKey(
-                repository.Id,
+                cloudRepositoryId,
                 queueItem.SnapshotId,
                 queueItem.RemoteSnapshotId,
                 package.Snapshot.PayloadSha256,
@@ -1427,7 +1698,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             repository.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(itemCt);
             var initialPushTimer = Stopwatch.StartNew();
-            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, initialIdempotencyKey, itemCt);
+            var pushResult = await cloudSync.PushSnapshotAsync(accessToken, cloudRepositoryId, package, initialIdempotencyKey, itemCt);
             initialPushTimer.Stop();
             if (pushResult is null)
                 throw new InvalidOperationException("Cloud rejected snapshot push (unauthorized or invalid session).");
@@ -1540,7 +1811,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                                 i = uploadedThroughIndex;
                                 continue;
                             }
-                            catch (Exception ex) when (ShouldFallbackToSingleBlockUpload(ex))
+                            catch (Exception ex) when (!itemCt.IsCancellationRequested && ShouldFallbackToSingleBlockUpload(ex))
                             {
                                 batchUploadSupported = false;
                                 log.LogInformation(
@@ -1595,7 +1866,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 }
 
                 var confirmIdempotencyKey = BuildPushIdempotencyKey(
-                    repository.Id,
+                    cloudRepositoryId,
                     queueItem.SnapshotId,
                     queueItem.RemoteSnapshotId,
                     package.Snapshot.PayloadSha256,
@@ -1606,7 +1877,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 repository.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(itemCt);
                 var confirmPushTimer = Stopwatch.StartNew();
-                var confirm = await cloudSync.PushSnapshotAsync(accessToken, repository.Id, package, confirmIdempotencyKey, itemCt);
+                var confirm = await cloudSync.PushSnapshotAsync(accessToken, cloudRepositoryId, package, confirmIdempotencyKey, itemCt);
                 confirmPushTimer.Stop();
                 if (confirm is null)
                     throw new InvalidOperationException("Cloud rejected follow-up snapshot push after block upload.");
@@ -1653,7 +1924,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 : "synced";
             repository.CloudSyncLastError = null;
             repository.UpdatedAt = DateTime.UtcNow;
-            remoteSnapshotCache.Set(repository.Id, queueItem.RemoteSnapshotId);
+            remoteSnapshotCache.Set(cloudRepositoryId, queueItem.RemoteSnapshotId);
 
             await db.SaveChangesAsync(itemCt);
 
@@ -2042,6 +2313,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private async Task<CloudSnapshotPackageDto?> BuildCloudSnapshotPackageAsync(
         int repositoryId,
+        int cloudRepositoryId,
         long localSnapshotId,
         long remoteSnapshotId,
         string? titleSuffix,
@@ -2193,7 +2465,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
             totalTimer.ElapsedMilliseconds);
 
         return new CloudSnapshotPackageDto(
-            new CloudRepositoryMetadataDto(repository.Id, repository.Name, repository.Description),
+            new CloudRepositoryMetadataDto(cloudRepositoryId, repository.Name, repository.Description),
             new CloudSnapshotMetadataDto(
                 remoteSnapshotId,
                 snapshotTitle,
@@ -2489,7 +2761,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
                         i = uploadedThroughIndex;
                         continue;
                     }
-                    catch (Exception ex) when (ShouldFallbackToSingleBlockUpload(ex))
+                    catch (Exception ex) when (!ct.IsCancellationRequested && ShouldFallbackToSingleBlockUpload(ex))
                     {
                         batchUploadSupported = false;
                         log.LogInformation(
@@ -2539,10 +2811,29 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (ex is NotSupportedException)
             return true;
 
-        if (ex is HttpRequestException http &&
-            http.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
-        {
+        if (ex is IOException or TimeoutException or TaskCanceledException)
             return true;
+
+        if (ex is HttpRequestException http)
+        {
+            if (http.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed or HttpStatusCode.NotImplemented)
+                return true;
+
+            if (http.StatusCode is HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout &&
+                ex.Message.Contains("upload_block_batch", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (ex.Message.Contains("copying content", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("transport connection", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("failed to persist block payload", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("failed to read block payload", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("failed to read multipart block batch", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
 
         return ex.InnerException is not null && ShouldFallbackToSingleBlockUpload(ex.InnerException);
@@ -2758,10 +3049,16 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private sealed record PreparedCloudRepositoryRestore(
         int SortOrder,
+        int CloudRepositoryId,
+        long? LatestRemoteSnapshotId,
         string RepositoryName,
         string? RepositoryDescription,
         string RestorePath,
         IReadOnlyList<string> Formats);
+
+    private sealed record CloudDivergenceMergeResult(
+        int CopiedFiles,
+        long? MergeSnapshotId);
 
     private static string BuildRestorePath(string? targetRootDirectory, string username, string repositoryName)
     {
@@ -2778,6 +3075,29 @@ public sealed class RepositoryCloudSyncOrchestrator(
         return Path.Combine(root, safeUser, safeRepo);
     }
 
+    private static string BuildCloudMergeCopyPath(string originalPath, long remoteSnapshotId)
+    {
+        var directory = Path.GetDirectoryName(originalPath) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(originalPath);
+        if (string.IsNullOrWhiteSpace(name))
+            name = Path.GetFileName(originalPath);
+
+        var extension = Path.GetExtension(originalPath);
+        var suffix = $".cloud-merge-s{remoteSnapshotId}";
+        var candidate = Path.Combine(directory, $"{name}{suffix}{extension}");
+        if (!File.Exists(candidate))
+            return candidate;
+
+        for (var i = 2; i < 10_000; i++)
+        {
+            candidate = Path.Combine(directory, $"{name}{suffix}-{i}{extension}");
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+
+        return Path.Combine(directory, $"{name}{suffix}-{Guid.NewGuid():N}{extension}");
+    }
+
     private static string ResolveSingleRepositoryRestorePath(
         string? requestedPath,
         string repositoryName,
@@ -2787,9 +3107,14 @@ public sealed class RepositoryCloudSyncOrchestrator(
         if (!string.IsNullOrWhiteSpace(requestedPath))
         {
             var selected = Path.GetFullPath(requestedPath.Trim());
-            return restoreToAnotherFolder
-                ? Path.Combine(selected, SanitizeSegment(repositoryName))
-                : selected;
+            if (!restoreToAnotherFolder)
+                return selected;
+
+            var safeRepo = SanitizeSegment(repositoryName);
+            var selectedName = Path.GetFileName(selected.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            return string.Equals(selectedName, safeRepo, StringComparison.OrdinalIgnoreCase)
+                ? selected
+                : Path.Combine(selected, safeRepo);
         }
 
         if (restoreToAnotherFolder)
@@ -2813,14 +3138,7 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
     private static string NormalizeFormat(string? extension)
     {
-        if (string.IsNullOrWhiteSpace(extension))
-            return string.Empty;
-
-        var value = extension.Trim();
-        if (!value.StartsWith('.'))
-            value = "." + value;
-
-        return value.ToLowerInvariant();
+        return KnownFileExtensions.NormalizeTrackedFileFormat(extension);
     }
 
     private static string? ResolvePath(string root, string relativePath)

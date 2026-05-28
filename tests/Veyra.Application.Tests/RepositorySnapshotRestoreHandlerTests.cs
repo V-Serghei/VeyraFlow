@@ -479,6 +479,7 @@ public sealed class RepositorySnapshotRestoreHandlerTests : IDisposable
             string? targetRootDirectory = null,
             bool restoreFullHistory = false,
             bool restoreToAnotherFolder = false,
+            bool restoreMetadataOnly = false,
             CancellationToken ct = default)
             => Task.FromResult(false);
 
