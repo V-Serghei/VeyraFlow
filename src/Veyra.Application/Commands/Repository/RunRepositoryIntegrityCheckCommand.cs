@@ -4,7 +4,7 @@ using Veyra.Application.DTOs;
 
 namespace Veyra.Application.Commands.Repository;
 
-public sealed record RunRepositoryIntegrityCheckCommand(
+public abstract record RunRepositoryIntegrityCheckCommand(
     int RepositoryId,
     bool RepairFromCloud = false,
     int MaxIssueSamples = 200,

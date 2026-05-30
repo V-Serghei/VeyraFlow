@@ -34,36 +34,36 @@ public static class KnownFileExtensions
         ".zip", ".7z", ".rar", ".tar", ".gz"
     ];
 
-    public static IReadOnlyList<string> TextDiffFormats { get; } =
+    private static IReadOnlyList<string> TextDiffFormats { get; } =
     [
         ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
         ".cs", ".js", ".ts", ".tsx", ".jsx", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
         ".html", ".css", ".sql", ".xaml", ".axaml"
     ];
 
-    public static IReadOnlyList<string> TextContentFormats { get; } =
+    private static IReadOnlyList<string> TextContentFormats { get; } =
     [
         ".txt", ".md", ".csv", ".json", ".xml", ".yml", ".yaml", ".ini", ".toml", ".log",
         ".cs", ".js", ".ts", ".tsx", ".jsx", ".java", ".py", ".rs", ".go", ".c", ".cpp", ".h", ".hpp",
         ".html", ".css", ".sql", ".xaml", ".axaml", ".svg"
     ];
 
-    public static IReadOnlyList<string> ImageDiffFormats { get; } =
+    private static IReadOnlyList<string> ImageDiffFormats { get; } =
     [
         ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".svg"
     ];
 
-    public static IReadOnlyList<string> AudioDiffFormats { get; } =
+    private static IReadOnlyList<string> AudioDiffFormats { get; } =
     [
         ".wav", ".mp3", ".aac", ".m4a", ".wma", ".aif", ".aiff"
     ];
 
-    public static IReadOnlyList<string> ArchiveDiffFormats { get; } =
+    private static IReadOnlyList<string> ArchiveDiffFormats { get; } =
     [
         ".zip"
     ];
 
-    public static IReadOnlyList<string> OfficeBinaryHintFormats { get; } =
+    private static IReadOnlyList<string> OfficeBinaryHintFormats { get; } =
     [
         ".doc", ".docx", ".rtf", ".odt"
     ];

@@ -18,3 +18,11 @@
   - keep the richer nested version,
   - remove the stale root copy,
   - only merge nested content back into the root path when the root path is the intended canonical UI file location.
+
+## 2026-05-30 - `NU1903` for `Tmds.DBus.Protocol` in Desktop builds
+
+- `Veyra.Desktop` does not reference `Tmds.DBus.Protocol` directly; the warning comes from the Avalonia desktop Linux stack:
+  - `Avalonia.Desktop` -> `Avalonia.X11` -> `Avalonia.FreeDesktop` -> `Tmds.DBus.Protocol`
+- Current local restore resolved `Tmds.DBus.Protocol` to `0.21.2`, which NuGet flags with `NU1903` because of advisory `GHSA-xrw6-gwf8-vvr9` / `CVE-2026-39959`.
+- `Veyra.Desktop.Tests` shows the same warning because it references `Veyra.Desktop`, so it inherits the same restore graph.
+- Fastest mitigation is to add an explicit direct package reference to a patched version of `Tmds.DBus.Protocol` (`0.21.3` or newer) in the desktop project, or upgrade Avalonia to a line that already requires a patched version.

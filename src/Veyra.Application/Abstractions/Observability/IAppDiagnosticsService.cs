@@ -1,4 +1,5 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.AppDiagnostics;
 
 namespace Veyra.Application.Abstractions.Observability;
 

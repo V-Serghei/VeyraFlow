@@ -1,4 +1,4 @@
-﻿﻿using FluentValidation;
+﻿using FluentValidation;
 
 namespace Veyra.Application.Commands.Setup;
 
@@ -17,7 +17,7 @@ public sealed class UpdateWatchedDirectoryCommandValidator : AbstractValidator<U
 
     private static bool IsRootDrive(string p)
     {
-        try { return Path.GetPathRoot(p)?.TrimEnd('\\')?.Equals(p.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) == true; }
+        try { return Path.GetPathRoot(p)?.TrimEnd('\\').Equals(p.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) == true; }
         catch { return false; }
     }
 }
