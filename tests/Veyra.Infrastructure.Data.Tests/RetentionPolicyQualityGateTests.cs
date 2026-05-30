@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.Services;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;
@@ -183,6 +184,7 @@ public sealed class RetentionPolicyQualityGateTests
             db,
             config,
             new FakeArchiveService(),
+            new ManagedRepositoryRetentionPlanner(),
             NullLogger<EfRepositoryRetentionService>.Instance);
     }
 

@@ -1,4 +1,6 @@
-namespace Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
+
+namespace Veyra.Application.DTOs.Repository.Comparison;
 
 public sealed record RepositoryPathComparisonResultDto(
     int AddedCount,

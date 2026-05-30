@@ -13,6 +13,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
+using Veyra.Application.DTOs.TextDiff;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Preview;
 

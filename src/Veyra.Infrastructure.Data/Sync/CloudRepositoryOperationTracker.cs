@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.CloudSync;
 
 namespace Veyra.Infrastructure.Data.Sync;
 

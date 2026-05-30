@@ -3,6 +3,7 @@ using System.Reflection;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Observability;
+using Veyra.Application.DTOs.OperationJournal;
 using Veyra.Domain.Observability;
 
 namespace Veyra.Application.Common.Behaviors;
@@ -93,7 +94,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
             await journal.AppendAsync(
-                new DTOs.OperationJournalEntryDto(
+                new OperationJournalEntryDto(
                     Id: 0,
                     OccurredAtUtc: DateTime.UtcNow,
                     Level: level,

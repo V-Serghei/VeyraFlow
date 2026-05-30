@@ -2,6 +2,8 @@ using System;
 using System.Linq;
 using FluentValidation;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Retention;
 
 namespace Veyra.Application.Commands.Repository;
 

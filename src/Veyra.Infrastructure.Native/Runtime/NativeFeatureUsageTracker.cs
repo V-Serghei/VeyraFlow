@@ -12,6 +12,7 @@ public static class NativeFeatureUsageTracker
     public const string SnapshotComparison = "snapshot_compare";
     public const string RepositoryPathComparison = "repository_path_compare";
     public const string VersionPlanning = "version_planning";
+    public const string RetentionPlanning = "retention_planning";
     public const string ImageDiff = "image_diff";
 
     private static readonly string[] FeatureOrder =
@@ -23,6 +24,7 @@ public static class NativeFeatureUsageTracker
         SnapshotComparison,
         RepositoryPathComparison,
         VersionPlanning,
+        RetentionPlanning,
         ImageDiff
     ];
 

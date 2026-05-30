@@ -1,6 +1,6 @@
 using MediatR;
 using Veyra.Application.Common.Results;
-using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.ArtifactKeys;
 
 namespace Veyra.Application.Commands.Security;
 

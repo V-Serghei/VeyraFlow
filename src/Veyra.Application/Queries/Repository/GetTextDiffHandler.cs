@@ -5,6 +5,7 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.TextDiff;
 using Veyra.Application.Services.Diff;
 
 namespace Veyra.Application.Queries.Repository;

@@ -1,5 +1,6 @@
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.TextDiff;
 
 namespace Veyra.Application.Services;
 

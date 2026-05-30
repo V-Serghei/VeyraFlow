@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Desktop.Services.Repositories;
 

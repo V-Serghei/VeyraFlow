@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.OperationJournal;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;

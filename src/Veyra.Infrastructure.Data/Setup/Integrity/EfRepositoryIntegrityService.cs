@@ -7,6 +7,7 @@ using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Integrity;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Data.Setup.Models.Integrity;

@@ -10,6 +10,7 @@ public sealed record NativeRuntimeHealthReport(
     bool SupportsSnapshotComparison,
     bool SupportsRepositoryPathComparison,
     bool SupportsVersionPlanning,
+    bool SupportsRetentionPlanning,
     bool SupportsImageDiff,
     string? LoadedPath,
     string? ErrorMessage,

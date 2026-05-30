@@ -21,6 +21,12 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Auth;
+using Veyra.Application.DTOs.CloudSync;
+using Veyra.Application.DTOs.FileVersions;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 

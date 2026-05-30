@@ -1,6 +1,7 @@
 using MediatR;
 using Veyra.Application.Abstractions.Security;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.ArtifactKeys;
 
 namespace Veyra.Application.Queries.Security;
 

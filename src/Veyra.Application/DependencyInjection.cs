@@ -1,7 +1,9 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Veyra.Application.Abstractions.Indexing;
+using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Behaviors;
 using Veyra.Application.Common.Observability;
 using Veyra.Application.Services;
@@ -23,6 +25,9 @@ public static class DependencyInjection
 
         services.AddScoped<ManagedSnapshotComparisonEngine>();
         services.AddScoped<ISnapshotComparisonEngine>(sp => sp.GetRequiredService<ManagedSnapshotComparisonEngine>());
+
+        services.AddSingleton<ManagedRepositoryRetentionPlanner>();
+        services.TryAddSingleton<IRepositoryRetentionPlanner>(sp => sp.GetRequiredService<ManagedRepositoryRetentionPlanner>());
 
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));

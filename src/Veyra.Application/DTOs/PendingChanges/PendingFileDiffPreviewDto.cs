@@ -1,4 +1,6 @@
-namespace Veyra.Application.DTOs;
+using Veyra.Application.DTOs.TextDiff;
+
+namespace Veyra.Application.DTOs.PendingChanges;
 
 public sealed record PendingFileDiffPreviewDto
 {

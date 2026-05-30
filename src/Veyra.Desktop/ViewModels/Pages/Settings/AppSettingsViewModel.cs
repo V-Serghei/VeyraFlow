@@ -25,6 +25,13 @@ using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Security;
 using Veyra.Application.DTOs;
 using Veyra.Application.DTOs.AppDiagnostics;
+using Veyra.Application.DTOs.ArtifactKeys;
+using Veyra.Application.DTOs.Auth;
+using Veyra.Application.DTOs.CloudSync;
+using Veyra.Application.DTOs.OperationJournal;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Retention;
 using Veyra.Application.Queries.Repository;
 using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;
@@ -4596,6 +4603,7 @@ public sealed partial class AppSettingsViewModel : ObservableObject
             "snapshot_compare" => Loc.T("app_settings.system_diagnostics_native_feature_snapshot_compare"),
             "repository_path_compare" => Loc.T("app_settings.system_diagnostics_native_feature_repository_path_compare"),
             "version_planning" => Loc.T("app_settings.system_diagnostics_native_feature_version_planning"),
+            "retention_planning" => Loc.T("app_settings.system_diagnostics_native_feature_retention_planning"),
             "image_diff" => Loc.T("app_settings.system_diagnostics_native_feature_image_diff"),
             _ => featureKey
         };

@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Scanning;
 
 public sealed record RepositoryScanEntryDto(
     string RelativePath,

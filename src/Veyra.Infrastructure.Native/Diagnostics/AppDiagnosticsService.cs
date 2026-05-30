@@ -6,6 +6,7 @@ using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
 using Veyra.Application.DTOs.AppDiagnostics;
+using Veyra.Application.DTOs.Repository.Core;
 using Veyra.Infrastructure.Native.Interop;
 using Veyra.Infrastructure.Native.Runtime.Models;
 using Veyra.Infrastructure.Native.Scanning;
@@ -250,6 +251,7 @@ public sealed class AppDiagnosticsService(
             report.SupportsSnapshotComparison,
             report.SupportsRepositoryPathComparison,
             report.SupportsVersionPlanning,
+            report.SupportsRetentionPlanning,
             report.SupportsImageDiff,
             featureUsage,
             report.LoadedPath,
@@ -266,6 +268,7 @@ public sealed class AppDiagnosticsService(
             NativeFeatureUsageTracker.SnapshotComparison => report.SupportsSnapshotComparison,
             NativeFeatureUsageTracker.RepositoryPathComparison => report.SupportsRepositoryPathComparison,
             NativeFeatureUsageTracker.VersionPlanning => report.SupportsVersionPlanning,
+            NativeFeatureUsageTracker.RetentionPlanning => report.SupportsRetentionPlanning,
             NativeFeatureUsageTracker.ImageDiff => report.SupportsImageDiff,
             _ => false
         };

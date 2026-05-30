@@ -1,5 +1,6 @@
 using System;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Desktop.Services.Scanning;
 

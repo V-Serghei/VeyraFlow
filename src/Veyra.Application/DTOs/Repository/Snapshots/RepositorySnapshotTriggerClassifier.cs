@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Snapshots;
 
 public static class RepositorySnapshotTriggerClassifier
 {

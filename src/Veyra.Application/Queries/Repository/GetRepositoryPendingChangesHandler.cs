@@ -1,6 +1,7 @@
 ﻿using MediatR;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
 
 namespace Veyra.Application.Queries.Repository;
 

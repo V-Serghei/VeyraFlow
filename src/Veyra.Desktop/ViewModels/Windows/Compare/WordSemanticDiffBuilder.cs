@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.TextDiff;
 
 namespace Veyra.Desktop.ViewModels.Windows;
 

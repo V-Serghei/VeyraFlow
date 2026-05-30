@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Veyra.Application.Common.Files;
 using Veyra.Application.Common.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 using Veyra.Desktop.Services.Sync;
 
 namespace Veyra.Desktop.Services.Repositories;

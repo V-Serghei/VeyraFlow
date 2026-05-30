@@ -87,6 +87,11 @@ int32_t veyra_plan_repository_versions_utf8(const char *states_json_ptr,
                                             uint64_t out_len,
                                             uint64_t *written);
 
+int32_t veyra_plan_retention_snapshots_utf8(const char *request_json_ptr,
+                                            uint8_t *out,
+                                            uint64_t out_len,
+                                            uint64_t *written);
+
 int64_t veyra_zstd_compress_file(const char *src_path_ptr, const char *dst_path_ptr, int level);
 
 int64_t veyra_zstd_decompress_file(const char *src_path_ptr, const char *dst_path_ptr);

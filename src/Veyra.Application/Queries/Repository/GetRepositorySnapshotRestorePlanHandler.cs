@@ -4,6 +4,7 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Repository;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Snapshots;
 
 namespace Veyra.Application.Queries.Repository;
 

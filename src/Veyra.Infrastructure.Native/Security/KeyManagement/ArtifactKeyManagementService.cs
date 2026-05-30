@@ -4,7 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Security;
-using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.ArtifactKeys;
 
 namespace Veyra.Infrastructure.Native.Security;
 

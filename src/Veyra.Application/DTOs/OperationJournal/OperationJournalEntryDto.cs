@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.OperationJournal;
 
 public sealed record OperationJournalEntryDto(
     long Id,

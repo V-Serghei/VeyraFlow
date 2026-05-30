@@ -2041,6 +2041,7 @@
     "app_settings.system_diagnostics_native_feature_snapshot_compare":  "Snapshot compare",
     "app_settings.system_diagnostics_native_feature_repository_path_compare":  "Path compare",
     "app_settings.system_diagnostics_native_feature_version_planning":  "Version planning",
+    "app_settings.system_diagnostics_native_feature_retention_planning":  "Retention planning",
     "app_settings.system_diagnostics_native_feature_image_diff":  "Image/SVG diff",
     "app_settings.system_diagnostics_export_text_button":  "Export TXT",
     "app_settings.system_diagnostics_export_json_button":  "Export JSON",

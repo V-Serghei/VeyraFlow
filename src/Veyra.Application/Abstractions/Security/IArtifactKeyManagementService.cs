@@ -1,4 +1,4 @@
-using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.ArtifactKeys;
 
 namespace Veyra.Application.Abstractions.Security;
 

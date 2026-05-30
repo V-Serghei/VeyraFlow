@@ -9,6 +9,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Retention;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Views.Windows;

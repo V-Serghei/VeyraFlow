@@ -1,4 +1,5 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Auth;
 
 namespace Veyra.Application.Abstractions.Auth;
 

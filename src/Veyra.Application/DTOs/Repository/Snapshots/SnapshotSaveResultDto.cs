@@ -1,4 +1,6 @@
-namespace Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+
+namespace Veyra.Application.DTOs.Repository.Snapshots;
 
 public sealed record SnapshotSaveResultDto(
     bool SnapshotCreated,

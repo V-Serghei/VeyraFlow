@@ -1,4 +1,5 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Comparison;
 
 namespace Veyra.Application.Abstractions.Indexing;
 

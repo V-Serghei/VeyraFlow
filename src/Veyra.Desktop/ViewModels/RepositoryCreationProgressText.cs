@@ -1,5 +1,6 @@
 using System;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels;

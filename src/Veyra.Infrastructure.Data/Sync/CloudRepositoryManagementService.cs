@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Auth;
+using Veyra.Application.DTOs.CloudSync;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 

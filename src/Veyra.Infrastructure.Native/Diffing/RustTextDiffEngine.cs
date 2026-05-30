@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.TextDiff;
 using Veyra.Application.Services;
 using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;

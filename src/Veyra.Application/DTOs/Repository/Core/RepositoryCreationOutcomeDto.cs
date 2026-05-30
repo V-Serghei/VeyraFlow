@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Core;
 
 public sealed record RepositoryCreationOutcomeDto(
     int RepositoryId,

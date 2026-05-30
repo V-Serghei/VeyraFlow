@@ -1,5 +1,6 @@
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Cloud;
 
 namespace Veyra.Infrastructure.Sync.Sync;
 

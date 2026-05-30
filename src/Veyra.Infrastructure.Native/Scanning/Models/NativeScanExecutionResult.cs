@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Infrastructure.Native.Scanning;
 

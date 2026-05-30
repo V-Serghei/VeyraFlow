@@ -1,4 +1,9 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.FileVersions;
+using Veyra.Application.DTOs.PendingChanges;
+using Veyra.Application.DTOs.Repository.Scanning;
+using Veyra.Application.DTOs.Repository.Snapshots;
+using Veyra.Application.DTOs.TextDiff;
 
 namespace Veyra.Application.Abstractions.Indexing;
 

@@ -2,7 +2,7 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Security;
 using Veyra.Application.Common.Results;
-using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.ArtifactKeys;
 
 namespace Veyra.Application.Commands.Security;
 

@@ -14,6 +14,8 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Models.TrackedFormats;
 using Veyra.Desktop.Services.Execution;

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.OperationJournal;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 

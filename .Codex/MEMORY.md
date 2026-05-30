@@ -12,3 +12,12 @@
 - Traced the remaining `NU1903` warning to Avalonia's Linux desktop chain in the desktop restore graph: `Avalonia.Desktop` -> `Avalonia.X11` -> `Avalonia.FreeDesktop` -> `Tmds.DBus.Protocol 0.21.2`.
 - Filled the previously empty `AddWatchedDirectoryCommandValidator`, aligned it with the watched-directory validation rules, and made `AddWatchedDirectoryCommand` concrete so it can be instantiated and validated.
 - Removed `CS8629` in `RepositoryCloudSyncOrchestrator` by avoiding `.Value` on `remoteLatestSnapshotId` inside the manual-conflict branch and using a local `GetValueOrDefault()` value for the error message.
+- Reconfirmed the current cross-language split: `native/veyra_core` already owns local hash/scan/block-store/compress/diff/image-diff work, while `server/cloud-api` already owns snapshot/block sync endpoints and pack/block storage flows; future moves should keep `C#` as orchestration/UI/domain glue and push only coarse-grained deterministic CPU/IO logic to `Rust` or authoritative multi-client cloud workflows to `Go`.
+- Concrete next migration candidates:
+  - `Rust`: retention/integrity/archive/recovery calculation cores behind coarse JSON FFI payloads.
+  - `Go`: cloud retention/GC/pack compaction/restore-package preparation as authoritative server jobs.
+  - `C#`: keep MediatR/UI/EF/domain orchestration and invoke `Rust`/`Go` as engines rather than moving application workflows wholesale.
+- Started the first Rust migration candidate: repository retention planning now goes through `IRepositoryRetentionPlanner`; `ManagedRepositoryRetentionPlanner` is the safe C# fallback and `RustRepositoryRetentionPlanner` calls optional native entrypoint `veyra_plan_retention_snapshots_utf8` when available.
+- Native feature diagnostics now include `retention_planning`; old native DLLs remain compatible because the new entrypoint is optional, not required for native runtime health.
+- `cargo check` validates `native/veyra_core` retention code, but `cargo test` needs MSVC `link.exe` in PATH. In this sandbox, full Rust tests stopped at linker discovery rather than code errors.
+- Desktop builds inside the sandbox can fail in Avalonia telemetry with denied access to `%LOCALAPPDATA%\AvaloniaUI\BuildServices\buildtasks.log`; set `AVALONIA_TELEMETRY_OPTOUT=1` for build verification in restricted sessions.

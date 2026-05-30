@@ -1,4 +1,6 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Desktop.ViewModels.Pages.Search;
 

@@ -26,3 +26,16 @@
 - Current local restore resolved `Tmds.DBus.Protocol` to `0.21.2`, which NuGet flags with `NU1903` because of advisory `GHSA-xrw6-gwf8-vvr9` / `CVE-2026-39959`.
 - `Veyra.Desktop.Tests` shows the same warning because it references `Veyra.Desktop`, so it inherits the same restore graph.
 - Fastest mitigation is to add an explicit direct package reference to a patched version of `Tmds.DBus.Protocol` (`0.21.3` or newer) in the desktop project, or upgrade Avalonia to a line that already requires a patched version.
+
+## 2026-05-30 - Avalonia telemetry task can fail in sandboxed builds
+
+- `AvaloniaStatsTask` may try to write `%LOCALAPPDATA%\AvaloniaUI\BuildServices\buildtasks.log`.
+- In Codex workspace sandbox this can throw `UnauthorizedAccessException`, even when all project code has already compiled.
+- For verification builds, set `AVALONIA_TELEMETRY_OPTOUT=1` before `dotnet build`:
+  - PowerShell: `$env:AVALONIA_TELEMETRY_OPTOUT='1'; & 'C:\Users\visto\.dotnet\dotnet.exe' build src\Veyra.Desktop\Veyra.Desktop.csproj --no-restore`
+
+## 2026-05-30 - Rust module ambiguity from empty root module file
+
+- Rust module resolution treats both `src/hash.rs` and `src/hash/mod.rs` as definitions for `pub mod hash;`.
+- Keeping both files causes `E0761: file for module 'hash' found at both ...`.
+- The real implementation is `native/veyra_core/src/hash/mod.rs`; the empty `native/veyra_core/src/hash.rs` should stay removed.

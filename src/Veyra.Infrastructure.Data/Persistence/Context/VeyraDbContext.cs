@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Retention;
 
 namespace Veyra.Infrastructure.Data.Persistence;
 

@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Auth;
 
 public sealed record AuthSessionDto(
     long CloudUserId,

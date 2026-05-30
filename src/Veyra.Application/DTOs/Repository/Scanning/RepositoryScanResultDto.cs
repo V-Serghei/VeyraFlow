@@ -1,4 +1,6 @@
-﻿namespace Veyra.Application.DTOs;
+﻿using Veyra.Application.DTOs.Repository.Core;
+
+namespace Veyra.Application.DTOs.Repository.Scanning;
 
 public sealed record RepositoryScanResultDto(
     int TotalEntries,

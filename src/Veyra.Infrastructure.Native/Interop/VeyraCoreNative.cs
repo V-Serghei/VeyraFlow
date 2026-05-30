@@ -21,6 +21,7 @@ internal static class VeyraCoreNative
     internal const string EntryCompareSnapshotLinks = "veyra_compare_snapshot_links_utf8";
     internal const string EntryCompareRepositoryPaths = "veyra_compare_repository_paths_utf8";
     internal const string EntryPlanRepositoryVersions = "veyra_plan_repository_versions_utf8";
+    internal const string EntryPlanRetentionSnapshots = "veyra_plan_retention_snapshots_utf8";
     internal const string EntryLastError = "veyra_last_error_utf8";
 
     private static readonly string[] RequiredEntrypoints =
@@ -39,7 +40,8 @@ internal static class VeyraCoreNative
     [
         EntryScanDirectoryLimited,
         EntryScanDirectoryLimitedV2,
-        EntryRenderImageDiff
+        EntryRenderImageDiff,
+        EntryPlanRetentionSnapshots
     ];
 
     private static readonly Lazy<NativeLibraryProbe> LibraryProbe = new(
@@ -157,6 +159,13 @@ internal static class VeyraCoreNative
         out ulong written);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int veyra_plan_retention_snapshots_utf8(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string requestJson,
+        byte[]? output,
+        ulong outputLen,
+        out ulong written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     private static extern int veyra_last_error_utf8(
         byte[]? output,
         ulong outputLen,
@@ -179,6 +188,7 @@ internal static class VeyraCoreNative
                 SupportsSnapshotComparison: false,
                 SupportsRepositoryPathComparison: false,
                 SupportsVersionPlanning: false,
+                SupportsRetentionPlanning: false,
                 SupportsImageDiff: false,
                 LoadedPath: null,
                 ErrorMessage: probe.LoadError ?? "Unable to load native veyra_core library.",
@@ -197,6 +207,7 @@ internal static class VeyraCoreNative
         var supportsSnapshotComparison = HasEntrypoint(probe, EntryCompareSnapshotLinks);
         var supportsRepositoryPathComparison = HasEntrypoint(probe, EntryCompareRepositoryPaths);
         var supportsVersionPlanning = HasEntrypoint(probe, EntryPlanRepositoryVersions);
+        var supportsRetentionPlanning = HasEntrypoint(probe, EntryPlanRetentionSnapshots);
         var supportsImageDiff = HasEntrypoint(probe, EntryRenderImageDiff);
 
         var isHealthy = missingEntrypoints.Length == 0;
@@ -227,6 +238,7 @@ internal static class VeyraCoreNative
             SupportsSnapshotComparison: supportsSnapshotComparison,
             SupportsRepositoryPathComparison: supportsRepositoryPathComparison,
             SupportsVersionPlanning: supportsVersionPlanning,
+            SupportsRetentionPlanning: supportsRetentionPlanning,
             SupportsImageDiff: supportsImageDiff,
             LoadedPath: probe.LoadedPath,
             ErrorMessage: probe.LoadError ?? runtimeCheckError,
@@ -397,6 +409,14 @@ internal static class VeyraCoreNative
             (buffer, len, out written) =>
                 veyra_plan_repository_versions_utf8(statesJson, buffer, len, out written),
             "Native repository version planner failed");
+    }
+
+    public static string PlanRetentionSnapshotsJson(string requestJson)
+    {
+        return ReadJsonResult(
+            (buffer, len, out written) =>
+                veyra_plan_retention_snapshots_utf8(requestJson, buffer, len, out written),
+            "Native repository retention planner failed");
     }
 
     public static long RestoreFileBlocks(string storeRoot, string blocksJson, string targetPath, bool overwriteExisting)

@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Recovery;
 
 public sealed record RepositoryRecoveryResultDto(
     int RepositoryId,

@@ -5,6 +5,7 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Application.Commands.Repository;
 

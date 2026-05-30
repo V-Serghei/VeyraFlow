@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
 
 namespace Veyra.Application.Queries.Repository;
 

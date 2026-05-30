@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.TextDiff;
 
 public sealed record TextDiffComputationDto(
     int AddedLines,
