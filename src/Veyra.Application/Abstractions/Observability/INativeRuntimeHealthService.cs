@@ -4,5 +4,5 @@ namespace Veyra.Application.Abstractions.Observability;
 
 public interface INativeRuntimeHealthService
 {
-    NativeRuntimeHealthDto Probe();
+    public NativeRuntimeHealthDto Probe();
 }

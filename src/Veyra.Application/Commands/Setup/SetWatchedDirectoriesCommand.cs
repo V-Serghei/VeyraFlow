@@ -3,4 +3,4 @@ using MediatR;
 
 namespace Veyra.Application.Commands.Setup;
 
-public sealed record SetWatchedDirectoriesCommand(IReadOnlyCollection<string> Paths) : IRequest;
+public abstract record SetWatchedDirectoriesCommand(IReadOnlyCollection<string> Paths) : IRequest;

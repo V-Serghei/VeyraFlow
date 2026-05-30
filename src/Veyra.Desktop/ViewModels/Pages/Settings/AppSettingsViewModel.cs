@@ -24,6 +24,7 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Security;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.AppDiagnostics;
 using Veyra.Application.Queries.Repository;
 using Veyra.Application.Queries.Security;
 using Veyra.Desktop.Localization;

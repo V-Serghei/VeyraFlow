@@ -6,7 +6,7 @@ public readonly struct OperationResult<T>
     public T? Value { get; }
     public string? Error { get; }
     public string? Summary { get; }
-    public OperationErrorKind ErrorKind { get; }
+    private OperationErrorKind ErrorKind { get; }
 
     private OperationResult(bool success, T? value, string? error, string? summary, OperationErrorKind kind)
     {

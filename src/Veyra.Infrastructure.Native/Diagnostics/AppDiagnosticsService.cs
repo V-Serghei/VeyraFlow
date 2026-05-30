@@ -5,6 +5,7 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.AppDiagnostics;
 using Veyra.Infrastructure.Native.Interop;
 using Veyra.Infrastructure.Native.Runtime.Models;
 using Veyra.Infrastructure.Native.Scanning;

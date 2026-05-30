@@ -8,7 +8,7 @@ public sealed class SetWatchedDirectoriesCommandValidator : AbstractValidator<Se
     {
         RuleFor(x => x.Paths)
             .NotEmpty().WithMessage("Select at least one folder.")
-            .Must(list => list.Distinct(System.StringComparer.OrdinalIgnoreCase).Count() == list.Count)
+            .Must(list => list.Distinct(StringComparer.OrdinalIgnoreCase).Count() == list.Count)
             .WithMessage("Duplicate folders are not allowed.")
             .Must(list => list.All(Directory.Exists))
             .WithMessage("Some folders do not exist.")
@@ -18,7 +18,7 @@ public sealed class SetWatchedDirectoriesCommandValidator : AbstractValidator<Se
 
     private static bool IsRootDrive(string p)
     {
-        try { return Path.GetPathRoot(p)?.TrimEnd('\\')?.Equals(p.TrimEnd('\\'), System.StringComparison.OrdinalIgnoreCase) == true; }
+        try { return Path.GetPathRoot(p)?.TrimEnd('\\').Equals(p.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) == true; }
         catch { return false; }
     }
 }

@@ -4,11 +4,12 @@ namespace Veyra.Application.Abstractions.Auth;
 
 public interface IUserProfileRepository
 {
-    Task<string?> GetActiveUsernameAsync(CancellationToken ct = default);
-    Task<UserProfileSessionDto?> GetActiveProfileAsync(CancellationToken ct = default);
-    Task<IReadOnlyList<UserProfileSessionDto>> GetProfilesAsync(CancellationToken ct = default);
-    Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default);
-    Task SaveOrUpdateProfileAsync(
+    public Task<string?> GetActiveUsernameAsync(CancellationToken ct = default);
+    public Task<UserProfileSessionDto?> GetActiveProfileAsync(CancellationToken ct = default);
+    public Task<IReadOnlyList<UserProfileSessionDto>> GetProfilesAsync(CancellationToken ct = default);
+    public Task SaveOrUpdateProfileAsync(string username, CancellationToken ct = default);
+
+    public Task SaveOrUpdateProfileAsync(
         string username,
         long? cloudUserId,
         string? accessToken,
@@ -18,7 +19,8 @@ public interface IUserProfileRepository
         DateTime? accessTokenExpiresAtUtc,
         DateTime? refreshTokenExpiresAtUtc,
         CancellationToken ct = default);
-    Task<bool> SetActiveProfileAsync(string username, CancellationToken ct = default);
-    Task<bool> SetRequirePasswordForSensitiveActionsAsync(bool enabled, CancellationToken ct = default);
-    Task SignOutActiveAsync(CancellationToken ct = default);
+
+    public Task<bool> SetActiveProfileAsync(string username, CancellationToken ct = default);
+    public Task<bool> SetRequirePasswordForSensitiveActionsAsync(bool enabled, CancellationToken ct = default);
+    public Task SignOutActiveAsync(CancellationToken ct = default);
 }

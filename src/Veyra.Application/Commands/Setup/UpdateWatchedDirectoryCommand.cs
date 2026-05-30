@@ -1,5 +1,5 @@
-﻿﻿using MediatR;
+﻿using MediatR;
 
 namespace Veyra.Application.Commands.Setup;
 
-public sealed record UpdateWatchedDirectoryCommand(string OldPath, string NewPath) : IRequest;
+public abstract record UpdateWatchedDirectoryCommand(string OldPath, string NewPath) : IRequest;

@@ -1,8 +1,9 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.AppDiagnostics;
 
 namespace Veyra.Application.Abstractions.Observability;
 
 public interface IAppDiagnosticsService
 {
-    Task<AppDiagnosticsReportDto> RunAsync(CancellationToken ct = default);
+    public Task<AppDiagnosticsReportDto> RunAsync(CancellationToken ct = default);
 }

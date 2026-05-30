@@ -4,6 +4,6 @@ namespace Veyra.Application.Abstractions.Auth;
 
 public interface IAccessTokenPolicyService
 {
-    AccessTokenPolicyEvaluationDto Evaluate(string? accessToken, DateTime? nowUtc = null);
-    string GetPolicySummary();
+    public AccessTokenPolicyEvaluationDto Evaluate(string? accessToken, DateTime? nowUtc = null);
+    public string GetPolicySummary();
 }

@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.AppDiagnostics;
 
 public sealed record AppDiagnosticsProcessMetricsDto(
     long WorkingSetBytes,

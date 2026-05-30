@@ -263,7 +263,7 @@ public sealed class RestoreRepositorySnapshotHandler(
     {
         foreach (var version in versions)
         {
-            if (version.SizeBytes > 0 && version.Blocks.Count == 0)
+            if (version is { SizeBytes: > 0, Blocks.Count: 0 })
                 return [$"{version.RelativePath}: no blocks"];
         }
 

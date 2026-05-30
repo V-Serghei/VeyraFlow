@@ -4,7 +4,7 @@ namespace Veyra.Application.Abstractions.Indexing;
 
 public interface ITextDiffEngine
 {
-    Task<TextDiffComputationDto> BuildDiffAsync(
+    public Task<TextDiffComputationDto> BuildDiffAsync(
         string leftFilePath,
         string rightFilePath,
         int maxLines,

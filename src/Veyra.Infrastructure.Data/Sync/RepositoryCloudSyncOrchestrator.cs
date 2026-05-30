@@ -1616,9 +1616,11 @@ public sealed class RepositoryCloudSyncOrchestrator(
 
             if (hasConflict && strategy == RepositorySyncConflictStrategies.ManualMerge)
             {
+                var observedRemoteSnapshotId = remoteLatestSnapshotId.GetValueOrDefault();
+
                 queueItem.Status = RepositorySyncQueueItem.StatusConflict;
                 queueItem.ObservedRemoteSnapshotId = remoteLatestSnapshotId;
-                queueItem.LastError = $"Cloud conflict detected. Remote latest snapshot is {remoteLatestSnapshotId.Value}, expected {expectedRemoteSnapshotId}.";
+                queueItem.LastError = $"Cloud conflict detected. Remote latest snapshot is {observedRemoteSnapshotId}, expected {expectedRemoteSnapshotId}.";
                 queueItem.UpdatedAt = DateTime.UtcNow;
 
                 repository.CloudSyncLastStatus = "conflict";

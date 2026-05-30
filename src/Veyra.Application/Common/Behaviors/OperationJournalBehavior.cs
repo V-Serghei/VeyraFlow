@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Linq;
 using System.Reflection;
 using MediatR;
 using Microsoft.Extensions.Logging;
@@ -21,7 +20,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
         CancellationToken cancellationToken)
     {
         if (!observability.IsDiagnosticsEnabled || !ShouldJournal(request.GetType()))
-            return await next();
+            return await next(cancellationToken);
 
         var requestType = request.GetType();
         var action = requestType.Name;
@@ -43,7 +42,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                 details: null,
                 cancellationToken);
 
-            var response = await next();
+            var response = await next(cancellationToken);
             stopwatch.Stop();
             var (success, message) = ExtractOutcome(response);
 
@@ -94,7 +93,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
             await journal.AppendAsync(
-                new Application.DTOs.OperationJournalEntryDto(
+                new DTOs.OperationJournalEntryDto(
                     Id: 0,
                     OccurredAtUtc: DateTime.UtcNow,
                     Level: level,
@@ -183,7 +182,7 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
         return raw switch
         {
             int v => v,
-            long v when v >= int.MinValue && v <= int.MaxValue => (int)v,
+            long v and >= int.MinValue and <= int.MaxValue => (int)v,
             short v => v,
             _ => null
         };
@@ -213,11 +212,11 @@ public sealed class OperationJournalBehavior<TRequest, TResponse>(
                 .GetValue(response)?.ToString();
 
             if (success)
-                return (true, string.IsNullOrWhiteSpace(summary) ? "Completed successfully." : summary!);
+                return (true, string.IsNullOrWhiteSpace(summary) ? "Completed successfully." : summary);
 
             return (false, string.IsNullOrWhiteSpace(error)
-                ? (string.IsNullOrWhiteSpace(summary) ? "Completed with warnings." : summary!)
-                : error!);
+                ? (string.IsNullOrWhiteSpace(summary) ? "Completed with warnings." : summary)
+                : error);
         }
 
         return (true, "Completed successfully.");

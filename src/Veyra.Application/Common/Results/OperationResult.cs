@@ -4,7 +4,7 @@ public readonly struct OperationResult
 {
     public bool Success { get; }
     public string? Error { get; }
-    public OperationErrorKind ErrorKind { get; }
+    private OperationErrorKind ErrorKind { get; }
 
     private OperationResult(bool success, string? error, OperationErrorKind kind)
     {
