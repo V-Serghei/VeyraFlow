@@ -2,28 +2,21 @@ using System.Net;
 
 namespace Veyra.Application.Abstractions.Auth;
 
-public sealed class CloudAuthRefreshRejectedException : Exception
+public sealed class CloudAuthRefreshRejectedException(
+    HttpStatusCode statusCode,
+    string? userMessage,
+    string? responseBody)
+    : Exception(BuildMessage(statusCode, userMessage, responseBody))
 {
-    public CloudAuthRefreshRejectedException(
-        HttpStatusCode statusCode,
-        string? userMessage,
-        string? responseBody)
-        : base(BuildMessage(statusCode, userMessage, responseBody))
-    {
-        StatusCode = statusCode;
-        UserMessage = userMessage;
-        ResponseBody = responseBody;
-    }
+    public HttpStatusCode StatusCode { get; } = statusCode;
 
-    public HttpStatusCode StatusCode { get; }
+    public string? UserMessage { get; } = userMessage;
 
-    public string? UserMessage { get; }
-
-    public string? ResponseBody { get; }
+    public string? ResponseBody { get; } = responseBody;
 
     private static string BuildMessage(HttpStatusCode statusCode, string? userMessage, string? responseBody)
     {
-        var detail = !string.IsNullOrWhiteSpace(userMessage)
+        string? detail = !string.IsNullOrWhiteSpace(userMessage)
             ? userMessage
             : responseBody;
 

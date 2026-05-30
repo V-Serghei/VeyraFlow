@@ -4,6 +4,6 @@ namespace Veyra.Application.Abstractions.Observability;
 
 public interface IOperationJournalService
 {
-    Task AppendAsync(OperationJournalEntryDto entry, CancellationToken ct = default);
-    Task<IReadOnlyList<OperationJournalEntryDto>> GetRecentAsync(int take = 100, CancellationToken ct = default);
+    public Task AppendAsync(OperationJournalEntryDto entry, CancellationToken ct = default);
+    public Task<IReadOnlyList<OperationJournalEntryDto>> GetRecentAsync(int take = 100, CancellationToken ct = default);
 }

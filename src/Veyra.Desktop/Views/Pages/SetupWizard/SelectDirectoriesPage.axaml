@@ -1,48 +1,42 @@
-﻿<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Pages.SetupWizard"
              x:Class="Veyra.Desktop.Views.Pages.SetupWizard.SelectDirectoriesPage"
              x:Name="Root"
              d:DataContext="{d:DesignInstance vm:SelectDirectoriesViewModel, IsDesignTimeCreatable=True}"
              x:DataType="vm:SelectDirectoriesViewModel">
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="*"/>
-    </Grid.RowDefinitions>
-
-    <StackPanel Margin="0,0,0,16">
-      <TextBlock FontSize="20" FontWeight="Bold" Text="Выбор директорий"/>
-      <TextBlock Opacity="0.8" Margin="0,6,0,0"
-                 Text="Выберите папки, которые нужно отслеживать."/>
-      <Border Margin="0,12,0,0" Padding="12" Background="#1E1E1E" CornerRadius="8">
-        <StackPanel Orientation="Horizontal">
-          <TextBox Width="560" Text="{Binding InputPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-          <Button Content="Обзор" Width="100" Margin="8,0,0,0" Command="{Binding BrowseCommand}" />
-          <Button Content="Добавить" Width="100" Margin="8,0,0,0" Command="{Binding AddCommand}" />
-        </StackPanel>
-      </Border>
+  <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
+    <StackPanel Spacing="8">
+      <TextBlock Classes="h2" Text="{loc:Tr setup.select_directories}"/>
+      <TextBlock Classes="muted" Text="{loc:Tr setup.select_directories_subtitle}"/>
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,8,0,0">
+        <TextBox Grid.Column="0" Text="{Binding InputPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Watermark="{loc:Tr setup.folder_path_placeholder}"/>
+        <Button Grid.Column="1" Content="{loc:Tr common.browse}" Width="100" Command="{Binding BrowseCommand}" Classes="subtle"/>
+        <Button Grid.Column="2" Content="{loc:Tr common.add}" Width="100" Command="{Binding AddCommand}" Classes="primary"/>
+      </Grid>
     </StackPanel>
 
-    <Border Grid.Row="1" Padding="12" Background="#1A1A1A" CornerRadius="8">
-      <ItemsControl ItemsSource="{Binding Directories}">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="x:String">
-            <DockPanel Margin="0,4">
-              <Button Content="Удалить"
-                      DockPanel.Dock="Right" Margin="8,0,0,0"
-                      Command="{Binding DataContext.RemoveCommand, ElementName=Root}"
-                      CommandParameter="{Binding .}" />
-              <TextBlock Text="{Binding .}" TextTrimming="CharacterEllipsis"/>
-            </DockPanel>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+    <Border Grid.Row="1" Padding="12" Classes="panel">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ItemsControl ItemsSource="{Binding Directories}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Border Classes="card" Padding="10" Margin="0,0,0,6">
+                <DockPanel>
+                  <Button Content="{loc:Tr common.remove}" DockPanel.Dock="Right" Margin="8,0,0,0" Classes="danger"
+                          Command="{Binding DataContext.RemoveCommand, ElementName=Root}"
+                          CommandParameter="{Binding .}" />
+                  <TextBlock Text="{Binding .}" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
     </Border>
 
-    <TextBlock Grid.Row="2" Margin="0,12,0,0" Opacity="0.7"
-               Text="{Binding FooterText}"/>
+    <TextBlock Grid.Row="2" Opacity="0.72" Text="{Binding FooterText}"/>
   </Grid>
 </UserControl>

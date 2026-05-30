@@ -4,11 +4,11 @@ namespace Veyra.Application.Abstractions.Indexing;
 
 public interface IRepositoryScanner
 {
-    Task<RepositoryScanResultDto> ScanRepositoryAsync(
+    public Task<RepositoryScanResultDto> ScanRepositoryAsync(
         int repositoryId,
         IProgress<RepositoryScanProgressDto>? progress = null,
         RepositoryScanOptionsDto? options = null,
         CancellationToken ct = default);
 
-    Task ScanAllRepositoriesAsync(CancellationToken ct = default);
+    public Task ScanAllRepositoriesAsync(CancellationToken ct = default);
 }
