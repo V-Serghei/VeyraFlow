@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Auth;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 

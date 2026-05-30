@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Snapshots;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Pages.Explorer;

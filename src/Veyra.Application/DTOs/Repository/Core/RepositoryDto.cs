@@ -1,4 +1,7 @@
-namespace Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Retention;
+
+namespace Veyra.Application.DTOs.Repository.Core;
 
 public sealed record RepositoryDto(
     int Id,

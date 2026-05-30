@@ -7,6 +7,9 @@ using MediatR;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.OperationJournal;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Core;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Services.Monitoring.Models;
 

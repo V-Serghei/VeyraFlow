@@ -17,6 +17,7 @@ using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
+using Veyra.Application.DTOs.Auth;
 using Veyra.Desktop.Services.Connectivity;
 using Veyra.Desktop.Services.Navigation;
 using Veyra.Desktop.Services.Scheduling;

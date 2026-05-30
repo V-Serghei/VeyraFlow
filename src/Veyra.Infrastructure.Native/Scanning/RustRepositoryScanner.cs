@@ -8,6 +8,7 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Scanning;
 using Veyra.Infrastructure.Native.Diagnostics;
 using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;

@@ -8,7 +8,7 @@ use super::{
     clear_last_error, copy_bytes_to_out, get_last_error, ptr_to_str, set_error_from,
     set_last_error, write_bytes,
 };
-use crate::{block_store, crypto, hash, image_diff, scan, snapshot_compare, text_diff};
+use crate::{block_store, crypto, hash, image_diff, retention, scan, snapshot_compare, text_diff};
 #[no_mangle]
 pub extern "C" fn veyra_last_error_utf8(out: *mut u8, out_len: u64, written: *mut u64) -> i32 {
     let data = get_last_error();
@@ -512,6 +512,31 @@ pub extern "C" fn veyra_plan_repository_versions_utf8(
     };
 
     let payload = match snapshot_compare::plan_repository_versions_json(states_json) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(&e);
+            return -1;
+        }
+    };
+
+    write_bytes(out, out_len, &payload, written)
+}
+
+#[no_mangle]
+pub extern "C" fn veyra_plan_retention_snapshots_utf8(
+    request_json_ptr: *const c_char,
+    out: *mut u8,
+    out_len: u64,
+    written: *mut u64,
+) -> i32 {
+    clear_last_error();
+
+    let Some(request_json) = ptr_to_str(request_json_ptr) else {
+        set_last_error("retention plan request json is null or invalid utf-8");
+        return -1;
+    };
+
+    let payload = match retention::plan_retention_snapshots_json(request_json) {
         Ok(v) => v,
         Err(e) => {
             set_last_error(&e);

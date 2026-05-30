@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Cloud;
 
 public sealed record RepositoryCloudSyncStatusDto(
     string ConflictStrategy,

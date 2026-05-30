@@ -1,6 +1,7 @@
 ﻿using MediatR;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
 
 namespace Veyra.Application.Queries.Repository;
 

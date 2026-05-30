@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.CloudSync;
 
 public sealed record CloudStorageRepairResultDto(
     bool Ok,

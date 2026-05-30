@@ -1,4 +1,5 @@
 ﻿using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.FileVersions;
 
 namespace Veyra.Application.Abstractions.Indexing;
 

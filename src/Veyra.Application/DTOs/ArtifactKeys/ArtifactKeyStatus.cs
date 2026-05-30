@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.ArtifactKeys;
 
 public static class ArtifactKeyStatus
 {

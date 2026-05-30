@@ -3,6 +3,7 @@ pub mod crypto;
 pub mod ffi;
 pub mod hash;
 pub mod image_diff;
+pub mod retention;
 pub mod scan;
 pub mod snapshot_compare;
 pub mod text_diff;

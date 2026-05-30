@@ -1,4 +1,5 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Integrity;
 
 namespace Veyra.Application.Abstractions.Setup;
 

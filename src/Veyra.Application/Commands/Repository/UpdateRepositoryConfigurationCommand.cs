@@ -1,6 +1,8 @@
 using MediatR;
 using Veyra.Application.Common.Results;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Retention;
 
 namespace Veyra.Application.Commands.Repository;
 

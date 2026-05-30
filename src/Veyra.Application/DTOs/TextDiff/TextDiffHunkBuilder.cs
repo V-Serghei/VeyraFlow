@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.TextDiff;
 
 public static class TextDiffHunkBuilder
 {

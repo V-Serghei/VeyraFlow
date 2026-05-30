@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Common.Files;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Bundles;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;

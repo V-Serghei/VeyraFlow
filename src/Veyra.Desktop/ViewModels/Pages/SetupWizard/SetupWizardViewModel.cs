@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.Commands.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
 using Veyra.Application.Queries.Repository;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Native;

@@ -4,6 +4,8 @@ using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 namespace Veyra.Application.Tests;
 

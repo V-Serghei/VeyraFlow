@@ -11,6 +11,9 @@ using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
 using Veyra.Desktop.Services.Scanning;
 using System.Linq;
+using Veyra.Application.DTOs.OperationJournal;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
 
 
 namespace Veyra.Desktop.Services.Scheduling;

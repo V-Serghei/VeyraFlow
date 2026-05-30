@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using MediatR;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Retention;
 using Veyra.Application.Queries.Repository;
 
 namespace Veyra.Desktop.Services.Maintenance;

@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.CloudSync;
 using Veyra.Desktop.Localization;
 using Veyra.Desktop.Services.Navigation;
 

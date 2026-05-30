@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Reflection;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
 
 namespace Veyra.Infrastructure.Data.Preview;
 

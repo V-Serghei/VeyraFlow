@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Veyra.Application.Abstractions.Observability;
+using Veyra.Application.DTOs.OperationJournal;
 using Veyra.Desktop.Services.Execution;
 using Veyra.Desktop.Services.Monitoring.Models;
 using Veyra.Desktop.Services.Repositories;
@@ -174,7 +175,7 @@ public sealed class ProcessResourceStatusStore : IProcessResourceStatusStore, ID
     {
         try
         {
-            var entries = await _scopeExecutor.ExecuteAsync<IOperationJournalService, IReadOnlyList<Veyra.Application.DTOs.OperationJournalEntryDto>>(
+            var entries = await _scopeExecutor.ExecuteAsync<IOperationJournalService, IReadOnlyList<OperationJournalEntryDto>>(
                 (journal, ct) => journal.GetRecentAsync(6, ct)).ConfigureAwait(false);
 
             var candidate = entries

@@ -1,6 +1,7 @@
 using System;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
 using Veyra.Desktop.Localization;
 
 namespace Veyra.Desktop.ViewModels.Windows;

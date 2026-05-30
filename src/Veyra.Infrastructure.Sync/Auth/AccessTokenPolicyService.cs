@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Veyra.Application.Abstractions.Auth;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Auth;
 
 namespace Veyra.Infrastructure.Sync.Auth;
 

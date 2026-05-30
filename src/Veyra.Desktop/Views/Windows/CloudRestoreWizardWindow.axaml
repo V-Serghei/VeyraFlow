@@ -3,6 +3,7 @@
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         xmlns:dto="clr-namespace:Veyra.Application.DTOs;assembly=Veyra.Application"
+        xmlns:cloudSync="clr-namespace:Veyra.Application.DTOs.CloudSync;assembly=Veyra.Application"
         x:Class="Veyra.Desktop.Views.Windows.CloudRestoreWizardWindow"
         x:DataType="vm:CloudRestoreWizardWindowViewModel"
         Width="860"
@@ -47,7 +48,7 @@
                             <TextBlock Text="{loc:Tr cloud_restore.conflicts}" Classes="section-title"/>
                             <ItemsControl ItemsSource="{Binding Conflicts}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="dto:CloudRepositoryConflictItemDto">
+                                    <DataTemplate x:DataType="cloudSync:CloudRepositoryConflictItemDto">
                                         <Border Classes="metric-card" Padding="10" Margin="0,0,0,8">
                                             <StackPanel Spacing="4">
                                                 <TextBlock Text="{Binding RelativePath}" FontWeight="SemiBold"/>

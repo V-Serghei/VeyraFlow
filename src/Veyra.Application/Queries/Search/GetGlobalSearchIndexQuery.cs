@@ -1,5 +1,6 @@
 using MediatR;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Search;
 
 namespace Veyra.Application.Queries.Search;
 

@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Retention;
+using Veyra.Application.DTOs.Repository.Snapshots;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
 using Veyra.Infrastructure.Data.Setup.Models.Retention;
@@ -14,6 +16,7 @@ public sealed class EfRepositoryRetentionService(
     VeyraDbContext db,
     IConfiguration configuration,
     IRepositorySnapshotArchiveService snapshotArchive,
+    IRepositoryRetentionPlanner retentionPlanner,
     ILogger<EfRepositoryRetentionService> log)
     : IRepositoryRetentionService
 {
@@ -195,16 +198,11 @@ public sealed class EfRepositoryRetentionService(
         progress?.Report(new RepositoryRetentionProgressDto("plan", 10, "Planning retention candidates..."));
 
         var triggerFilter = NormalizeTriggerFilters(effectivePolicy.TriggerFilters);
-        var (snapshotsToDelete, automaticSnapshotsCompacted) = PlanSnapshotsToDelete(
-            snapshots,
-            effectivePolicy.MaxAgeDays,
-            effectivePolicy.MaxSnapshots,
-            effectivePolicy.MaxTotalSizeBytes,
-            triggerFilter,
-            effectivePolicy.AllowManualSnapshotCleanup,
-            effectivePolicy.AutomaticCompactionEnabled,
-            effectivePolicy.AutomaticCompactionWindowHours,
-            DateTime.UtcNow);
+        var retentionPlan = await retentionPlanner.PlanAsync(
+            BuildRetentionPlanRequest(snapshots, effectivePolicy, triggerFilter, DateTime.UtcNow),
+            ct);
+        var snapshotsToDelete = retentionPlan.SnapshotIdsToDelete.ToHashSet();
+        var automaticSnapshotsCompacted = retentionPlan.AutomaticSnapshotsCompacted;
 
         if (snapshots.Count - snapshotsToDelete.Count <= 0)
         {
@@ -772,93 +770,38 @@ public sealed class EfRepositoryRetentionService(
                 .SetProperty(x => x.UpdatedAt, runAtUtc), ct);
     }
 
-    private static (HashSet<long> SnapshotsToDelete, int AutomaticSnapshotsCompacted) PlanSnapshotsToDelete(
+    private static RepositoryRetentionPlanRequest BuildRetentionPlanRequest(
         IReadOnlyList<SnapshotState> snapshots,
-        int? maxAgeDays,
-        int? maxSnapshots,
-        long? maxTotalSizeBytes,
+        RepositoryRetentionPolicyDto effectivePolicy,
         HashSet<string> triggerFilter,
-        bool allowManualSnapshotCleanup,
-        bool automaticCompactionEnabled,
-        int? automaticCompactionWindowHours,
         DateTime nowUtc)
-    {
-        var eligible = snapshots
-            .Where(s => !IsSnapshotProtectedFromRetention(s))
-            .Where(s => MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
-            .ToList();
-
-        var toDelete = new HashSet<long>();
-        var automaticSnapshotsCompacted = 0;
-
-        if (maxAgeDays is > 0)
-        {
-            var cutoff = nowUtc.AddDays(-maxAgeDays.Value);
-            foreach (var snapshot in eligible)
-            {
-                if (snapshot.CreatedAt < cutoff)
-                    toDelete.Add(snapshot.Id);
-            }
-        }
-
-        automaticSnapshotsCompacted = ApplyAutomaticCompactionCandidates(
-            snapshots,
-            toDelete,
+        => new(
+            snapshots.Select(ToRetentionPlanState).ToList(),
+            effectivePolicy.MaxAgeDays,
+            effectivePolicy.MaxSnapshots,
+            effectivePolicy.MaxTotalSizeBytes,
             triggerFilter,
-            allowManualSnapshotCleanup,
-            automaticCompactionEnabled,
-            automaticCompactionWindowHours);
+            effectivePolicy.AllowManualSnapshotCleanup,
+            effectivePolicy.AutomaticCompactionEnabled,
+            effectivePolicy.AutomaticCompactionWindowHours,
+            nowUtc);
 
-        if (maxSnapshots is > 0)
-        {
-            var sorted = eligible
-                .Where(s => !toDelete.Contains(s.Id))
-                .OrderByDescending(s => s.CreatedAt)
-                .ThenByDescending(s => s.Id)
-                .ToList();
+    private static RepositoryRetentionSnapshotPlanState ToRetentionPlanState(SnapshotState snapshot)
+    {
+        var trigger = snapshot.Trigger ?? string.Empty;
+        var isWorking = RepositorySnapshotTriggerClassifier.IsWorking(trigger);
+        var isAutomatic = RepositorySnapshotTriggerClassifier.IsAutomatic(trigger);
 
-            var keepSet = sorted
-                .Take(maxSnapshots.Value)
-                .Select(s => s.Id)
-                .ToHashSet();
-
-            foreach (var snapshot in sorted)
-            {
-                if (!keepSet.Contains(snapshot.Id))
-                    toDelete.Add(snapshot.Id);
-            }
-        }
-
-        if (maxTotalSizeBytes is > 0)
-        {
-            var total = snapshots
-                .Where(s => !toDelete.Contains(s.Id))
-                .Sum(s => s.TotalFileBytes);
-
-            if (total > maxTotalSizeBytes.Value)
-            {
-                var removable = snapshots
-                    .Where(s => !toDelete.Contains(s.Id) && MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
-                    .OrderBy(s => s.CreatedAt)
-                    .ThenBy(s => s.Id)
-                    .ToList();
-
-                foreach (var snapshot in removable)
-                {
-                    if (total <= maxTotalSizeBytes.Value)
-                        break;
-
-                    var remainingCount = snapshots.Count - toDelete.Count;
-                    if (remainingCount <= 1)
-                        break;
-
-                    if (toDelete.Add(snapshot.Id))
-                        total -= snapshot.TotalFileBytes;
-                }
-            }
-        }
-
-        return (toDelete, automaticSnapshotsCompacted);
+        return new RepositoryRetentionSnapshotPlanState(
+            snapshot.Id,
+            snapshot.CreatedAt,
+            snapshot.TotalFileBytes,
+            trigger,
+            IsSnapshotProtectedFromRetention(snapshot),
+            RepositorySnapshotTriggerClassifier.IsManual(trigger),
+            isAutomatic,
+            isAutomatic || isWorking,
+            isWorking);
     }
 
     private async Task<RepositoryRetentionPolicyDto> ResolveEffectivePolicyAsync(
@@ -1128,138 +1071,6 @@ public sealed class EfRepositoryRetentionService(
             .Where(static value => !string.IsNullOrWhiteSpace(value))
             .Select(static value => value.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static bool MatchesTriggerFilter(
-        string? trigger,
-        IReadOnlySet<string> triggerFilter,
-        bool allowManualSnapshotCleanup)
-    {
-        var normalizedTrigger = (trigger ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(normalizedTrigger))
-            return false;
-
-        if (!allowManualSnapshotCleanup && RepositorySnapshotTriggerClassifier.IsManual(normalizedTrigger))
-            return false;
-
-        if (triggerFilter.Count == 0)
-            return true;
-
-        foreach (var token in triggerFilter)
-        {
-            if (string.IsNullOrWhiteSpace(token))
-                continue;
-
-            if (string.Equals(token, "all", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (string.Equals(token, normalizedTrigger, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (token.EndsWith('*') &&
-                normalizedTrigger.StartsWith(token[..^1], StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (string.Equals(token, "automatic", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(token, "auto", StringComparison.OrdinalIgnoreCase))
-            {
-                if (IsAutomaticTrigger(normalizedTrigger))
-                    return true;
-
-                continue;
-            }
-
-            if (string.Equals(token, "manual", StringComparison.OrdinalIgnoreCase))
-            {
-                if (allowManualSnapshotCleanup && IsManualTrigger(normalizedTrigger))
-                    return true;
-
-                continue;
-            }
-
-            if (string.Equals(token, "working", StringComparison.OrdinalIgnoreCase))
-            {
-                if (IsWorkingTrigger(normalizedTrigger))
-                    return true;
-
-                continue;
-            }
-
-            if (string.Equals(token, "scheduled", StringComparison.OrdinalIgnoreCase)
-                && normalizedTrigger.StartsWith("scheduled_", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static int ApplyAutomaticCompactionCandidates(
-        IReadOnlyList<SnapshotState> snapshots,
-        HashSet<long> toDelete,
-        IReadOnlySet<string> triggerFilter,
-        bool allowManualSnapshotCleanup,
-        bool automaticCompactionEnabled,
-        int? automaticCompactionWindowHours)
-    {
-        if (!automaticCompactionEnabled || automaticCompactionWindowHours is not > 0)
-            return 0;
-
-        var ticksPerBucket = TimeSpan.FromHours(automaticCompactionWindowHours.Value).Ticks;
-        if (ticksPerBucket <= 0)
-            return 0;
-
-        var compactable = snapshots
-            .Where(s => !toDelete.Contains(s.Id))
-            .Where(s => RepositorySnapshotTriggerClassifier.IsAutomatic(s.Trigger))
-            .Where(s => MatchesTriggerFilter(s.Trigger, triggerFilter, allowManualSnapshotCleanup))
-            .GroupBy(s => GetCompactionBucket(s.CreatedAt, ticksPerBucket));
-
-        var compacted = 0;
-
-        foreach (var bucket in compactable)
-        {
-            var ordered = bucket
-                .OrderByDescending(s => s.CreatedAt)
-                .ThenByDescending(s => s.Id)
-                .ToList();
-
-            foreach (var snapshot in ordered.Skip(1))
-            {
-                if (toDelete.Add(snapshot.Id))
-                    compacted++;
-            }
-        }
-
-        return compacted;
-    }
-
-    private static long GetCompactionBucket(DateTime createdAt, long ticksPerBucket)
-    {
-        var utc = createdAt.Kind == DateTimeKind.Utc
-            ? createdAt
-            : createdAt.ToUniversalTime();
-
-        return utc.Ticks / ticksPerBucket;
-    }
-
-    private static bool IsAutomaticTrigger(string trigger)
-    {
-        return RepositorySnapshotTriggerClassifier.IsAutomatic(trigger)
-               || RepositorySnapshotTriggerClassifier.IsWorking(trigger);
-    }
-
-    private static bool IsManualTrigger(string trigger)
-    {
-        return RepositorySnapshotTriggerClassifier.IsManual(trigger);
-    }
-
-    private static bool IsWorkingTrigger(string trigger)
-    {
-        return RepositorySnapshotTriggerClassifier.IsWorking(trigger);
     }
 
     private static bool IsWithinMaintenanceWindow(

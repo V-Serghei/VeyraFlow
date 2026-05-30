@@ -2047,6 +2047,7 @@
     "app_settings.system_diagnostics_native_feature_snapshot_compare":  "Сравнение снимков",
     "app_settings.system_diagnostics_native_feature_repository_path_compare":  "Сравнение путей",
     "app_settings.system_diagnostics_native_feature_version_planning":  "Планирование версий",
+    "app_settings.system_diagnostics_native_feature_retention_planning":  "Планирование retention",
     "app_settings.system_diagnostics_native_feature_image_diff":  "Сравнение изображений/SVG",
     "app_settings.system_diagnostics_export_text_button":  "Экспорт TXT",
     "app_settings.system_diagnostics_export_json_button":  "Экспорт JSON",

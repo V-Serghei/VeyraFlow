@@ -1,5 +1,7 @@
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.PendingChanges;
+using Veyra.Application.DTOs.Repository.Comparison;
 
 namespace Veyra.Application.Services;
 

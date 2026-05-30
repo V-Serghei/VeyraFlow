@@ -1,4 +1,5 @@
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.OperationJournal;
 
 namespace Veyra.Application.Abstractions.Observability;
 

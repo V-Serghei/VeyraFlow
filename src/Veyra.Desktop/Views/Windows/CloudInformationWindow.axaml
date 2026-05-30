@@ -3,6 +3,7 @@
         xmlns:vm="clr-namespace:Veyra.Desktop.ViewModels.Windows"
         xmlns:dto="clr-namespace:Veyra.Application.DTOs;assembly=Veyra.Application"
         xmlns:loc="clr-namespace:Veyra.Desktop.Localization"
+        xmlns:cloudSync="clr-namespace:Veyra.Application.DTOs.CloudSync;assembly=Veyra.Application"
         x:Class="Veyra.Desktop.Views.Windows.CloudInformationWindow"
         x:DataType="vm:CloudInformationWindowViewModel"
         Width="920"
@@ -66,7 +67,7 @@
                         <TextBlock Text="{loc:Tr cloud_info.cloud_only_missing}" Classes="section-title"/>
                         <ItemsControl ItemsSource="{Binding CloudOnlyRepositories}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                <DataTemplate x:DataType="cloudSync:CloudRepositoryManagerRepositoryDto">
                                     <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -78,7 +79,7 @@
                         <TextBlock Text="{loc:Tr cloud_info.linked_locally}" Classes="section-title"/>
                         <ItemsControl ItemsSource="{Binding LinkedRepositories}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                <DataTemplate x:DataType="cloudSync:CloudRepositoryManagerRepositoryDto">
                                     <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -90,7 +91,7 @@
                         <TextBlock Text="{loc:Tr cloud_info.conflicts}" Classes="section-title"/>
                         <ItemsControl ItemsSource="{Binding ConflictedRepositories}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="dto:CloudRepositoryManagerRepositoryDto">
+                                <DataTemplate x:DataType="cloudSync:CloudRepositoryManagerRepositoryDto">
                                     <TextBlock Text="{Binding Name}" Margin="0,0,0,6"/>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

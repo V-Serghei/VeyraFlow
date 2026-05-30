@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Comparison;
 
 public sealed record RepositoryVersionPlanEntryDto(
     string RelativePath,

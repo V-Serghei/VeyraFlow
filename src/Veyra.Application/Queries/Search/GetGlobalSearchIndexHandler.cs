@@ -2,6 +2,10 @@ using MediatR;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
+using Veyra.Application.DTOs.Repository.Snapshots;
+using Veyra.Application.DTOs.Search;
 
 namespace Veyra.Application.Queries.Search;
 

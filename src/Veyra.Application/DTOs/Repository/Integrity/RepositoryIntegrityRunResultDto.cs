@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.Repository.Integrity;
 
 public sealed record RepositoryIntegrityRunResultDto(
     int RepositoryId,

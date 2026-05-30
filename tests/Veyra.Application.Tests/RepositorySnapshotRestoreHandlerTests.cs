@@ -4,6 +4,14 @@ using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.Abstractions.Sync;
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.FileVersions;
+using Veyra.Application.DTOs.PendingChanges;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Retention;
+using Veyra.Application.DTOs.Repository.Scanning;
+using Veyra.Application.DTOs.Repository.Snapshots;
+using Veyra.Application.DTOs.TextDiff;
 
 namespace Veyra.Application.Tests;
 

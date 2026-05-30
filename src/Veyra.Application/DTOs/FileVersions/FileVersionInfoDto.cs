@@ -1,4 +1,4 @@
-namespace Veyra.Application.DTOs;
+namespace Veyra.Application.DTOs.FileVersions;
 
 public sealed record FileVersionInfoDto(
     long FileVersionId,

@@ -1,4 +1,8 @@
-namespace Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Scanning;
+using Veyra.Application.DTOs.Repository.Snapshots;
+
+namespace Veyra.Application.DTOs.Search;
 
 public sealed record GlobalSearchIndexLoadDto(
     IReadOnlyList<RepositoryDto> Repositories,

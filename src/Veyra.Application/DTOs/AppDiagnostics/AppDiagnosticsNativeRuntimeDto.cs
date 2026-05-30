@@ -10,6 +10,7 @@ public sealed record AppDiagnosticsNativeRuntimeDto(
     bool SupportsSnapshotComparison,
     bool SupportsRepositoryPathComparison,
     bool SupportsVersionPlanning,
+    bool SupportsRetentionPlanning,
     bool SupportsImageDiff,
     IReadOnlyList<AppDiagnosticsNativeFeatureUsageDto> FeatureUsage,
     string? LoadedPath,

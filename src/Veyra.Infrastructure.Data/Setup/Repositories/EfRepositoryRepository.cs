@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Cloud;
+using Veyra.Application.DTOs.Repository.Core;
+using Veyra.Application.DTOs.Repository.Retention;
 using Veyra.Domain.Entities;
 using Veyra.Domain.Entities.Watched;
 using Veyra.Infrastructure.Data.Persistence;

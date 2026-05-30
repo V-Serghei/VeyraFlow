@@ -1,5 +1,6 @@
 using Veyra.Application.Commands.Repository;
 using Veyra.Application.DTOs;
+using Veyra.Application.DTOs.Repository.Core;
 
 namespace Veyra.Desktop.Services.Repositories;
 
