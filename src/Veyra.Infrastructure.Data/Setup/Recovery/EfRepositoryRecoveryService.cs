@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Veyra.Application.Abstractions.Indexing;
 using Veyra.Application.Abstractions.Setup;
+using Veyra.Application.Common.Repository;
 using Veyra.Application.DTOs;
 using Veyra.Domain.Entities;
 using Veyra.Infrastructure.Data.Persistence;
@@ -13,6 +14,7 @@ public sealed class EfRepositoryRecoveryService(
     VeyraDbContext db,
     IRepositoryIntegrityService integrity,
     IRepositoryScanner scanner,
+    IFileContentStore contentStore,
     ILogger<EfRepositoryRecoveryService> log)
     : IRepositoryRecoveryService
 {
@@ -37,13 +39,29 @@ public sealed class EfRepositoryRecoveryService(
 
         messages.Add(integrityRun.Summary);
 
+        var restoredMissingFiles = await RestoreMissingFilesFromLatestKnownVersionsAsync(repositoryId, ct);
+        if (restoredMissingFiles.RestoredFiles > 0 || restoredMissingFiles.SkippedFiles > 0)
+            messages.Add(restoredMissingFiles.Summary);
+        if (restoredMissingFiles.RestoredFiles > 0)
+        {
+            var refreshScan = await scanner.ScanRepositoryAsync(
+                repositoryId,
+                progress: null,
+                options: new RepositoryScanOptionsDto(
+                    SaveFileVersions: false,
+                    TriggerOverride: "sync_index_repair_restore",
+                    SnapshotTitle: null),
+                ct: ct);
+            messages.Add($"Repository index refreshed after missing-file restore. Entries={refreshScan.TotalEntries}, Files={refreshScan.FileEntries}.");
+        }
+
         var relink = await RelinkRepositoryAsync(repositoryId, ct);
         messages.AddRange(relink.Messages);
 
         var success = integrityRun.UnresolvedIssueCount == 0 && relink.Success;
-        var affectedRows = integrityRun.RepairedBlockCount + Math.Max(0, relink.AffectedRows);
+        var affectedRows = integrityRun.RepairedBlockCount + restoredMissingFiles.RestoredFiles + Math.Max(0, relink.AffectedRows);
         var summary =
-            $"Repair {(success ? "completed" : "finished with warnings")}. RepairedBlocks={integrityRun.RepairedBlockCount}, Unresolved={integrityRun.UnresolvedIssueCount}, RelinkAffected={relink.AffectedRows}.";
+            $"Repair {(success ? "completed" : "finished with warnings")}. RepairedBlocks={integrityRun.RepairedBlockCount}, RestoredMissingFiles={restoredMissingFiles.RestoredFiles}, Unresolved={integrityRun.UnresolvedIssueCount}, RelinkAffected={relink.AffectedRows}.";
 
         var result = new RepositoryRecoveryResultDto(
             RepositoryId: repositoryId,
@@ -63,6 +81,137 @@ public sealed class EfRepositoryRecoveryService(
             result.Summary);
 
         return result;
+    }
+
+    private async Task<MissingFileRestoreResult> RestoreMissingFilesFromLatestKnownVersionsAsync(
+        int repositoryId,
+        CancellationToken ct)
+    {
+        var repository = await db.Set<Repository>()
+            .AsNoTracking()
+            .Include(r => r.Directory)
+            .FirstOrDefaultAsync(r => r.Id == repositoryId && !r.IsDeleted && !r.Directory.IsDeleted, ct);
+
+        if (repository is null || string.IsNullOrWhiteSpace(repository.Directory.Path) || !Directory.Exists(repository.Directory.Path))
+            return MissingFileRestoreResult.None;
+
+        var latestVersionRows = await db.Set<FileVersion>()
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(v => !v.IsDeleted
+                        && !v.FileIdentity.Repository.IsDeleted
+                        && v.FileIdentity.RepositoryId == repositoryId)
+            .Select(v => new
+            {
+                v.Id,
+                v.FileIdentity.RelativePath,
+                v.SizeBytes,
+                v.IsDeletionMarker,
+                v.ContentHashSha256,
+                v.LastWriteUtc,
+                v.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        if (latestVersionRows.Count == 0)
+            return MissingFileRestoreResult.None;
+
+        var latestVersionsByPath = latestVersionRows
+            .GroupBy(v => NormalizeRelativePath(v.RelativePath), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderByDescending(v => v.CreatedAt)
+                .ThenByDescending(v => v.Id)
+                .First())
+            .Where(v => !v.IsDeletionMarker)
+            .ToList();
+
+        var latestVersionIds = latestVersionsByPath.Select(v => v.Id).ToList();
+        var blocksByVersion = latestVersionIds.Count == 0
+            ? new Dictionary<long, List<StoredFileBlockDto>>()
+            : (await db.Set<FileVersionBlock>()
+                    .AsNoTracking()
+                    .IgnoreQueryFilters()
+                    .Where(b => latestVersionIds.Contains(b.FileVersionId) && !b.IsDeleted)
+                    .OrderBy(b => b.Sequence)
+                    .Select(b => new
+                    {
+                        b.FileVersionId,
+                        Block = new StoredFileBlockDto(
+                            b.Sequence,
+                            b.BlockStorageKey,
+                            b.LengthBytes,
+                            b.StoredSizeBytes)
+                    })
+                    .ToListAsync(ct))
+                .GroupBy(x => x.FileVersionId)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Block).ToList());
+
+        var restored = 0;
+        var skipped = 0;
+
+        foreach (var version in latestVersionsByPath)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (RepositoryInternalPathFilter.ShouldIgnoreForSnapshotRestore(version.RelativePath))
+                continue;
+
+            var targetPath = ResolvePathWithinRoot(repository.Directory.Path, version.RelativePath);
+            if (targetPath is null)
+            {
+                skipped++;
+                continue;
+            }
+
+            if (File.Exists(targetPath))
+            {
+                TrySetLastWriteTimeUtc(targetPath, version.LastWriteUtc);
+                continue;
+            }
+
+            var blocks = blocksByVersion.GetValueOrDefault(version.Id) ?? [];
+            if (version.SizeBytes > 0 && blocks.Count == 0)
+            {
+                skipped++;
+                continue;
+            }
+
+            var missingBlocks = await contentStore.FindMissingBlocksAsync(
+                blocks.Select(b => b.BlockStorageKey).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                ct);
+            if (missingBlocks.Count > 0)
+            {
+                skipped++;
+                continue;
+            }
+
+            var parent = Path.GetDirectoryName(targetPath);
+            if (!string.IsNullOrWhiteSpace(parent))
+                Directory.CreateDirectory(parent);
+
+            await contentStore.RestoreFileAsync(
+                blocks,
+                targetPath,
+                overwriteExisting: false,
+                expectedContentHash: version.ContentHashSha256,
+                ct: ct);
+            TrySetLastWriteTimeUtc(targetPath, version.LastWriteUtc);
+            restored++;
+        }
+
+        if (restored == 0 && skipped == 0)
+            return MissingFileRestoreResult.None;
+
+        log.LogInformation(
+            "Repository missing file restore finished. RepositoryId {RepositoryId}. Restored {Restored}. Skipped {Skipped}",
+            repositoryId,
+            restored,
+            skipped);
+
+        return new MissingFileRestoreResult(
+            restored,
+            skipped,
+            $"Missing file restore completed. Restored={restored}, Skipped={skipped}.");
     }
 
     public async Task<RepositoryRecoveryResultDto> ReindexRepositoryAsync(
@@ -444,6 +593,50 @@ public sealed class EfRepositoryRecoveryService(
             return newestNonDeletion;
 
         return versions.FirstOrDefault();
+    }
+
+    private static string NormalizeRelativePath(string relativePath)
+        => relativePath.Trim().Replace('\\', '/');
+
+    private static string? ResolvePathWithinRoot(string rootPath, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(relativePath))
+            return null;
+
+        var root = Path.GetFullPath(rootPath.Trim());
+        var normalizedRelativePath = NormalizeRelativePath(relativePath)
+            .Replace('/', Path.DirectorySeparatorChar);
+        var targetPath = Path.GetFullPath(Path.Combine(root, normalizedRelativePath));
+        var rootPrefix = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        return targetPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
+            ? targetPath
+            : null;
+    }
+
+    private static void TrySetLastWriteTimeUtc(string path, DateTime lastWriteUtc)
+    {
+        if (lastWriteUtc == default || !File.Exists(path))
+            return;
+
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+        }
+        catch
+        {
+            // Best effort: content restore must not fail just because metadata cannot be written.
+        }
+    }
+
+    private sealed record MissingFileRestoreResult(
+        int RestoredFiles,
+        int SkippedFiles,
+        string Summary)
+    {
+        public static readonly MissingFileRestoreResult None = new(0, 0, string.Empty);
     }
 
 }

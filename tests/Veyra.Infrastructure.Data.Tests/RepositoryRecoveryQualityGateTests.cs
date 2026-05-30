@@ -23,6 +23,7 @@ public sealed class RepositoryRecoveryQualityGateTests
             scope.Db,
             new FakeIntegrityService(),
             new FakeScanner(),
+            new FakeContentStore(),
             NullLogger<EfRepositoryRecoveryService>.Instance);
 
         var results = await service.RunStartupHealthCheckAsync();
@@ -59,6 +60,7 @@ public sealed class RepositoryRecoveryQualityGateTests
             scope.Db,
             new FakeIntegrityService(),
             scanner,
+            new FakeContentStore(),
             NullLogger<EfRepositoryRecoveryService>.Instance);
 
         var result = await service.ReindexRepositoryAsync(repositoryId);
@@ -97,6 +99,7 @@ public sealed class RepositoryRecoveryQualityGateTests
             scope.Db,
             integrity,
             new FakeScanner(),
+            new FakeContentStore(),
             NullLogger<EfRepositoryRecoveryService>.Instance);
 
         var result = await service.RepairRepositoryAsync(repositoryId);
@@ -271,6 +274,25 @@ public sealed class RepositoryRecoveryQualityGateTests
 
         public Task ScanAllRepositoriesAsync(CancellationToken ct = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class FakeContentStore : IFileContentStore
+    {
+        public Task<StoredFileContentDto> StoreFileAsync(string filePath, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<long> RestoreFileAsync(
+            IReadOnlyList<StoredFileBlockDto> blocks,
+            string targetPath,
+            bool overwriteExisting,
+            string? expectedContentHash = null,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<string>> FindMissingBlocksAsync(
+            IReadOnlyCollection<string> blockStorageKeys,
+            CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     private sealed class SqliteDbScope : IAsyncDisposable

@@ -103,11 +103,11 @@ public sealed class RestoreRepositorySnapshotHandler(
             .Where(static path => !RepositoryInternalPathFilter.ShouldIgnoreForSnapshotRestore(path))
             .Where(path => !targetDirectories.Contains(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(static path => path.Count(static ch => ch == '/'))
-            .ThenBy(static path => path.Length)
+            .OrderByDescending(static path => path.Count(static ch => ch == '/'))
+            .ThenByDescending(static path => path.Length)
             .ToList();
 
-        var backupRoot = extraCurrentFiles.Count == 0 && extraCurrentDirectories.Count == 0
+        var backupRoot = extraCurrentFiles.Count == 0
             ? null
             : BuildUniqueDirectory(
                 Path.Combine(
@@ -121,20 +121,6 @@ public sealed class RestoreRepositorySnapshotHandler(
         if (backupRoot is not null)
         {
             Directory.CreateDirectory(backupRoot);
-            foreach (var relativePath in extraCurrentDirectories)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var source = ToAbsolutePath(repositoryRoot, relativePath);
-                if (!Directory.Exists(source))
-                    continue;
-
-                var target = ToAbsolutePath(backupRoot, relativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                Directory.Move(source, target);
-                backedUp++;
-            }
-
             foreach (var relativePath in extraCurrentFiles)
             {
                 ct.ThrowIfCancellationRequested();
@@ -148,6 +134,19 @@ public sealed class RestoreRepositorySnapshotHandler(
                 File.Move(source, target, overwrite: false);
                 backedUp++;
             }
+        }
+
+        var emptiedDirectories = 0;
+        foreach (var relativePath in extraCurrentDirectories)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var source = ToAbsolutePath(repositoryRoot, relativePath);
+            if (!Directory.Exists(source) || Directory.EnumerateFileSystemEntries(source).Any())
+                continue;
+
+            Directory.Delete(source);
+            emptiedDirectories++;
         }
 
         CreateSnapshotDirectories(repositoryRoot, entriesToRestore);
@@ -167,6 +166,7 @@ public sealed class RestoreRepositorySnapshotHandler(
                 overwriteExisting: true,
                 version.ContentHashSha256,
                 ct);
+            TrySetLastWriteTimeUtc(targetPath, version.LastWriteUtc);
         }
 
         var saveResult = await snapshots.SaveSnapshotAsync(
@@ -184,12 +184,13 @@ public sealed class RestoreRepositorySnapshotHandler(
             await cloudSync.TryPushLatestSnapshotAsync(repositoryId, ct);
 
         log.LogInformation(
-            "Repository rollback completed. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Restored {Restored}. Overwritten {Overwritten}. BackedUp {BackedUp}. CreatedSnapshot {CreatedSnapshot}",
+            "Repository rollback completed. RepositoryId {RepositoryId}. SnapshotId {SnapshotId}. Restored {Restored}. Overwritten {Overwritten}. BackedUp {BackedUp}. EmptyDirectoriesRemoved {EmptyDirectoriesRemoved}. CreatedSnapshot {CreatedSnapshot}",
             repositoryId,
             snapshotId,
             versionsToRestore.Count,
             overwritten,
             backedUp,
+            emptiedDirectories,
             saveResult.SnapshotCreated);
 
         var result = new RepositorySnapshotRestoreResultDto(
@@ -232,6 +233,7 @@ public sealed class RestoreRepositorySnapshotHandler(
                 overwriteExisting: false,
                 version.ContentHashSha256,
                 ct);
+            TrySetLastWriteTimeUtc(targetPath, version.LastWriteUtc);
         }
 
         log.LogInformation(
@@ -302,6 +304,21 @@ public sealed class RestoreRepositorySnapshotHandler(
 
     private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/').Trim('/');
+
+    private static void TrySetLastWriteTimeUtc(string path, DateTime lastWriteUtc)
+    {
+        if (lastWriteUtc == default || !File.Exists(path))
+            return;
+
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+        }
+        catch
+        {
+            // Best effort: restore should not fail if the filesystem refuses timestamp metadata.
+        }
+    }
 
     private static IEnumerable<string> EnumerateParentDirectories(string relativePath)
     {

@@ -253,6 +253,7 @@ public sealed class RepositorySnapshotRestoreHandlerTests : IDisposable
             SizeBytes: payload.Length,
             IsDeletionMarker: false,
             ContentHashSha256: hash,
+            LastWriteUtc: DateTime.UtcNow,
             Blocks: [new StoredFileBlockDto(
                 Sequence: 0,
                 BlockStorageKey: blockKey,

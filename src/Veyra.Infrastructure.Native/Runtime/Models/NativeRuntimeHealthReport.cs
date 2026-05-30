@@ -1,6 +1,4 @@
-using System.Collections.Generic;
-
-namespace Veyra.Infrastructure.Native;
+namespace Veyra.Infrastructure.Native.Runtime.Models;
 
 public sealed record NativeRuntimeHealthReport(
     bool IsLoaded,

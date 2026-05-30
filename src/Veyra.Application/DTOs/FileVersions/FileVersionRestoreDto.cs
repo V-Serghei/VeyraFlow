@@ -8,4 +8,5 @@ public sealed record FileVersionRestoreDto(
     long SizeBytes,
     bool IsDeletionMarker,
     string ContentHashSha256,
+    DateTime LastWriteUtc,
     IReadOnlyList<StoredFileBlockDto> Blocks);

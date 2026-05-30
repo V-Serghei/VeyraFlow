@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using Veyra.Infrastructure.Native;
+using Veyra.Infrastructure.Native.Runtime.Models;
 
 namespace Veyra.Infrastructure.Native.Interop;
 

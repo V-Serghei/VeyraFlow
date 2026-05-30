@@ -2503,6 +2503,10 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 .ThenByDescending(v => v.FileVersionId)
                 .First())
             .ToList();
+        var entriesByPath = package.Entries
+            .Where(e => !e.IsDirectory)
+            .GroupBy(e => e.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         var requiredBlockHashes = latestByPath
             .Where(v => !v.IsDeletionMarker)
@@ -2564,6 +2568,23 @@ public sealed class RepositoryCloudSyncOrchestrator(
                 targetPath,
                 overwriteExisting: true,
                 ct: ct);
+            if (entriesByPath.TryGetValue(version.RelativePath, out var sourceEntry))
+                TrySetLastWriteTimeUtc(targetPath, sourceEntry.LastWriteUtc);
+        }
+    }
+
+    private static void TrySetLastWriteTimeUtc(string path, DateTime lastWriteUtc)
+    {
+        if (lastWriteUtc == default || !File.Exists(path))
+            return;
+
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+        }
+        catch
+        {
+            // Timestamp metadata is best effort for cloud restore.
         }
     }
 

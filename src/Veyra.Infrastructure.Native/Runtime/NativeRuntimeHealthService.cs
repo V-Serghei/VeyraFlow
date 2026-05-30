@@ -1,5 +1,6 @@
 using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.DTOs;
+using Veyra.Infrastructure.Native.Runtime;
 
 namespace Veyra.Infrastructure.Native;
 
