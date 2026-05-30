@@ -6,6 +6,7 @@ using Veyra.Application.Abstractions.Observability;
 using Veyra.Application.Abstractions.Setup;
 using Veyra.Application.DTOs;
 using Veyra.Infrastructure.Native.Interop;
+using Veyra.Infrastructure.Native.Runtime.Models;
 using Veyra.Infrastructure.Native.Scanning;
 
 namespace Veyra.Infrastructure.Native.Diagnostics;

@@ -42,6 +42,7 @@ public sealed class RestoreFileVersionHandler(
             var overwrite = request.OverwriteCurrent;
 
             await contentStore.RestoreFileAsync(restoreData.Blocks, targetPath, overwrite, restoreData.ContentHashSha256, ct);
+            TrySetLastWriteTimeUtc(targetPath, restoreData.LastWriteUtc);
 
             log.LogInformation(
                 "File version restored. RepositoryId {RepositoryId}. VersionId {VersionId}. Target {Target}. Overwrite {Overwrite}",
@@ -92,6 +93,21 @@ public sealed class RestoreFileVersionHandler(
 
     private static string NormalizeRelativePath(string value)
         => value.Trim().Replace('\\', '/');
+
+    private static void TrySetLastWriteTimeUtc(string path, DateTime lastWriteUtc)
+    {
+        if (lastWriteUtc == default || !File.Exists(path))
+            return;
+
+        try
+        {
+            File.SetLastWriteTimeUtc(path, DateTime.SpecifyKind(lastWriteUtc, DateTimeKind.Utc));
+        }
+        catch
+        {
+            // Restoring bytes is the important part; timestamp restore is best effort.
+        }
+    }
 
     private static string ToAbsolutePath(string rootPath, string relativePath)
     {

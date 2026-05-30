@@ -3121,6 +3121,7 @@ public sealed class EfRepositorySnapshotRepository(
             version.SizeBytes,
             version.IsDeletionMarker,
             version.ContentHashSha256,
+            version.LastWriteUtc,
             blocks);
     }
 
@@ -3167,7 +3168,8 @@ public sealed class EfRepositorySnapshotRepository(
                 l.FileIdentity.Extension,
                 l.FileVersion.SizeBytes,
                 l.FileVersion.IsDeletionMarker,
-                l.FileVersion.ContentHashSha256
+                l.FileVersion.ContentHashSha256,
+                l.FileVersion.LastWriteUtc
             })
             .ToListAsync(ct);
 
@@ -3207,6 +3209,7 @@ public sealed class EfRepositorySnapshotRepository(
                 v.SizeBytes,
                 v.IsDeletionMarker,
                 v.ContentHashSha256,
+                v.LastWriteUtc,
                 blocksByVersion.GetValueOrDefault(v.Id) ?? []))
             .ToList();
 

@@ -132,6 +132,7 @@ public sealed class RestoreIntegrityTests
             SizeBytes: size,
             IsDeletionMarker: isDeletion,
             ContentHashSha256: hash,
+            LastWriteUtc: DateTime.UtcNow,
             Blocks: isDeletion ? [] : [new StoredFileBlockDto(0, "sha256-" + new string('a', 64), (int)size, (int)size)]);
 
     private static RestoreFileVersionHandler BuildHandler(FileVersionRestoreDto version, IFileContentStore store)

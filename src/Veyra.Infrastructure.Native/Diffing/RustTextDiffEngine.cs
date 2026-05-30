@@ -6,6 +6,7 @@ using Veyra.Application.DTOs;
 using Veyra.Application.Services;
 using Veyra.Infrastructure.Native.Execution;
 using Veyra.Infrastructure.Native.Interop;
+using Veyra.Infrastructure.Native.Runtime;
 
 namespace Veyra.Infrastructure.Native.Diffing;
 
